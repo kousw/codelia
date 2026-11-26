@@ -1,6 +1,10 @@
-use crate::app::state::ShellRulePicker;
+use crate::app::state::{
+    LaneActionPickerState, ShellRulePicker, ShellRulePickerState, UpdatePickerState,
+};
 use crate::app::util::text::wrap_line;
-use crate::app::{ConfirmDialogState, PickDialogState, PromptDialogState};
+use crate::app::{
+    ConfirmDialogState, PickDialogItem, PromptDialogState, RuntimePickList, RuntimePickListKind,
+};
 use ratatui::text::Line;
 
 use super::super::text::truncate_to_width;
@@ -247,60 +251,115 @@ pub(super) fn build_prompt_panel_view(panel: &PromptDialogState) -> PanelView {
     }
 }
 
-pub(super) fn build_pick_panel_view(panel: &PickDialogState) -> PanelView {
-    let mut lines = Vec::with_capacity(panel.items.len() + 2);
-    let mut option_start = 0;
-    let shell_approval = panel.approval
+pub(super) fn build_runtime_pick_list_view(panel: &RuntimePickList) -> PanelView {
+    let approval = matches!(panel.kind, RuntimePickListKind::Approval { .. });
+    let shell_approval = approval
         && panel
             .message
             .as_deref()
             .is_some_and(is_shell_approval_message);
-    if let Some(message) = panel
+    let message = panel
         .message
         .as_deref()
-        .filter(|message| !shell_approval && !message.trim().is_empty())
-    {
-        let message = if panel.approval {
-            visible_approval_message(message)
-        } else {
-            message.to_owned()
-        };
-        lines.extend(
-            message
-                .lines()
-                .skip(usize::from(panel.approval))
-                .map(str::to_owned),
-        );
-        lines.push(String::new());
-        option_start = lines.len();
-    }
-    for (idx, item) in panel.items.iter().enumerate() {
-        let check = if panel.multi {
+        .filter(|message| !shell_approval && !message.trim().is_empty());
+    let visible_message = if approval {
+        message.map(visible_approval_message)
+    } else {
+        None
+    };
+    let message = if approval {
+        visible_message
+            .as_deref()
+            .map(|message| message.split_once('\n').map_or("", |(_, rest)| rest))
+    } else {
+        message
+    };
+    let rows = panel.items.iter().enumerate().map(|(idx, item)| {
+        let prefix = if panel.multi {
             if panel.chosen.get(idx).copied().unwrap_or(false) {
-                "[x]"
+                "[x] "
             } else {
-                "[ ]"
+                "[ ] "
             }
+        } else if shell_approval {
+            ""
         } else {
-            "   "
+            "    "
         };
-        let detail = item
-            .detail
-            .as_ref()
-            .map(|text| format!(" - {text}"))
-            .unwrap_or_default();
-        if (shell_approval && !panel.multi) || panel.local_update_picker {
-            lines.push(format!("{}{detail}", item.label));
-        } else {
-            lines.push(format!("{check} {}{detail}", item.label));
-        }
+        pick_item_row(item, prefix)
+    });
+    build_pick_panel_view(
+        (!shell_approval).then_some(panel.title.as_str()),
+        message,
+        rows,
+        panel.selected,
+        !shell_approval,
+    )
+}
+
+pub(super) fn build_lane_action_picker_view(panel: &LaneActionPickerState) -> PanelView {
+    build_pick_panel_view(
+        Some(&panel.title),
+        None,
+        panel.items.iter().map(|item| pick_item_row(item, "    ")),
+        panel.selected,
+        true,
+    )
+}
+
+pub(super) fn build_update_picker_view(panel: &UpdatePickerState) -> PanelView {
+    build_pick_panel_view(
+        Some(&panel.title),
+        panel
+            .message
+            .as_deref()
+            .filter(|message| !message.trim().is_empty()),
+        panel.items.iter().map(|item| pick_item_row(item, "")),
+        panel.selected,
+        true,
+    )
+}
+
+pub(super) fn build_shell_rule_picker_view(panel: &ShellRulePickerState) -> PanelView {
+    build_pick_panel_view(
+        Some(&panel.title),
+        panel
+            .message
+            .as_deref()
+            .filter(|message| !message.trim().is_empty()),
+        panel.items.iter().map(|item| pick_item_row(item, "    ")),
+        panel.selected,
+        true,
+    )
+}
+
+fn pick_item_row(item: &PickDialogItem, prefix: &str) -> String {
+    match &item.detail {
+        Some(detail) => format!("{prefix}{} - {detail}", item.label),
+        None => format!("{prefix}{}", item.label),
     }
+}
+
+fn build_pick_panel_view(
+    title: Option<&str>,
+    message: Option<&str>,
+    rows: impl Iterator<Item = String>,
+    selected: usize,
+    wrap_lines: bool,
+) -> PanelView {
+    let mut lines = Vec::new();
+    if let Some(message) = message {
+        lines.extend(message.lines().map(str::to_owned));
+        lines.push(String::new());
+    }
+    let selected = lines.len() + selected;
+    lines.extend(rows);
     PanelView {
-        title: (!shell_approval).then(|| panel.title.clone()),
+        title: title.map(str::to_owned),
         lines,
         header_index: None,
-        selected: Some(option_start + panel.selected),
-        wrap_lines: !shell_approval,
+        selected: Some(selected),
+        wrap_lines,
         tail_pinned_from: None,
     }
 }
@@ -324,13 +383,14 @@ fn visible_approval_message(message: &str) -> String {
 }
 
 pub(super) fn render_approval_pick(
-    panel: &PickDialogState,
+    panel: &RuntimePickList,
+    review_offset: Option<usize>,
     view: &PanelView,
     max_lines: u16,
     width: usize,
 ) -> Vec<Line<'static>> {
     let message = visible_approval_message(panel.message.as_deref().unwrap_or_default());
-    if let Some(offset) = panel.review_offset {
+    if let Some(offset) = review_offset {
         return render_pick_details("Approval details", &message, offset, max_lines, width);
     }
     if is_shell_approval_message(&message) {
@@ -372,7 +432,7 @@ fn approval_preview_rows(section: &str, width: usize, budget: usize) -> Vec<Line
 }
 
 fn render_shell_approval_pick(
-    panel: &PickDialogState,
+    panel: &RuntimePickList,
     view: &PanelView,
     message: &str,
     max_lines: u16,
@@ -429,12 +489,12 @@ fn render_shell_approval_pick(
 }
 
 pub(super) fn render_shell_rule_details(
-    panel: &PickDialogState,
+    panel: &ShellRulePickerState,
     max_lines: u16,
     width: usize,
 ) -> Option<Vec<Line<'static>>> {
     let offset = panel.review_offset?;
-    let message = match panel.shell_rule_picker.as_ref()? {
+    let message = match &panel.kind {
         ShellRulePicker::Choose { .. } => {
             let item = panel.items.get(panel.selected)?;
             format!(
@@ -480,12 +540,14 @@ fn render_pick_details(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_confirm_panel_view, build_pick_panel_view, render_approval_pick};
-    use crate::app::{ConfirmDialogState, ConfirmMode, PickDialogItem, PickDialogState};
+    use super::{build_confirm_panel_view, build_runtime_pick_list_view, render_approval_pick};
+    use crate::app::{
+        ConfirmDialogState, ConfirmMode, PickDialogItem, RuntimePickList, RuntimePickListKind,
+    };
     use ratatui::{backend::TestBackend, widgets::Paragraph, Terminal};
 
-    fn approval_dialog(message: &str, choices: &[&str]) -> PickDialogState {
-        PickDialogState {
+    fn approval_dialog(message: &str, choices: &[&str]) -> RuntimePickList {
+        RuntimePickList {
             id: "approval".into(),
             title: "Approve shell?".into(),
             message: Some(message.into()),
@@ -500,16 +562,20 @@ mod tests {
             selected: 0,
             multi: false,
             chosen: vec![],
-            approval: true,
-            review_offset: None,
-            shell_rule_picker: None,
-            local_update_picker: false,
+            kind: RuntimePickListKind::Approval {
+                review_offset: None,
+            },
         }
     }
 
-    fn draw_approval(panel: &PickDialogState, width: u16, height: u16) -> String {
-        let view = build_pick_panel_view(panel);
-        let lines = render_approval_pick(panel, &view, height, usize::from(width));
+    fn draw_approval(
+        panel: &RuntimePickList,
+        review_offset: Option<usize>,
+        width: u16,
+        height: u16,
+    ) -> String {
+        let view = build_runtime_pick_list_view(panel);
+        let lines = render_approval_pick(panel, review_offset, &view, height, usize::from(width));
         assert!(lines.len() <= usize::from(height));
         assert!(lines.iter().all(|line| line.width() <= usize::from(width)));
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -526,7 +592,7 @@ mod tests {
             &["Run once", "Set up future allowance…", "Skip"],
         );
         panel.selected = 1;
-        let compact = draw_approval(&panel, 36, 7);
+        let compact = draw_approval(&panel, None, 36, 7);
         assert!(compact.contains("Command: python3"));
         assert!(compact.contains("long command to test wrapping"));
         assert!(compact.contains('…'));
@@ -537,12 +603,10 @@ mod tests {
         assert!(!compact.contains("Reason:"));
         assert!(!compact.contains("Working directory:"));
 
-        panel.review_offset = Some(0);
-        let beginning = draw_approval(&panel, 36, 4);
+        let beginning = draw_approval(&panel, Some(0), 36, 4);
         assert!(beginning.contains("Command: python3"));
         assert!(beginning.contains("first continuation"));
-        panel.review_offset = Some(8);
-        let end = draw_approval(&panel, 36, 8);
+        let end = draw_approval(&panel, Some(8), 36, 8);
         assert!(end.contains("last continuation"));
         assert!(end.contains("Reason: Auto approve requests a"));
         assert!(end.contains("sion."));
@@ -562,7 +626,7 @@ mod tests {
             ],
         );
         panel.selected = 2;
-        let compact = draw_approval(&panel, 44, 7);
+        let compact = draw_approval(&panel, None, 44, 7);
         assert!(compact.contains("Future allowance: cargo test"));
         assert!(compact.contains("[D]"));
         assert!(compact.contains("Command: cargo test --release"));
@@ -579,7 +643,7 @@ mod tests {
             super::visible_approval_message("Future allowance: x\u{202e}y"),
             r"Future allowance: x\u{202e}y"
         );
-        let mut panel = PickDialogState {
+        let panel = RuntimePickList {
             id: "approval".into(),
             title: "Approve shell?".into(),
             message: Some("git status; git diff --cached --shortstat\nWorking directory: example\nNetwork: off\nExpires: now".into()),
@@ -589,14 +653,11 @@ mod tests {
             selected: 1,
             multi: false,
             chosen: vec![],
-            approval: true,
-            review_offset: None,
-            shell_rule_picker: None,
-            local_update_picker: false,
+            kind: RuntimePickListKind::Approval { review_offset: None },
         };
-        let view = build_pick_panel_view(&panel);
+        let view = build_runtime_pick_list_view(&panel);
         for height in [2, 3, 5] {
-            let rendered = render_approval_pick(&panel, &view, height, 36);
+            let rendered = render_approval_pick(&panel, None, &view, height, 36);
             assert!(rendered
                 .iter()
                 .any(|line| line.to_string().contains("git status")));
@@ -604,8 +665,7 @@ mod tests {
                 .iter()
                 .any(|line| line.to_string().contains("Deny and continue")));
         }
-        panel.review_offset = Some(1);
-        let rendered = render_approval_pick(&panel, &view, 4, 32);
+        let rendered = render_approval_pick(&panel, Some(1), &view, 4, 32);
         assert!(rendered
             .iter()
             .any(|line| line.to_string().contains("shortstat")));

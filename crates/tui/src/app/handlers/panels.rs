@@ -1,14 +1,12 @@
 use crate::app::runtime::{
-    send_model_list, send_model_set, send_pick_response, send_session_history, send_session_list,
-    send_session_open, send_theme_set, RuntimeTx,
+    send_model_list, send_model_set, send_session_history, send_session_list, send_session_open,
+    send_theme_set, send_tool_call, RuntimeTx,
 };
 use crate::app::state::parse_theme_name;
-use crate::app::state::LogKind;
-use crate::app::{
-    AppState, LocalPanel, ModelListMode, ModelListSubmitAction, ModelSetScope, PendingRpc,
-    PendingRpcSlot,
-};
+use crate::app::state::{LaneActionPickerState, LogKind, ModelListPanelState};
+use crate::app::{AppState, LocalPanel, ModelListMode, ModelSetScope, PendingRpc, PendingRpcSlot};
 use crossterm::event::KeyCode;
+use serde_json::json;
 
 const REASONING_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 const SESSION_HISTORY_MAX_EVENTS: usize = 500;
@@ -360,88 +358,147 @@ pub(crate) fn handle_model_list_panel_key(
     key: KeyCode,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let Some(LocalPanel::ModelList(panel)) = app.overlays.local_panel.as_mut() else {
+    let Some(LocalPanel::ModelList { panel, scope }) = app.overlays.local_panel.as_mut() else {
         return None;
     };
-    let mut needs_redraw = false;
     match key {
-        KeyCode::Esc => {
-            let pending_pick_id = match &panel.submit_action {
-                ModelListSubmitAction::UiPick { request_id, .. } => Some(request_id.clone()),
-                ModelListSubmitAction::ModelSet { .. } => None,
-            };
-            app.overlays.local_panel = None;
-            if let Some(request_id) = pending_pick_id {
-                let ids: Vec<String> = Vec::new();
-                if let Err(error) = send_pick_response(tx, &request_id, &ids) {
-                    app.push_error_report("pick response error", error.to_string());
-                }
-            }
-            needs_redraw = true;
-        }
+        KeyCode::Esc => app.overlays.local_panel = None,
         KeyCode::Enter => {
-            let selected = panel.selected;
-            let model = panel.model_ids.get(selected).cloned();
-            let submit_action = match &panel.submit_action {
-                ModelListSubmitAction::ModelSet { scope } => {
-                    ModelListSubmitAction::ModelSet { scope: *scope }
-                }
-                ModelListSubmitAction::UiPick {
-                    request_id,
-                    item_ids,
-                } => ModelListSubmitAction::UiPick {
-                    request_id: request_id.clone(),
-                    item_ids: item_ids.clone(),
-                },
-            };
+            let model = panel.item_ids.get(panel.selected).cloned();
+            let scope = *scope;
             app.overlays.local_panel = None;
             if let Some(model) = model {
-                match submit_action {
-                    ModelListSubmitAction::ModelSet { scope } => {
-                        let provider = app.runtime_info.current_provider.clone();
-                        open_reasoning_picker(app, provider.as_deref(), model, scope, tx);
-                    }
-                    ModelListSubmitAction::UiPick {
-                        request_id,
-                        item_ids,
-                    } => {
-                        if let Some(item_id) = item_ids.get(selected) {
-                            let ids = vec![item_id.clone()];
-                            if let Err(error) = send_pick_response(tx, &request_id, &ids) {
-                                app.push_error_report("pick response error", error.to_string());
-                            }
-                        }
-                    }
-                }
+                let provider = app.runtime_info.current_provider.clone();
+                open_reasoning_picker(app, provider.as_deref(), model, scope, tx);
             }
-            needs_redraw = true;
         }
+        _ => return Some(navigate_model_list(panel, key)),
+    }
+    Some(true)
+}
+
+pub(crate) fn navigate_model_list(panel: &mut ModelListPanelState, key: KeyCode) -> bool {
+    match key {
         KeyCode::Up => {
             panel.selected = panel.selected.saturating_sub(1);
-            needs_redraw = true;
         }
         KeyCode::Down => {
-            if panel.selected + 1 < panel.model_ids.len() {
+            if panel.selected + 1 < panel.item_ids.len() {
                 panel.selected += 1;
-                needs_redraw = true;
             }
         }
         KeyCode::PageUp => {
             panel.selected = panel.selected.saturating_sub(5);
-            needs_redraw = true;
         }
         KeyCode::PageDown => {
             let next = panel.selected.saturating_add(5);
-            panel.selected = usize::min(next, panel.model_ids.len().saturating_sub(1));
-            needs_redraw = true;
+            panel.selected = usize::min(next, panel.item_ids.len().saturating_sub(1));
         }
         KeyCode::Tab => {
             panel.view_mode = panel.view_mode.toggle();
-            needs_redraw = true;
         }
-        _ => {}
+        _ => return false,
     }
-    Some(needs_redraw)
+    true
+}
+
+pub(crate) fn handle_update_picker_key(app: &mut AppState, key: KeyCode) -> Option<bool> {
+    let Some(LocalPanel::UpdatePicker(picker)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
+    if key == KeyCode::Enter
+        && !app
+            .render_state
+            .drawn_update_choice
+            .as_ref()
+            .is_some_and(|(id, selected)| *id == picker.id && *selected == picker.selected)
+    {
+        app.push_line(
+            LogKind::Status,
+            "Resize the terminal to see the selected update mode, or press Esc to cancel.",
+        );
+        return Some(true);
+    }
+    app.render_state.drawn_update_choice = None;
+    if matches!(key, KeyCode::Enter | KeyCode::Esc) {
+        if let Some(LocalPanel::UpdatePicker(picker)) = app.overlays.local_panel.take() {
+            crate::app::self_update::finish_picker(app, picker, key == KeyCode::Enter);
+        }
+        return Some(true);
+    }
+    Some(navigate_pick_list(
+        &mut picker.selected,
+        picker.items.len(),
+        key,
+    ))
+}
+
+pub(crate) fn handle_shell_rule_picker_key(
+    app: &mut AppState,
+    key: KeyCode,
+    tx: &mut dyn RuntimeTx,
+) -> Option<bool> {
+    let Some(LocalPanel::ShellRulePicker(picker)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
+    if let Some(handled) = handle_pick_review_key(&mut picker.review_offset, key) {
+        return Some(handled);
+    }
+    if matches!(key, KeyCode::Enter | KeyCode::Esc) {
+        if let Some(LocalPanel::ShellRulePicker(picker)) = app.overlays.local_panel.take() {
+            if key == KeyCode::Enter {
+                super::shell_rules::select(app, tx, picker);
+            }
+        }
+        return Some(true);
+    }
+    Some(navigate_pick_list(
+        &mut picker.selected,
+        picker.items.len(),
+        key,
+    ))
+}
+
+pub(crate) fn navigate_pick_list(selected: &mut usize, len: usize, key: KeyCode) -> bool {
+    match key {
+        KeyCode::Up => *selected = selected.saturating_sub(1),
+        KeyCode::Down => {
+            if *selected + 1 < len {
+                *selected += 1;
+            }
+        }
+        KeyCode::Char(ch) if ch.is_ascii_digit() => {
+            let index = ch.to_digit(10).unwrap_or(0) as usize;
+            if index > 0 && index <= len {
+                *selected = index - 1;
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
+pub(crate) fn handle_pick_review_key(
+    review_offset: &mut Option<usize>,
+    key: KeyCode,
+) -> Option<bool> {
+    if let Some(offset) = review_offset.as_mut() {
+        match key {
+            KeyCode::Esc | KeyCode::Char('d' | 'D') => *review_offset = None,
+            KeyCode::Up => *offset = offset.saturating_sub(1),
+            KeyCode::Down => *offset = offset.saturating_add(1),
+            KeyCode::PageUp => *offset = offset.saturating_sub(8),
+            KeyCode::PageDown => *offset = offset.saturating_add(8),
+            KeyCode::Home => *offset = 0,
+            _ => return Some(false),
+        }
+        return Some(true);
+    }
+    if matches!(key, KeyCode::Char('d' | 'D')) {
+        *review_offset = Some(0);
+        return Some(true);
+    }
+    None
 }
 
 pub(crate) fn handle_session_list_panel_key(
@@ -561,30 +618,24 @@ pub(crate) fn handle_lane_list_panel_key(
                 });
                 needs_redraw = true;
             } else if let Some(lane) = panel.lanes.get(panel.selected).cloned() {
-                app.overlays.runtime_dialogs.pick = Some(crate::app::PickDialogState {
-                    id: format!("lane:action:{}", lane.lane_id),
-                    title: format!("Lane {}", lane.lane_id),
-                    message: None,
-                    items: vec![
-                        crate::app::PickDialogItem {
-                            id: "status".to_string(),
-                            label: "Status".to_string(),
-                            detail: Some("Show lane status".to_string()),
-                        },
-                        crate::app::PickDialogItem {
-                            id: "close".to_string(),
-                            label: "Close".to_string(),
-                            detail: Some("Close lane".to_string()),
-                        },
-                    ],
-                    multi: false,
-                    selected: 0,
-                    approval: false,
-                    review_offset: None,
-                    shell_rule_picker: None,
-                    local_update_picker: false,
-                    chosen: vec![false, false],
-                });
+                app.overlays.local_panel =
+                    Some(LocalPanel::LaneActionPicker(LaneActionPickerState {
+                        lane_id: lane.lane_id.clone(),
+                        title: format!("Lane {}", lane.lane_id),
+                        items: vec![
+                            crate::app::PickDialogItem {
+                                id: "status".to_string(),
+                                label: "Status".to_string(),
+                                detail: Some("Show lane status".to_string()),
+                            },
+                            crate::app::PickDialogItem {
+                                id: "close".to_string(),
+                                label: "Close".to_string(),
+                                detail: Some("Close lane".to_string()),
+                            },
+                        ],
+                        selected: 0,
+                    }));
                 needs_redraw = true;
             }
         }
@@ -592,6 +643,68 @@ pub(crate) fn handle_lane_list_panel_key(
     }
 
     Some(needs_redraw)
+}
+
+pub(crate) fn handle_lane_action_picker_key(
+    app: &mut AppState,
+    key: KeyCode,
+    tx: &mut dyn RuntimeTx,
+) -> Option<bool> {
+    let Some(LocalPanel::LaneActionPicker(picker)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
+    match key {
+        KeyCode::Esc => {
+            app.overlays.local_panel = None;
+            Some(true)
+        }
+        KeyCode::Enter => {
+            let lane_id = picker.lane_id.clone();
+            let action = picker
+                .items
+                .get(picker.selected)
+                .map(|item| item.id.clone());
+            app.overlays.local_panel = None;
+            if let Some(action) = action {
+                let request_id = tx.next_id();
+                match action.as_str() {
+                    "status" => {
+                        app.rpc_pending
+                            .insert(request_id.clone(), PendingRpc::LaneStatus);
+                        if let Err(error) = send_tool_call(
+                            tx,
+                            &request_id,
+                            "lane_status",
+                            json!({ "lane_id": lane_id }),
+                        ) {
+                            app.rpc_pending.remove_slot(PendingRpcSlot::LaneStatus);
+                            app.push_error_report("send error", error.to_string());
+                        }
+                    }
+                    "close" => {
+                        app.rpc_pending
+                            .insert(request_id.clone(), PendingRpc::LaneClose);
+                        if let Err(error) = send_tool_call(
+                            tx,
+                            &request_id,
+                            "lane_close",
+                            json!({ "lane_id": lane_id }),
+                        ) {
+                            app.rpc_pending.remove_slot(PendingRpcSlot::LaneClose);
+                            app.push_error_report("send error", error.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some(true)
+        }
+        _ => Some(navigate_pick_list(
+            &mut picker.selected,
+            picker.items.len(),
+            key,
+        )),
+    }
 }
 
 pub(crate) fn handle_provider_picker_key(

@@ -224,8 +224,8 @@ fn clear_log_removes_only_the_pending_image_artifact_slot() {
 fn every_local_panel_blocks_paste() {
     use crate::app::{
         ContextPanelState, LaneListPanelState, LocalPanel, ModelListMode, ModelListPanelState,
-        ModelListSubmitAction, ModelListViewMode, ModelPickerState, ModelSetScope, PasteTarget,
-        ProviderPickerState, ReasoningPickerState, SessionListPanelState, ThemeListPanelState,
+        ModelListViewMode, ModelPickerState, ModelSetScope, PasteTarget, ProviderPickerState,
+        ReasoningPickerState, SessionListPanelState, ThemeListPanelState,
     };
     let panels = [
         LocalPanel::SessionList(SessionListPanelState {
@@ -257,19 +257,19 @@ fn every_local_panel_blocks_paste() {
             theme_ids: vec![],
             selected: 0,
         }),
-        LocalPanel::ModelList(ModelListPanelState {
-            title: "Models".into(),
-            header_limits: String::new(),
-            rows_limits: vec![],
-            header_cost: String::new(),
-            rows_cost: vec![],
-            model_ids: vec![],
-            selected: 0,
-            view_mode: ModelListViewMode::Limits,
-            submit_action: ModelListSubmitAction::ModelSet {
-                scope: ModelSetScope::Config,
+        LocalPanel::ModelList {
+            panel: ModelListPanelState {
+                title: "Models".into(),
+                header_limits: String::new(),
+                rows_limits: vec![],
+                header_cost: String::new(),
+                rows_cost: vec![],
+                item_ids: vec![],
+                selected: 0,
+                view_mode: ModelListViewMode::Limits,
             },
-        }),
+            scope: ModelSetScope::Config,
+        },
         LocalPanel::ProviderPicker(ProviderPickerState {
             providers: vec!["openai".into()],
             selected: 0,
@@ -285,6 +285,21 @@ fn every_local_panel_blocks_paste() {
             model: "model".into(),
             scope: ModelSetScope::Config,
             levels: vec!["low".into()],
+            selected: 0,
+        }),
+        LocalPanel::UpdatePicker(crate::app::self_update::startup_picker()),
+        LocalPanel::ShellRulePicker(crate::app::state::ShellRulePickerState {
+            title: "Shell rules".into(),
+            message: None,
+            items: vec![],
+            selected: 0,
+            kind: crate::app::state::ShellRulePicker::Choose { session_id: None },
+            review_offset: None,
+        }),
+        LocalPanel::LaneActionPicker(crate::app::state::LaneActionPickerState {
+            lane_id: "lane-1".into(),
+            title: "Lane lane-1".into(),
+            items: vec![],
             selected: 0,
         }),
     ];

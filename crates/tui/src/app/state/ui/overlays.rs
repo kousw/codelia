@@ -1,8 +1,8 @@
-use super::dialogs::{RuntimeDialogRef, RuntimeDialogs};
+use super::dialogs::{PickDialogItem, RuntimeDialogRef, RuntimeDialogs};
 use super::{
-    ContextPanelState, LaneListPanelState, ModelListPanelState, ModelListSubmitAction,
-    ModelPickerState, ProviderPickerState, ReasoningPickerState, SessionListPanelState,
-    SkillsListPanelState, ThemeListPanelState,
+    ContextPanelState, LaneListPanelState, ModelListPanelState, ModelPickerState, ModelSetScope,
+    ProviderPickerState, ReasoningPickerState, SessionListPanelState, SkillsListPanelState,
+    ThemeListPanelState,
 };
 
 pub struct QueueSteerPicker {
@@ -16,10 +16,56 @@ pub enum LocalPanel {
     Context(ContextPanelState),
     SkillsList(SkillsListPanelState),
     ThemeList(ThemeListPanelState),
-    ModelList(ModelListPanelState),
+    ModelList {
+        panel: ModelListPanelState,
+        scope: ModelSetScope,
+    },
     ProviderPicker(ProviderPickerState),
     ModelPicker(ModelPickerState),
     ReasoningPicker(ReasoningPickerState),
+    UpdatePicker(UpdatePickerState),
+    ShellRulePicker(ShellRulePickerState),
+    LaneActionPicker(LaneActionPickerState),
+}
+
+pub struct LaneActionPickerState {
+    pub lane_id: String,
+    pub title: String,
+    pub items: Vec<PickDialogItem>,
+    pub selected: usize,
+}
+
+pub struct UpdatePickerState {
+    pub id: String,
+    pub title: String,
+    pub message: Option<String>,
+    pub items: Vec<PickDialogItem>,
+    pub selected: usize,
+    pub startup: bool,
+}
+
+pub struct ShellRulePickerState {
+    pub title: String,
+    pub message: Option<String>,
+    pub items: Vec<PickDialogItem>,
+    pub selected: usize,
+    pub kind: ShellRulePicker,
+    pub review_offset: Option<usize>,
+}
+
+pub enum ShellRulePicker {
+    Trust {
+        trusted: bool,
+        workspace: String,
+        revision: String,
+        session_id: Option<String>,
+    },
+    Choose {
+        session_id: Option<String>,
+    },
+    Confirm {
+        session_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,14 +85,6 @@ pub struct OverlayState {
 impl OverlayState {
     pub fn has_modal_or_panel(&self) -> bool {
         self.runtime_dialogs.is_any_open() || self.local_panel.is_some()
-    }
-
-    pub fn has_onboarding_model_pick(&self) -> bool {
-        matches!(
-            &self.local_panel,
-            Some(LocalPanel::ModelList(panel))
-                if matches!(panel.submit_action, ModelListSubmitAction::UiPick { .. })
-        )
     }
 
     pub fn paste_target(&self, image_preview_open: bool, startup_pending: bool) -> PasteTarget {

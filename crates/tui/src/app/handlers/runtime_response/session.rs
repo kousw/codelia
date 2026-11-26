@@ -161,9 +161,6 @@ fn apply_session_list_result(app: &mut AppState, result: &SessionListResult, sho
         app.push_line(LogKind::Status, message);
         app.push_line(LogKind::Space, "");
     }
-    if app.overlays.has_onboarding_model_pick() {
-        return;
-    }
     app.overlays.local_panel = Some(LocalPanel::SessionList(build_session_list_panel(
         sessions,
         show_all,

@@ -3,8 +3,8 @@ mod project_trust;
 use super::runtime_response::push_shell_stream_preview;
 use crate::app::app_state::{ShellRuleRpc, ShellRuleScope};
 use crate::app::runtime::{send_request, send_tool_call, RpcResponse, RuntimeTx};
-use crate::app::state::{LogKind, PickDialogItem, PickDialogState, ShellRulePicker};
-use crate::app::{AppState, PendingRpc, PendingRpcSlot};
+use crate::app::state::{LogKind, PickDialogItem, ShellRulePicker, ShellRulePickerState};
+use crate::app::{AppState, LocalPanel, PendingRpc, PendingRpcSlot};
 use crate::protocol::{
     decode_result, methods, PermissionLaunchRule, PermissionLaunchRuleLaunchKind,
     PermissionLaunchRuleScope, PermissionsListParams, PermissionsListResult,
@@ -476,14 +476,19 @@ fn list_response(
         return;
     }
     if choose_removal {
-        if app.overlays.runtime_dialogs.is_any_open() {
+        if app.overlays.runtime_dialogs.is_any_open()
+            || matches!(
+                app.overlays.local_panel,
+                Some(LocalPanel::UpdatePicker(_) | LocalPanel::ShellRulePicker(_))
+            )
+        {
             app.push_line(
                 LogKind::Status,
                 "Finish the current dialog, then run /permissions remove again.",
             );
             return;
         }
-        app.overlays.runtime_dialogs.pick = Some(picker(
+        app.overlays.local_panel = Some(picker(
             ShellRulePicker::Choose { session_id },
             "Remove a saved rule [D details]",
             Some("Enter selects a rule. Esc closes the picker.".to_owned()),
@@ -523,31 +528,29 @@ fn picker(
     title: &str,
     message: Option<String>,
     items: Vec<PickDialogItem>,
-) -> PickDialogState {
-    let chosen = vec![false; items.len()];
-    PickDialogState {
-        id: "codelia:shell-rules".to_owned(),
+) -> LocalPanel {
+    LocalPanel::ShellRulePicker(ShellRulePickerState {
         title: title.to_owned(),
         message,
         items,
         selected: 0,
-        multi: false,
-        chosen,
-        approval: false,
+        kind: action,
         review_offset: None,
-        shell_rule_picker: Some(action),
-        local_update_picker: false,
-    }
+    })
 }
 
-pub(crate) fn select(app: &mut AppState, tx: &mut dyn RuntimeTx, picker_state: PickDialogState) {
-    let (confirming, session_id) = match picker_state.shell_rule_picker {
-        Some(ShellRulePicker::Trust {
+pub(crate) fn select(
+    app: &mut AppState,
+    tx: &mut dyn RuntimeTx,
+    picker_state: ShellRulePickerState,
+) {
+    let (confirming, session_id) = match picker_state.kind {
+        ShellRulePicker::Trust {
             trusted,
             workspace,
             revision,
             session_id,
-        }) => {
+        } => {
             if picker_state
                 .items
                 .get(picker_state.selected)
@@ -588,9 +591,8 @@ pub(crate) fn select(app: &mut AppState, tx: &mut dyn RuntimeTx, picker_state: P
             );
             return;
         }
-        Some(ShellRulePicker::Choose { session_id }) => (false, session_id),
-        Some(ShellRulePicker::Confirm { session_id }) => (true, session_id),
-        None => return,
+        ShellRulePicker::Choose { session_id } => (false, session_id),
+        ShellRulePicker::Confirm { session_id } => (true, session_id),
     };
     if !session_is_current(app, session_id.as_deref()) {
         app.push_line(
@@ -627,7 +629,7 @@ pub(crate) fn select(app: &mut AppState, tx: &mut dyn RuntimeTx, picker_state: P
         return;
     };
     if !confirming {
-        app.overlays.runtime_dialogs.pick = Some(picker(
+        app.overlays.local_panel = Some(picker(
             ShellRulePicker::Confirm { session_id },
             "Remove this rule? [D details]",
             Some(format!(

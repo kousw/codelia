@@ -97,14 +97,16 @@ fn apply_model_list_result(
         .or_else(|| app.runtime_info.current_provider.clone())
         .unwrap_or_else(|| "openai".to_string());
     let current_label = current.clone().unwrap_or_else(|| "-".to_string());
-    app.overlays.local_panel = Some(LocalPanel::ModelList(build_model_list_panel(
-        provider_label,
-        current_label,
-        models,
-        result.details.as_ref(),
-        current.as_deref(),
+    app.overlays.local_panel = Some(LocalPanel::ModelList {
+        panel: build_model_list_panel(
+            provider_label,
+            current_label,
+            models,
+            result.details.as_ref(),
+            current.as_deref(),
+        ),
         scope,
-    )));
+    });
 }
 
 pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcResponse) {

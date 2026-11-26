@@ -22,6 +22,10 @@
   capability-gated and must not optimistically mutate lifecycle state before success.
 
 ## Notes
+- Match pick cancellations by `RuntimePickDialog::id()`. A server pick
+  supersedes a client-tool choice by sending `choice superseded` and clearing
+  its tracked ID. Client-tool choices are busy when a runtime pick or a local
+  update or shell-rule picker is open.
 - Apply each decoded line before reading the history slot and active run for the next line. Poll at most 300 lines per tick.
 - `RuntimeMsg::Ignored` makes no state change and requests no redraw. Reaching the per-tick line cap still requests a redraw.
 - Preserve goal → pending RPC → fallback order for responses.

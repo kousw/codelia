@@ -10,7 +10,7 @@ use crate::app::state::{InputState, LogKind, SelectionHitTest};
 use crate::app::util::{sanitize_paste, write_clipboard_text};
 use crate::app::{
     AppState, ConfirmSlot, LocalPanel, PasteTarget, PendingRpc, PendingRpcSlot, PromptDialogState,
-    PromptSlot, RuntimeDialogRef,
+    PromptSlot, RuntimeDialogRef, RuntimePickDialog, RuntimePickListKind,
 };
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use serde_json::{json, Value};
@@ -490,62 +490,42 @@ fn handle_prompt_key(
 }
 
 fn handle_pick_key(app: &mut AppState, key: KeyCode, tx: &mut dyn RuntimeTx) -> Option<bool> {
-    let pick = app.overlays.runtime_dialogs.pick.as_mut()?;
-    if let Some(offset) = pick.review_offset.as_mut() {
-        match key {
-            KeyCode::Esc | KeyCode::Char('d' | 'D') => pick.review_offset = None,
-            KeyCode::Up => *offset = offset.saturating_sub(1),
-            KeyCode::Down => *offset = offset.saturating_add(1),
-            KeyCode::PageUp => *offset = offset.saturating_sub(8),
-            KeyCode::PageDown => *offset = offset.saturating_add(8),
-            KeyCode::Home => *offset = 0,
-            _ => return Some(false),
-        }
-        return Some(true);
-    }
-    if (pick.approval || pick.shell_rule_picker.is_some())
-        && matches!(key, KeyCode::Char('d' | 'D'))
-    {
-        pick.review_offset = Some(0);
-        return Some(true);
-    }
-    if pick.local_update_picker && matches!(key, KeyCode::Enter | KeyCode::Esc) {
-        if key == KeyCode::Enter
-            && !app
-                .render_state
-                .drawn_update_choice
-                .as_ref()
-                .is_some_and(|(id, selected)| *id == pick.id && *selected == pick.selected)
-        {
-            app.push_line(
-                LogKind::Status,
-                "Resize the terminal to see the selected update mode, or press Esc to cancel.",
-            );
+    let pick = match app.overlays.runtime_dialogs.pick.as_mut()? {
+        RuntimePickDialog::List(pick) => pick,
+        RuntimePickDialog::OnboardingModelList { request_id, panel } => {
+            if !matches!(key, KeyCode::Enter | KeyCode::Esc) {
+                return Some(panels::navigate_model_list(panel, key));
+            }
+            let ids = if key == KeyCode::Enter {
+                panel
+                    .item_ids
+                    .get(panel.selected)
+                    .cloned()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let id = request_id.clone();
+            app.overlays.runtime_dialogs.pick = None;
+            if let Err(error) = send_pick_response(tx, &id, &ids) {
+                app.push_error_report("pick response error", error.to_string());
+            }
             return Some(true);
         }
-        app.render_state.drawn_update_choice = None;
-        if let Some(picker) = app.overlays.runtime_dialogs.pick.take() {
-            crate::app::self_update::finish_picker(app, picker, key == KeyCode::Enter);
+    };
+    if let RuntimePickListKind::Approval { review_offset } = &mut pick.kind {
+        if let Some(handled) = panels::handle_pick_review_key(review_offset, key) {
+            return Some(handled);
         }
-        return Some(true);
     }
-    if pick.shell_rule_picker.is_some() && matches!(key, KeyCode::Enter | KeyCode::Esc) {
-        if let Some(picker) = app.overlays.runtime_dialogs.pick.take() {
-            if key == KeyCode::Enter {
-                handlers::shell_rules::select(app, tx, picker);
-            }
-        }
-        return Some(true);
-    }
-    if pick.local_update_picker {
-        app.render_state.drawn_update_choice = None;
-    }
-    let mut handled = true;
+    let client_tool_choice = matches!(pick.kind, RuntimePickListKind::ClientToolChoice);
     match key {
         KeyCode::Esc => {
             let id = pick.id.clone();
             app.overlays.runtime_dialogs.pick = None;
-            if app.rpc_pending.client_tool_choice_ids.remove(&id) {
+            if client_tool_choice {
+                app.rpc_pending.client_tool_choice_ids.remove(&id);
                 if let Err(error) = send_client_tool_error(tx, &id, "choice cancelled") {
                     app.push_error_report("client tool response error", error.to_string());
                 }
@@ -554,14 +534,6 @@ fn handle_pick_key(app: &mut AppState, key: KeyCode, tx: &mut dyn RuntimeTx) -> 
             let ids: Vec<String> = Vec::new();
             if let Err(error) = send_pick_response(tx, &id, &ids) {
                 app.push_error_report("pick response error", error.to_string());
-            }
-        }
-        KeyCode::Up => {
-            pick.selected = pick.selected.saturating_sub(1);
-        }
-        KeyCode::Down => {
-            if pick.selected + 1 < pick.items.len() {
-                pick.selected += 1;
             }
         }
         KeyCode::Enter => {
@@ -586,47 +558,12 @@ fn handle_pick_key(app: &mut AppState, key: KeyCode, tx: &mut dyn RuntimeTx) -> 
             };
             app.overlays.runtime_dialogs.pick = None;
 
-            if app.rpc_pending.client_tool_choice_ids.remove(&id) {
+            if client_tool_choice {
+                app.rpc_pending.client_tool_choice_ids.remove(&id);
                 let selected_id = ids.first().cloned();
                 let result = json!({ "selected_id": selected_id });
                 if let Err(error) = send_client_tool_success(tx, &id, result) {
                     app.push_error_report("client tool response error", error.to_string());
-                }
-                return Some(true);
-            }
-
-            if let Some(lane_id) = id.strip_prefix("lane:action:") {
-                if let Some(action) = ids.first() {
-                    let request_id = tx.next_id();
-                    match action.as_str() {
-                        "status" => {
-                            app.rpc_pending
-                                .insert(request_id.clone(), PendingRpc::LaneStatus);
-                            if let Err(error) = send_tool_call(
-                                tx,
-                                &request_id,
-                                "lane_status",
-                                json!({ "lane_id": lane_id }),
-                            ) {
-                                app.rpc_pending.remove_slot(PendingRpcSlot::LaneStatus);
-                                app.push_error_report("send error", error.to_string());
-                            }
-                        }
-                        "close" => {
-                            app.rpc_pending
-                                .insert(request_id.clone(), PendingRpc::LaneClose);
-                            if let Err(error) = send_tool_call(
-                                tx,
-                                &request_id,
-                                "lane_close",
-                                json!({ "lane_id": lane_id }),
-                            ) {
-                                app.rpc_pending.remove_slot(PendingRpcSlot::LaneClose);
-                                app.push_error_report("send error", error.to_string());
-                            }
-                        }
-                        _ => {}
-                    }
                 }
                 return Some(true);
             }
@@ -640,15 +577,15 @@ fn handle_pick_key(app: &mut AppState, key: KeyCode, tx: &mut dyn RuntimeTx) -> 
                 *choice = !*choice;
             }
         }
-        KeyCode::Char(ch) if ch.is_ascii_digit() => {
-            let index = ch.to_digit(10).unwrap_or(0) as usize;
-            if index > 0 && index <= pick.items.len() {
-                pick.selected = index - 1;
-            }
+        _ => {
+            return Some(panels::navigate_pick_list(
+                &mut pick.selected,
+                pick.items.len(),
+                key,
+            ))
         }
-        _ => handled = false,
     }
-    Some(handled)
+    Some(true)
 }
 
 fn selection_point_at(
@@ -810,10 +747,15 @@ pub(crate) fn handle_non_main_key(
         Some(LocalPanel::Context(_)) => panels::handle_context_panel_key(app, key),
         Some(LocalPanel::SkillsList(_)) => panels::handle_skills_list_panel_key(app, key),
         Some(LocalPanel::ThemeList(_)) => panels::handle_theme_list_panel_key(app, key, tx),
-        Some(LocalPanel::ModelList(_)) => panels::handle_model_list_panel_key(app, key, tx),
+        Some(LocalPanel::ModelList { .. }) => panels::handle_model_list_panel_key(app, key, tx),
         Some(LocalPanel::ProviderPicker(_)) => panels::handle_provider_picker_key(app, key, tx),
         Some(LocalPanel::ModelPicker(_)) => panels::handle_model_picker_key(app, key, tx),
         Some(LocalPanel::ReasoningPicker(_)) => panels::handle_reasoning_picker_key(app, key, tx),
+        Some(LocalPanel::UpdatePicker(_)) => panels::handle_update_picker_key(app, key),
+        Some(LocalPanel::ShellRulePicker(_)) => panels::handle_shell_rule_picker_key(app, key, tx),
+        Some(LocalPanel::LaneActionPicker(_)) => {
+            panels::handle_lane_action_picker_key(app, key, tx)
+        }
         None => {
             if app.queue_picker_focused() && !modifiers.is_empty() {
                 return Some(false);
@@ -951,9 +893,12 @@ mod shell_rule_tests {
             submit(&mut app, &mut tx, "/permissions remove");
             respond(&mut app, &mut tx, id, &list);
             for key in keys {
-                assert_eq!(handle_pick_key(&mut app, key, &mut tx), Some(true));
+                assert_eq!(
+                    handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut tx),
+                    Some(true)
+                );
             }
-            assert!(app.overlays.runtime_dialogs.pick.is_none());
+            assert!(app.overlays.local_panel.is_none());
         }
         respond(
             &mut app,
@@ -966,16 +911,16 @@ mod shell_rule_tests {
         submit(&mut app, &mut tx, "/permissions remove");
         respond(&mut app, &mut tx, "permissions-6", &list);
         assert_eq!(
-            handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
+            handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
             Some(true)
         );
         app.runtime_info.session_id = Some("session-2".into());
         assert_eq!(
-            handle_pick_key(&mut app, KeyCode::Down, &mut tx),
+            handle_non_main_key(&mut app, KeyCode::Down, KeyModifiers::NONE, &mut tx),
             Some(true)
         );
         assert_eq!(
-            handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
+            handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
             Some(true)
         );
         assert!(log(&app).contains("The session changed."));
@@ -985,31 +930,27 @@ mod shell_rule_tests {
         for (request_id, confirm) in [("permissions-7", false), ("permissions-8", true)] {
             submit(&mut app, &mut tx, "/permissions remove");
             respond(&mut app, &mut tx, request_id, &tool_list);
+            let Some(LocalPanel::ShellRulePicker(picker)) = &app.overlays.local_panel else {
+                panic!("expected rule picker");
+            };
+            assert_eq!(picker.items.len(), 1);
             assert_eq!(
-                app.overlays
-                    .runtime_dialogs
-                    .pick
-                    .as_ref()
-                    .unwrap()
-                    .items
-                    .len(),
-                1
-            );
-            assert_eq!(
-                handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
+                handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
                 Some(true)
             );
-            let dialog = app.overlays.runtime_dialogs.pick.as_ref().unwrap();
+            let Some(LocalPanel::ShellRulePicker(dialog)) = &app.overlays.local_panel else {
+                panic!("expected rule picker");
+            };
             assert!(dialog.message.as_deref().unwrap().contains("webfetch"));
             assert_eq!(dialog.selected, 0);
             if confirm {
                 assert_eq!(
-                    handle_pick_key(&mut app, KeyCode::Down, &mut tx),
+                    handle_non_main_key(&mut app, KeyCode::Down, KeyModifiers::NONE, &mut tx),
                     Some(true)
                 );
             }
             assert_eq!(
-                handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
+                handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
                 Some(true)
             );
             assert_eq!(
@@ -1065,19 +1006,21 @@ mod shell_rule_tests {
                 .to_owned();
             sender.send(json!({"id":id,"jsonrpc":"2.0","result":{"approval_mode":null,"paths":{"global":"/config.json","project":null},"rules":[],"project_allow_trust":{"trusted":false,"workspace":"/workspace","revision":"snapshot-1","rules":[{"tool":"shell","command":"cargo test"}]}}}).to_string()).unwrap();
             assert!(process_runtime_messages(&mut app, &rx, &mut tx));
-            let dialog = app.overlays.runtime_dialogs.pick.as_ref().unwrap();
+            let Some(LocalPanel::ShellRulePicker(dialog)) = &app.overlays.local_panel else {
+                panic!("expected rule picker");
+            };
             let message = dialog.message.as_ref().unwrap();
             assert!(message.contains("future edits"));
             assert!(message.contains("cargo test"));
             assert_eq!(dialog.selected, 0);
             if confirm {
                 assert_eq!(
-                    handle_pick_key(&mut app, KeyCode::Down, &mut tx),
+                    handle_non_main_key(&mut app, KeyCode::Down, KeyModifiers::NONE, &mut tx),
                     Some(true)
                 );
             }
             assert_eq!(
-                handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
+                handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
                 Some(true)
             );
             assert_eq!(
@@ -1148,7 +1091,13 @@ mod shell_rule_tests {
             .runtime_dialogs
             .pick
             .as_ref()
-            .is_some_and(|pick| pick.approval));
+            .is_some_and(|pick| matches!(
+                pick,
+                RuntimePickDialog::List(crate::app::RuntimePickList {
+                    kind: RuntimePickListKind::Approval { .. },
+                    ..
+                })
+            )));
         for key in [KeyCode::Down, KeyCode::Enter] {
             assert_eq!(handle_pick_key(&mut app, key, &mut tx), Some(true));
         }
@@ -1193,6 +1142,13 @@ mod update_tests {
     use crate::app::self_update::{self, LauncherPaths};
     use ratatui::{backend::TestBackend, Terminal};
     use std::io::Write;
+
+    fn update_picker(app: &AppState) -> &crate::app::state::UpdatePickerState {
+        let Some(LocalPanel::UpdatePicker(picker)) = &app.overlays.local_panel else {
+            panic!("expected update picker");
+        };
+        picker
+    }
 
     #[test]
     fn update_command_and_picker_never_reply_to_runtime() {
@@ -1254,12 +1210,7 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
                 .unwrap();
             assert!(app.render_state.drawn_update_choice.is_none());
             key(app, KeyCode::Enter);
-            let pick = app
-                .overlays
-                .runtime_dialogs
-                .pick
-                .as_ref()
-                .expect("hidden choice must not close the picker");
+            let pick = update_picker(app);
             assert_eq!(pick.items[pick.selected].id, "auto");
             assert!(app.pending_update_control.is_none());
             if enlarge {
@@ -1271,7 +1222,10 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
                 // Even with enough room, a new selection must be drawn before Enter.
                 key(app, KeyCode::Up);
                 key(app, KeyCode::Enter);
-                assert!(app.overlays.runtime_dialogs.pick.is_some());
+                assert!(matches!(
+                    app.overlays.local_panel,
+                    Some(LocalPanel::UpdatePicker(_))
+                ));
                 assert!(app.pending_update_control.is_none());
                 key(app, KeyCode::Down);
                 terminal
@@ -1286,21 +1240,19 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
             assert!(handlers::handle_enter(&mut app, &mut tx));
             assert!(app.input.current().is_empty());
             poll(&mut app);
-            let picker = app
-                .overlays
-                .runtime_dialogs
-                .pick
-                .as_ref()
-                .expect("local update picker");
-            assert!(picker.local_update_picker);
+            let picker = update_picker(&app);
+            assert!(!picker.startup);
             assert_eq!(picker.items[picker.selected].id, "notify");
             assert_eq!(
                 picker.message.as_deref(),
                 Some("Current: 1.2.3. Update candidate (latest): 1.2.4.")
             );
             pick_auto_in_short_terminal(&mut app, &mut tx, key == KeyCode::Enter);
-            assert_eq!(handle_pick_key(&mut app, key, &mut tx), Some(true));
-            assert!(app.overlays.runtime_dialogs.pick.is_none());
+            assert_eq!(
+                handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut tx),
+                Some(true)
+            );
+            assert!(app.overlays.local_panel.is_none());
             assert_eq!(app.pending_update_control.is_some(), key == KeyCode::Enter);
         }
         poll(&mut app);
@@ -1325,7 +1277,7 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
                 .insert("session-open".into(), PendingRpc::SessionOpen);
             assert!(!startup_confirmations::poll(&mut app));
             app.rpc_pending.remove_slot(PendingRpcSlot::SessionOpen);
-            assert!(app.overlays.runtime_dialogs.pick.is_none());
+            assert!(app.overlays.local_panel.is_none());
             assert!(startup_confirmations::poll(&mut app));
             app.overlays.runtime_dialogs.prompt = Some(PromptSlot {
                 state: PromptDialogState {
@@ -1338,20 +1290,20 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
                 input: Default::default(),
             });
             assert!(startup_confirmations::poll(&mut app));
-            assert!(app.overlays.runtime_dialogs.pick.is_none());
+            assert!(app.overlays.local_panel.is_none());
             assert!(!startup_confirmations::poll(&mut app));
             assert!(app.startup_confirmations.is_pending());
             app.overlays.runtime_dialogs.prompt = None;
             assert!(startup_confirmations::poll(&mut app));
-            let picker = app.overlays.runtime_dialogs.pick.as_ref().unwrap();
-            assert!(self_update::is_startup_picker(picker));
+            let picker = update_picker(&app);
+            assert!(picker.startup);
             assert_eq!(picker.items[picker.selected].id, "notify");
             pick_auto_in_short_terminal(&mut app, &mut tx, key == KeyCode::Enter);
             assert_eq!(
                 handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut tx),
                 Some(true)
             );
-            assert!(app.overlays.runtime_dialogs.pick.is_none());
+            assert!(app.overlays.local_panel.is_none());
             if key == KeyCode::Enter {
                 assert!(!startup_confirmations::poll(&mut app));
                 assert!(

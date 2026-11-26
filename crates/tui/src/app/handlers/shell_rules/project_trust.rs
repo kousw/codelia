@@ -1,6 +1,6 @@
 use super::{picker, session_is_current, visible_json};
 use crate::app::state::{LogKind, PickDialogItem, ShellRulePicker};
-use crate::app::AppState;
+use crate::app::{AppState, LocalPanel};
 use crate::protocol::{
     PermissionRuleSpec, PermissionsListResult, ProjectAllowTrust, ProjectAllowTrustSetResult,
 };
@@ -88,7 +88,12 @@ pub(super) fn confirm(
         );
         return;
     }
-    if app.overlays.runtime_dialogs.is_any_open() {
+    if app.overlays.runtime_dialogs.is_any_open()
+        || matches!(
+            app.overlays.local_panel,
+            Some(LocalPanel::UpdatePicker(_) | LocalPanel::ShellRulePicker(_))
+        )
+    {
         app.push_line(
             LogKind::Status,
             "Finish the current dialog, then run /permissions again.",
@@ -106,7 +111,7 @@ pub(super) fn confirm(
         },
         rule_text(&snapshot.rules)
     );
-    app.overlays.runtime_dialogs.pick = Some(picker(
+    app.overlays.local_panel = Some(picker(
         ShellRulePicker::Trust {
             trusted,
             workspace,

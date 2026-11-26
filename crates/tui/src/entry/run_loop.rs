@@ -3,7 +3,7 @@ use crate::app::handlers::confirm::activate_pending_confirm_dialog;
 use crate::app::runtime::RuntimeTx;
 use crate::app::state::LogKind;
 use crate::app::util::sample_memory;
-use crate::app::{AppState, RuntimeDialogRef};
+use crate::app::{AppState, LocalPanel};
 use crate::entry::terminal::{set_mouse_capture, with_synchronized_update, TuiTerminal};
 use crate::entry::terminal_mode::ResolvedTerminalMode;
 use crate::event_loop::input::{
@@ -128,10 +128,9 @@ pub(crate) fn run_tui_loop(
         if needs_redraw {
             let frame_started = Instant::now();
             let inline_scrollback = terminal_mode.uses_inline_scrollback();
-            let size_before = if matches!(
-                app.overlays.runtime_dialogs.top(),
-                Some(RuntimeDialogRef::Pick(pick)) if pick.local_update_picker
-            ) {
+            let size_before = if !app.overlays.runtime_dialogs.is_any_open()
+                && matches!(app.overlays.local_panel, Some(LocalPanel::UpdatePicker(_)))
+            {
                 terminal.size().ok()
             } else {
                 None

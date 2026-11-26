@@ -93,7 +93,7 @@ pub(crate) fn update(app: &mut AppState, msg: Msg, tx: &mut dyn RuntimeTx) -> Up
 
 ### 3.2 Tick Execution Order & Two-Phase Tick Messages
 
-To preserve exact `entry/run_loop.rs` semantics—including the `continue` branches on `KeyEventKind != Press`, `image_preview` key handling, `Ctrl+C`, and blocked paste that intentionally skip post-input ticks—the loop separates pre-draw and post-input ticks:
+To preserve exact `entry/run_loop.rs` semantics—including the `continue` branches on `KeyEventKind != Press`, `image_preview` key handling, and `Ctrl+C` that intentionally skip post-input ticks (while `Event::Paste`, even when blocked, still falls through to `PostInputTick`)—the loop separates pre-draw and post-input ticks:
 
 1. **Per-line runtime drain (up to `MAX_RUNTIME_LINES_PER_TICK = 300`)**:
    - Because `parse_runtime_output_with_history()` depends on live `session_history_id.is_some()` and `active_run_id` **per line** (`runtime_response/mod.rs:61-69`), the shell MUST NOT batch-parse all queued lines before updating `AppState`.
@@ -248,17 +248,13 @@ pub struct PromptSlot {
     pub input: InputState,
 }
 
-pub enum RuntimePickKind {
+pub enum RuntimePickListKind {
     Standard,
     Approval { review_offset: Option<usize> },
     ClientToolChoice,
-    /// Onboarding model selection triggered by a runtime `ui.pick.request`
-    /// (`ModelListSubmitAction::PickRequest`). Lives in Tier 1 because it carries
-    /// a mandatory runtime reply obligation and must never be silently dropped by a local panel.
-    OnboardingModelList(ModelListPanelState),
 }
 
-pub struct RuntimePickDialog {
+pub struct RuntimePickList {
     pub id: String,
     pub title: String,
     pub message: Option<String>,
@@ -266,7 +262,16 @@ pub struct RuntimePickDialog {
     pub selected: usize,
     pub multi: bool,
     pub chosen: Vec<bool>,
-    pub kind: RuntimePickKind,
+    pub kind: RuntimePickListKind,
+}
+
+pub enum RuntimePickDialog {
+    List(RuntimePickList),
+    /// Onboarding `ui.pick.request` with a mandatory runtime reply.
+    OnboardingModelList {
+        request_id: String,
+        panel: Box<ModelListPanelState>,
+    },
 }
 
 #[derive(Default)]
@@ -284,12 +289,16 @@ pub enum LocalPanel {
     Context(ContextPanelState),
     SkillsList(SkillsListPanelState),
     ThemeList(ThemeListPanelState),
-    ModelList(ModelListPanelState),      // local `/model` list only (no PickRequest obligation)
+    ModelList {
+        panel: ModelListPanelState,
+        scope: ModelSetScope,
+    },
     ProviderPicker(ProviderPickerState),
     ModelPicker(ModelPickerState),
     ReasoningPicker(ReasoningPickerState),
-    ShellRulePicker(ShellRulePickerState),
     UpdatePicker(UpdatePickerState),     // `/update` and startup update picker
+    ShellRulePicker(ShellRulePickerState),
+    LaneActionPicker(LaneActionPickerState),
 }
 
 /// Tier 3: Bottom-priority queue steer focus, preserved underneath transient local panels
@@ -305,11 +314,11 @@ pub struct OverlayState {
 #### Key Behavioral Contracts for `OverlayState`
 
 1. **`render_state.confirm_phase` removal**: `ConfirmPhase` (`None | Pending | Active`) is replaced directly by `runtime_dialogs.confirm: Option<ConfirmSlot>`. Both `clear_log()` (`methods.rs:432-437`) and `assert_render_invariants()` (`methods.rs:518-532`) simplify accordingly.
-2. **Single `top()` priority**: `RuntimeDialogs::top()` defines `confirm > prompt > pick` once; both `view/ui/panels/mod.rs` and `event_loop/input.rs` dispatch through it.
+2. **Runtime dialog priority**. Input uses `RuntimeDialogs::top()` with `confirm > prompt > pick`. Rendering uses `visible_top()`, which skips a pending confirm until activation.
 3. **`UpdatePicker` drawn-cell check**: Both `view/ui/mod.rs::drawn_update_choice` and `entry/run_loop.rs`'s `size_before` guard MUST check:
    `!app.overlays.runtime_dialogs.is_any_open() && matches!(app.overlays.local_panel, Some(LocalPanel::UpdatePicker(_)))`.
-4. **`client_tools.rs:384` busy policy**: Keep `tui_ask_user_choice` rejecting when `runtime_dialogs.pick.is_some()` (and explicitly document whether local `UpdatePicker` / `ShellRulePicker` also blocks it; keeping `runtime_dialogs.pick.is_some() || matches!(local_panel, Some(LocalPanel::UpdatePicker(_) | LocalPanel::ShellRulePicker(_)))` preserves exact current behavior).
-5. **Client-tool panel replacement**: When `tui_open_selector` or `tui_preview_artifact` opens `LocalPanel::Context`, it replaces only `local_panel` (leaving `runtime_dialogs` and `queue_focus` untouched).
+4. **Client-tool & runtime pick arbitration**. `tui_ask_user_choice` returns `"pick dialog is busy"` when a runtime pick or a local `UpdatePicker` or `ShellRulePicker` is open. `tui_open_selector` and `tui_preview_artifact` likewise reject with `"pick dialog is busy"` while `UpdatePicker` or `ShellRulePicker` is open so local pickers are not silently clobbered. An incoming `ui.pick.request` replies `"choice superseded"` to a displaced client-tool choice and removes its tracked request ID; if another server-owned runtime pick (`Standard`, `Approval`, or `OnboardingModelList`) is already open, the existing pick stays open and the incoming `ui.pick.request` is declined with `ids: []`. `ui.pick.cancelled` only cancels server-owned picks (never `ClientToolChoice`, which belongs to `client.tool.cancel`).
+5. **Client-tool panel replacement**. `tui_open_selector` and `tui_preview_artifact` set `local_panel` to `LocalPanel::Context` (unless blocked by an open `UpdatePicker` or `ShellRulePicker`). Runtime dialogs and queue focus retain their own state.
 6. **Intentional UX consistency fix — `PasteTarget` tightening**:
    - Today `blocks_composer_paste` (`event_loop/input.rs:385-397`) omitted `session_list_panel`, `context_panel`, `model_list_panel`, `provider_picker`, and `model_picker`, allowing paste into an invisible composer behind those panels.
    - Under `OverlayState::paste_target(image_preview_open, startup_pending)`:
@@ -319,6 +328,9 @@ pub struct OverlayState {
      - `startup_pending` or `local_panel.is_some()` or `queue_focus_active` → `PasteTarget::Blocked`
      - otherwise → `PasteTarget::Composer`
    - **Explicitly recorded as a minor UX bug fix** (not silent behavior drift), covered by per-panel unit tests.
+
+7. **Model list submission and cancellation**. `LocalPanel::ModelList` carries the scope for `model.set`. `RuntimePickDialog::OnboardingModelList` carries the request ID for `ui.pick.request`. Both share the display rows and selected item index in `ModelListPanelState`. `ui.pick.cancelled` dismisses a matching pick through `RuntimePickDialog::id()`.
+8. **Startup update picker**. Startup opens `LocalPanel::UpdatePicker` with `startup: true`. Any open runtime dialog clears the startup picker from the local tier. The pending startup confirmation opens it again once the runtime dialogs close and the other startup gates allow it.
 
 ---
 

@@ -1,6 +1,6 @@
 //! Local, launcher-selected confirmations before normal composer dispatch.
 
-use super::{self_update, state::PickDialogState, AppState, PendingRpcSlot};
+use super::{self_update, state::UpdatePickerState, AppState, LocalPanel, PendingRpcSlot};
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -16,7 +16,7 @@ impl StartupConfirmation {
         }
     }
 
-    fn picker(self) -> PickDialogState {
+    fn picker(self) -> UpdatePickerState {
         match self {
             Self::UpdateMode => self_update::startup_picker(),
         }
@@ -28,9 +28,9 @@ impl StartupConfirmation {
         }
     }
 
-    fn owns_picker(self, panel: &PickDialogState) -> bool {
+    fn owns_picker(self, panel: &UpdatePickerState) -> bool {
         match self {
-            Self::UpdateMode => self_update::is_startup_picker(panel),
+            Self::UpdateMode => panel.startup,
         }
     }
 }
@@ -73,16 +73,14 @@ pub(crate) fn poll(app: &mut AppState) -> bool {
             app.startup_confirmations.answered = false;
             continue;
         }
-        if (app.overlays.runtime_dialogs.confirm_state().is_some()
-            || app.overlays.runtime_dialogs.prompt.is_some())
-            && app
-                .overlays
-                .runtime_dialogs
-                .pick
-                .as_ref()
-                .is_some_and(|panel| item.owns_picker(panel))
+        if app.overlays.runtime_dialogs.is_any_open()
+            && matches!(
+                &app.overlays.local_panel,
+                Some(LocalPanel::UpdatePicker(panel)) if item.owns_picker(panel)
+            )
         {
-            app.overlays.runtime_dialogs.pick = None;
+            app.overlays.local_panel = None;
+            app.render_state.drawn_update_choice = None;
             return true;
         }
         if app.rpc_pending.has_slot(PendingRpcSlot::Initialize)
@@ -91,8 +89,7 @@ pub(crate) fn poll(app: &mut AppState) -> bool {
         {
             return false;
         }
-        // A runtime picker may replace this panel; only a local answer advances the queue.
-        app.overlays.runtime_dialogs.pick = Some(item.picker());
+        app.overlays.local_panel = Some(LocalPanel::UpdatePicker(item.picker()));
         return true;
     }
     false

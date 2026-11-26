@@ -106,7 +106,7 @@ pub(super) fn handle_model_session_command<'a>(
             if matches!(
                 app.overlays.local_panel,
                 Some(
-                    LocalPanel::ModelList(_)
+                    LocalPanel::ModelList { .. }
                         | LocalPanel::ReasoningPicker(_)
                         | LocalPanel::SkillsList(_)
                         | LocalPanel::ThemeList(_)
@@ -154,7 +154,7 @@ fn send_model_set_for_scope(
     if matches!(
         app.overlays.local_panel,
         Some(
-            LocalPanel::ModelList(_)
+            LocalPanel::ModelList { .. }
                 | LocalPanel::ReasoningPicker(_)
                 | LocalPanel::SkillsList(_)
                 | LocalPanel::ThemeList(_)
@@ -265,7 +265,7 @@ pub(super) fn handle_fast_command<'a>(
     if matches!(
         app.overlays.local_panel,
         Some(
-            LocalPanel::ModelList(_)
+            LocalPanel::ModelList { .. }
                 | LocalPanel::ReasoningPicker(_)
                 | LocalPanel::SkillsList(_)
                 | LocalPanel::ThemeList(_)
@@ -409,7 +409,7 @@ pub(super) fn handle_skills_command<'a>(
     if matches!(
         app.overlays.local_panel,
         Some(
-            LocalPanel::ModelList(_)
+            LocalPanel::ModelList { .. }
                 | LocalPanel::ReasoningPicker(_)
                 | LocalPanel::SessionList(_)
                 | LocalPanel::Context(_)
@@ -675,7 +675,7 @@ pub(super) fn handle_lane_command<'a>(
     if matches!(
         app.overlays.local_panel,
         Some(
-            LocalPanel::ModelList(_)
+            LocalPanel::ModelList { .. }
                 | LocalPanel::ReasoningPicker(_)
                 | LocalPanel::SessionList(_)
                 | LocalPanel::Context(_)

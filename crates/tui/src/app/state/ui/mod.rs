@@ -12,14 +12,17 @@ pub(crate) use composer::{
     complete_slash_command, is_known_command, skill_suggestion_rows, unknown_command_message,
 };
 pub use dialogs::{
-    ConfirmDialogState, ConfirmMode, ConfirmSlot, PickDialogItem, PickDialogState,
-    PromptDialogState, PromptSlot, RuntimeDialogRef, ShellRulePicker,
+    ConfirmDialogState, ConfirmMode, ConfirmSlot, PickDialogItem, PromptDialogState, PromptSlot,
+    RuntimeDialogRef, RuntimePickDialog, RuntimePickList, RuntimePickListKind,
 };
 pub use model::{
-    ModelListMode, ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
-    ModelSetScope, ProviderPickerState, ReasoningPickerState,
+    ModelListMode, ModelListPanelState, ModelListViewMode, ModelPickerState, ModelSetScope,
+    ProviderPickerState, ReasoningPickerState,
 };
-pub use overlays::{LocalPanel, OverlayState, PasteTarget, QueueSteerPicker};
+pub use overlays::{
+    LaneActionPickerState, LocalPanel, OverlayState, PasteTarget, QueueSteerPicker,
+    ShellRulePicker, ShellRulePickerState, UpdatePickerState,
+};
 pub use panels::{
     ContextPanelState, LaneListItem, LaneListPanelState, SessionListPanelState, ThemeListPanelState,
 };

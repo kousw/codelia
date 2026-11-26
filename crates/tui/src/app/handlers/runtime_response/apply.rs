@@ -5,13 +5,14 @@ use super::replay::apply_replay_progress;
 use super::{client_tools, steer};
 use crate::app::handlers::confirm::handle_confirm_request;
 use crate::app::runtime::{
-    AgentMsg, ClientToolMsg, ClientToolRejection, RunControlMsg, RunErrorPresentation, RuntimeMsg,
-    RuntimeTx, ServerUiMsg, UiPickRequest, UiPromptRequest,
+    send_client_tool_error, send_pick_response, AgentMsg, ClientToolMsg, ClientToolRejection,
+    RunControlMsg, RunErrorPresentation, RuntimeMsg, RuntimeTx, ServerUiMsg, UiPickRequest,
+    UiPromptRequest,
 };
 use crate::app::state::{InputState, LogKind, LogLine, LogTone};
 use crate::app::{
-    AppState, LocalPanel, PendingRpcSlot, PickDialogItem, PickDialogState, PromptDialogState,
-    PromptSlot, PROMPT_DISPATCH_RETRY_BACKOFF,
+    AppState, PendingRpcSlot, PickDialogItem, PromptDialogState, PromptSlot, RuntimePickDialog,
+    RuntimePickList, RuntimePickListKind, PROMPT_DISPATCH_RETRY_BACKOFF,
 };
 use std::time::Instant;
 
@@ -27,7 +28,7 @@ pub(super) fn apply_runtime_msg(
             // Parity: keep non-ignored messages requesting redraw even when unmatched.
             let _ = super::handle_rpc_response(app, response, tx);
         }
-        RuntimeMsg::UiRequest(request) => apply_ui_request(app, request),
+        RuntimeMsg::UiRequest(request) => apply_ui_request(app, request, tx),
         RuntimeMsg::ClientTool(tool) => match tool {
             ClientToolMsg::Call(request) => {
                 client_tools::handle_client_tool_request(app, request, tx);
@@ -46,18 +47,26 @@ pub(super) fn apply_runtime_msg(
     true
 }
 
-fn apply_ui_request(app: &mut AppState, request: ServerUiMsg) {
+fn apply_ui_request(app: &mut AppState, request: ServerUiMsg, tx: &mut dyn RuntimeTx) {
     match request {
         ServerUiMsg::Confirm(request) => handle_confirm_request(app, request),
         ServerUiMsg::Prompt(request) => handle_prompt_request(app, request),
-        ServerUiMsg::Pick(request) => handle_pick_request(app, request),
+        ServerUiMsg::Pick(request) => handle_pick_request(app, request, tx),
         ServerUiMsg::PickCancelled { id } => {
             if app
                 .overlays
                 .runtime_dialogs
                 .pick
                 .as_ref()
-                .is_some_and(|dialog| dialog.id == id)
+                .is_some_and(|dialog| {
+                    !matches!(
+                        dialog,
+                        RuntimePickDialog::List(RuntimePickList {
+                            kind: RuntimePickListKind::ClientToolChoice,
+                            ..
+                        })
+                    ) && dialog.id() == id
+                })
             {
                 app.overlays.runtime_dialogs.pick = None;
             }
@@ -66,9 +75,7 @@ fn apply_ui_request(app: &mut AppState, request: ServerUiMsg) {
 }
 
 fn reject_malformed(app: &mut AppState, rejection: ClientToolRejection, tx: &mut dyn RuntimeTx) {
-    use crate::app::runtime::{
-        send_client_tool_error, send_confirm_response, send_pick_response, send_prompt_response,
-    };
+    use crate::app::runtime::{send_confirm_response, send_pick_response, send_prompt_response};
     let id = rejection.id.as_str();
     let sent = match rejection.method.as_str() {
         "ui.confirm.request" => send_confirm_response(tx, id, false, false, None),
@@ -332,14 +339,37 @@ fn handle_prompt_request(app: &mut AppState, request: UiPromptRequest) {
     });
 }
 
-fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
+fn handle_pick_request(app: &mut AppState, request: UiPickRequest, tx: &mut dyn RuntimeTx) {
+    match app.overlays.runtime_dialogs.pick.take() {
+        Some(RuntimePickDialog::List(RuntimePickList {
+            id,
+            kind: RuntimePickListKind::ClientToolChoice,
+            ..
+        })) => {
+            app.rpc_pending.client_tool_choice_ids.remove(&id);
+            if let Err(error) = send_client_tool_error(tx, &id, "choice superseded") {
+                app.push_error_report("client tool response error", error.to_string());
+            }
+        }
+        Some(existing) => {
+            app.overlays.runtime_dialogs.pick = Some(existing);
+            let empty: Vec<String> = Vec::new();
+            if let Err(error) = send_pick_response(tx, &request.id, &empty) {
+                app.push_error_report("pick response error", error.to_string());
+            }
+            return;
+        }
+        None => {}
+    }
     if let Some(panel) = build_onboarding_model_list_panel(&request) {
-        app.overlays.runtime_dialogs.pick = None;
-        app.overlays.local_panel = Some(LocalPanel::ModelList(panel));
+        app.overlays.runtime_dialogs.pick = Some(RuntimePickDialog::OnboardingModelList {
+            request_id: request.id,
+            panel: Box::new(panel),
+        });
         return;
     }
     let chosen = vec![false; request.items.len()];
-    app.overlays.runtime_dialogs.pick = Some(PickDialogState {
+    app.overlays.runtime_dialogs.pick = Some(RuntimePickDialog::List(RuntimePickList {
         id: request.id,
         title: request.title,
         message: request.message,
@@ -355,9 +385,12 @@ fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
         selected: 0,
         multi: request.multi,
         chosen,
-        approval: request.approval,
-        review_offset: None,
-        shell_rule_picker: None,
-        local_update_picker: false,
-    });
+        kind: if request.approval {
+            RuntimePickListKind::Approval {
+                review_offset: None,
+            }
+        } else {
+            RuntimePickListKind::Standard
+        },
+    }));
 }

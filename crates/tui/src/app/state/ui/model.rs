@@ -62,16 +62,6 @@ impl ModelSetScope {
     }
 }
 
-pub enum ModelListSubmitAction {
-    ModelSet {
-        scope: ModelSetScope,
-    },
-    UiPick {
-        request_id: String,
-        item_ids: Vec<String>,
-    },
-}
-
 pub struct ProviderPickerState {
     pub providers: Vec<String>,
     pub selected: usize,
@@ -85,8 +75,7 @@ pub struct ModelListPanelState {
     pub rows_limits: Vec<String>,
     pub header_cost: String,
     pub rows_cost: Vec<String>,
-    pub model_ids: Vec<String>,
+    pub item_ids: Vec<String>,
     pub selected: usize,
     pub view_mode: ModelListViewMode,
-    pub submit_action: ModelListSubmitAction,
 }

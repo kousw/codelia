@@ -3,7 +3,10 @@ use crate::app::runtime::{
     ClientToolCancel, ClientToolRequest, RuntimeTx,
 };
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
-use crate::app::{AppState, ContextPanelState, LocalPanel, PickDialogItem, PickDialogState};
+use crate::app::{
+    AppState, ContextPanelState, LocalPanel, PickDialogItem, RuntimePickDialog, RuntimePickList,
+    RuntimePickListKind,
+};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
@@ -379,7 +382,12 @@ fn handle_ask_user_choice(
     request: ClientToolRequest,
     tx: &mut dyn RuntimeTx,
 ) -> bool {
-    if app.overlays.runtime_dialogs.pick.is_some() {
+    if app.overlays.runtime_dialogs.pick.is_some()
+        || matches!(
+            app.overlays.local_panel,
+            Some(LocalPanel::UpdatePicker(_) | LocalPanel::ShellRulePicker(_))
+        )
+    {
         if let Err(error) = send_client_tool_error(tx, &request.id, "pick dialog is busy") {
             app.push_error_report("client tool response error", error.to_string());
         }
@@ -397,7 +405,7 @@ fn handle_ask_user_choice(
     app.rpc_pending
         .client_tool_choice_ids
         .insert(request.id.clone());
-    app.overlays.runtime_dialogs.pick = Some(PickDialogState {
+    app.overlays.runtime_dialogs.pick = Some(RuntimePickDialog::List(RuntimePickList {
         id: request.id,
         title: dialog.title,
         message: dialog.message,
@@ -405,11 +413,8 @@ fn handle_ask_user_choice(
         selected: 0,
         multi: false,
         chosen: Vec::new(),
-        approval: false,
-        review_offset: None,
-        shell_rule_picker: None,
-        local_update_picker: false,
-    });
+        kind: RuntimePickListKind::ClientToolChoice,
+    }));
     true
 }
 
@@ -445,10 +450,11 @@ fn handle_open_selector(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    if app.overlays.has_onboarding_model_pick() {
-        if let Err(error) =
-            send_client_tool_error(tx, &request.id, "onboarding pick dialog is active")
-        {
+    if matches!(
+        app.overlays.local_panel,
+        Some(LocalPanel::UpdatePicker(_) | LocalPanel::ShellRulePicker(_))
+    ) {
+        if let Err(error) = send_client_tool_error(tx, &request.id, "pick dialog is busy") {
             app.push_error_report("client tool response error", error.to_string());
         }
         return true;
@@ -475,10 +481,11 @@ fn handle_preview_artifact(
         .to_string();
     let kind = arg_str(&request.arguments, "kind").unwrap_or("text");
     let content = arg_str(&request.arguments, "content").unwrap_or("");
-    if app.overlays.has_onboarding_model_pick() {
-        if let Err(error) =
-            send_client_tool_error(tx, &request.id, "onboarding pick dialog is active")
-        {
+    if matches!(
+        app.overlays.local_panel,
+        Some(LocalPanel::UpdatePicker(_) | LocalPanel::ShellRulePicker(_))
+    ) {
+        if let Err(error) = send_client_tool_error(tx, &request.id, "pick dialog is busy") {
             app.push_error_report("client tool response error", error.to_string());
         }
         return true;
@@ -594,7 +601,7 @@ pub(super) fn handle_client_tool_cancel(
         .runtime_dialogs
         .pick
         .as_ref()
-        .is_some_and(|dialog| dialog.id == cancellation.request_id);
+        .is_some_and(|dialog| dialog.id() == cancellation.request_id);
     if matches_active_dialog {
         app.overlays.runtime_dialogs.pick = None;
         let message = match cancellation.reason.as_str() {
@@ -659,7 +666,10 @@ mod tests {
                 tx,
             );
 
-            let pick = app.overlays.runtime_dialogs.pick.expect("pick dialog");
+            let Some(super::RuntimePickDialog::List(pick)) = app.overlays.runtime_dialogs.pick
+            else {
+                panic!("expected a choice list");
+            };
             assert_eq!(pick.message.as_deref(), Some("Pick a direction."));
             let ids = pick
                 .items

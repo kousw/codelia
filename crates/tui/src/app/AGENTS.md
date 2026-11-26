@@ -67,8 +67,10 @@
   Replace the local panel with one assignment and keep the other tiers independent.
   Runtime slots keep confirm > prompt > pick priority with `top()` for input and
   `visible_top()` for drawing so pending confirm keeps the underlying frame visible.
-  Onboarding model selection still uses `LocalPanel::ModelList` with the
-  `UiPick` submit action, and update and shell-rule pickers still use the pick slot.
+  The runtime pick slot owns onboarding model selection and its request ID.
+  Local model lists carry the scope for `model.set`. CLI update and shell-rule
+  pickers are local panels. Any open runtime dialog blocks update-choice
+  draw validation and makes the startup update picker yield.
 - `PendingRpcs` owns outgoing request metadata. Singleton slots keep the latest request, and `run.steer` supports multiple request IDs. Server-initiated choice IDs are tracked separately.
 - Route responses through goal handling, upload handling, `rpc_pending.take(&response.id)`, then the unmatched fallback. Goal tracking stays in `app.goal` and a pending `goal.continue` shares the `RunStart` slot.
 - `handlers` and `runtime/parser` should depend on `app::theme` / `app::markdown`, not `view/*`.

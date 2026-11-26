@@ -1,4 +1,5 @@
 use super::super::input::InputState;
+use super::model::ModelListPanelState;
 
 pub enum ConfirmSlot {
     Pending(ConfirmDialogState),
@@ -16,7 +17,7 @@ pub struct PromptSlot {
 pub enum RuntimeDialogRef<'a> {
     Confirm(&'a ConfirmSlot),
     Prompt(&'a PromptSlot),
-    Pick(&'a PickDialogState),
+    Pick(&'a RuntimePickDialog),
 }
 
 /// Independent slots keep lower-priority dialogs alive while another owns focus.
@@ -24,7 +25,7 @@ pub enum RuntimeDialogRef<'a> {
 pub struct RuntimeDialogs {
     pub confirm: Option<ConfirmSlot>,
     pub prompt: Option<PromptSlot>,
-    pub pick: Option<PickDialogState>,
+    pub pick: Option<RuntimePickDialog>,
 }
 
 impl RuntimeDialogs {
@@ -70,12 +71,6 @@ impl RuntimeDialogs {
                 self.confirm = other;
                 false
             }
-        }
-    }
-
-    pub fn confirm_state(&self) -> Option<&ConfirmDialogState> {
-        match self.confirm.as_ref()? {
-            ConfirmSlot::Pending(state) | ConfirmSlot::Active { state, .. } => Some(state),
         }
     }
 
@@ -126,7 +121,13 @@ pub struct PickDialogItem {
     pub detail: Option<String>,
 }
 
-pub struct PickDialogState {
+pub enum RuntimePickListKind {
+    Standard,
+    Approval { review_offset: Option<usize> },
+    ClientToolChoice,
+}
+
+pub struct RuntimePickList {
     pub id: String,
     pub title: String,
     pub message: Option<String>,
@@ -134,25 +135,24 @@ pub struct PickDialogState {
     pub selected: usize,
     pub multi: bool,
     pub chosen: Vec<bool>,
-    pub approval: bool,
-    pub review_offset: Option<usize>,
-    pub shell_rule_picker: Option<ShellRulePicker>,
-    pub(crate) local_update_picker: bool,
+    pub kind: RuntimePickListKind,
 }
 
-pub enum ShellRulePicker {
-    Trust {
-        trusted: bool,
-        workspace: String,
-        revision: String,
-        session_id: Option<String>,
+pub enum RuntimePickDialog {
+    List(RuntimePickList),
+    OnboardingModelList {
+        request_id: String,
+        panel: Box<ModelListPanelState>,
     },
-    Choose {
-        session_id: Option<String>,
-    },
-    Confirm {
-        session_id: Option<String>,
-    },
+}
+
+impl RuntimePickDialog {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::List(list) => &list.id,
+            Self::OnboardingModelList { request_id, .. } => request_id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,5 +1,5 @@
-use super::state::{LogKind, PickDialogItem, PickDialogState};
-use super::AppState;
+use super::state::{LogKind, PickDialogItem, UpdatePickerState};
+use super::{AppState, LocalPanel};
 use serde::Deserialize;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
@@ -188,20 +188,16 @@ pub(crate) fn open(app: &mut AppState, args: &str) {
     start(app, None);
 }
 
-pub(crate) fn finish_picker(app: &mut AppState, panel: PickDialogState, save: bool) {
+pub(crate) fn finish_picker(app: &mut AppState, panel: UpdatePickerState, save: bool) {
     if save {
         if let Some(mode) = Mode::ALL.get(panel.selected).copied() {
             start(app, Some(mode));
         }
     }
-    if is_startup_picker(&panel) {
+    if panel.startup {
         app.startup_confirmations
             .answer(super::startup_confirmations::StartupConfirmation::UpdateMode);
     }
-}
-
-pub(crate) fn is_startup_picker(panel: &PickDialogState) -> bool {
-    panel.local_update_picker && panel.id == STARTUP_PICKER_ID
 }
 
 pub(crate) fn poll(app: &mut AppState) -> bool {
@@ -236,7 +232,7 @@ pub(crate) fn poll(app: &mut AppState) -> bool {
             app.push_line(LogKind::Status, note);
         }
     } else if !app.has_interaction_panel() {
-        app.overlays.runtime_dialogs.pick = Some(build_picker(&status));
+        app.overlays.local_panel = Some(LocalPanel::UpdatePicker(build_picker(&status)));
     } else {
         app.push_line(
             LogKind::Status,
@@ -265,7 +261,7 @@ fn inline(value: &str) -> String {
         .collect()
 }
 
-fn build_picker(status: &Status) -> PickDialogState {
+fn build_picker(status: &Status) -> UpdatePickerState {
     let candidate = status
         .candidate
         .as_deref()
@@ -288,20 +284,28 @@ fn build_picker(status: &Status) -> PickDialogState {
         "Local CLI updates",
         message,
         status.saved_mode,
+        false,
     )
 }
 
-pub(crate) fn startup_picker() -> PickDialogState {
+pub(crate) fn startup_picker() -> UpdatePickerState {
     mode_picker(
         STARTUP_PICKER_ID,
         "Startup setup: CLI updates",
         "Choose how this CLI handles updates on future launches. Esc to decide later. Nothing is installed now.".to_string(),
         Mode::Notify,
+        true,
     )
 }
 
-fn mode_picker(id: &str, title: &str, message: String, selected: Mode) -> PickDialogState {
-    PickDialogState {
+fn mode_picker(
+    id: &str,
+    title: &str,
+    message: String,
+    selected: Mode,
+    startup: bool,
+) -> UpdatePickerState {
+    UpdatePickerState {
         id: id.to_string(),
         title: title.to_string(),
         message: Some(message),
@@ -317,12 +321,7 @@ fn mode_picker(id: &str, title: &str, message: String, selected: Mode) -> PickDi
             .iter()
             .position(|&mode| mode == selected)
             .unwrap_or(0),
-        multi: false,
-        chosen: Vec::new(),
-        approval: false,
-        review_offset: None,
-        shell_rule_picker: None,
-        local_update_picker: true,
+        startup,
     }
 }
 

@@ -6,9 +6,14 @@ mod render;
 mod suggestions;
 mod types;
 
-use crate::app::{AppState, ConfirmSlot, LocalPanel, RuntimeDialogRef};
+use crate::app::{
+    AppState, ConfirmSlot, LocalPanel, RuntimeDialogRef, RuntimePickDialog, RuntimePickListKind,
+};
 
-use dialogs::{build_confirm_panel_view, build_pick_panel_view, build_prompt_panel_view};
+use dialogs::{
+    build_confirm_panel_view, build_lane_action_picker_view, build_prompt_panel_view,
+    build_runtime_pick_list_view, build_shell_rule_picker_view, build_update_picker_view,
+};
 use lists::{
     build_context_panel_view, build_lane_list_panel_view, build_session_list_panel_view,
     build_skills_list_panel_view, build_theme_list_panel_view,
@@ -29,13 +34,21 @@ pub(super) fn render_composer_panel(
     max_lines: u16,
     width: usize,
 ) -> Vec<ratatui::text::Line<'static>> {
-    if let Some(RuntimeDialogRef::Pick(pick)) = app.overlays.runtime_dialogs.visible_top() {
-        if pick.approval {
-            return dialogs::render_approval_pick(pick, view, max_lines, width);
+    match app.overlays.runtime_dialogs.visible_top() {
+        Some(RuntimeDialogRef::Pick(RuntimePickDialog::List(pick))) => {
+            if let RuntimePickListKind::Approval { review_offset } = pick.kind {
+                return dialogs::render_approval_pick(pick, review_offset, view, max_lines, width);
+            }
         }
-        if let Some(details) = dialogs::render_shell_rule_details(pick, max_lines, width) {
-            return details;
+        None => {
+            if let Some(LocalPanel::ShellRulePicker(picker)) = &app.overlays.local_panel {
+                if let Some(details) = dialogs::render_shell_rule_details(picker, max_lines, width)
+                {
+                    return details;
+                }
+            }
         }
+        _ => {}
     }
     build_panel_render(view, max_lines, width)
 }
@@ -48,7 +61,12 @@ pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
                 Some(build_confirm_panel_view(state))
             }
             RuntimeDialogRef::Prompt(prompt) => Some(build_prompt_panel_view(&prompt.state)),
-            RuntimeDialogRef::Pick(pick) => Some(build_pick_panel_view(pick)),
+            RuntimeDialogRef::Pick(RuntimePickDialog::List(pick)) => {
+                Some(build_runtime_pick_list_view(pick))
+            }
+            RuntimeDialogRef::Pick(RuntimePickDialog::OnboardingModelList { panel, .. }) => {
+                Some(build_model_list_panel_view(panel))
+            }
         };
     }
 
@@ -58,7 +76,7 @@ pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
         Some(LocalPanel::Context(panel)) => Some(build_context_panel_view(panel)),
         Some(LocalPanel::SkillsList(panel)) => Some(build_skills_list_panel_view(panel)),
         Some(LocalPanel::ThemeList(panel)) => Some(build_theme_list_panel_view(panel)),
-        Some(LocalPanel::ModelList(panel)) => Some(build_model_list_panel_view(panel)),
+        Some(LocalPanel::ModelList { panel, .. }) => Some(build_model_list_panel_view(panel)),
         Some(LocalPanel::ProviderPicker(picker)) => Some(build_picker_panel_view(
             "Select provider".to_string(),
             &picker.providers,
@@ -91,6 +109,9 @@ pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
             ))
         }
 
+        Some(LocalPanel::UpdatePicker(picker)) => Some(build_update_picker_view(picker)),
+        Some(LocalPanel::ShellRulePicker(picker)) => Some(build_shell_rule_picker_view(picker)),
+        Some(LocalPanel::LaneActionPicker(picker)) => Some(build_lane_action_picker_view(picker)),
         None => build_queue_panel_view(app)
             .or_else(|| build_command_panel_view(app))
             .or_else(|| build_skill_suggestion_panel_view(app))

@@ -1,9 +1,6 @@
 use super::formatters::truncate_text;
 use crate::app::runtime::UiPickRequest;
-use crate::app::{
-    ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelSetScope,
-    SessionListPanelState,
-};
+use crate::app::{ModelListPanelState, ModelListViewMode, SessionListPanelState};
 
 pub(super) fn parse_onboarding_model_provider(title: &str) -> Option<String> {
     let prefix = "Select model (";
@@ -62,7 +59,6 @@ pub(super) fn build_onboarding_model_list_panel(
     let mut rows_limits = Vec::new();
     let mut rows_cost = Vec::new();
     let mut model_ids = Vec::new();
-    let mut pick_item_ids = Vec::new();
 
     for item in &request.items {
         name_width = name_width.max(item.label.len());
@@ -77,8 +73,7 @@ pub(super) fn build_onboarding_model_list_panel(
             "  {:<name_width$}  {:>cost_input_width$}  {:>cost_output_width$}",
             item.label, cost_in, cost_out,
         ));
-        model_ids.push(item.label.clone());
-        pick_item_ids.push(item.id.clone());
+        model_ids.push(item.id.clone());
     }
 
     let header_limits = format!(
@@ -96,13 +91,9 @@ pub(super) fn build_onboarding_model_list_panel(
         rows_limits,
         header_cost,
         rows_cost,
-        model_ids,
+        item_ids: model_ids,
         selected: 0,
         view_mode: ModelListViewMode::Limits,
-        submit_action: ModelListSubmitAction::UiPick {
-            request_id: request.id.clone(),
-            item_ids: pick_item_ids,
-        },
     })
 }
 
@@ -189,7 +180,6 @@ pub(super) fn build_model_list_panel(
     models: Vec<String>,
     details: Option<&std::collections::BTreeMap<String, crate::protocol::ModelListDetails>>,
     current: Option<&str>,
-    scope: ModelSetScope,
 ) -> ModelListPanelState {
     let format_usd = |value: Option<f64>| -> String {
         match value {
@@ -283,9 +273,8 @@ pub(super) fn build_model_list_panel(
         rows_limits: rendered_rows_limits,
         header_cost,
         rows_cost: rendered_rows_cost,
-        model_ids,
+        item_ids: model_ids,
         selected,
         view_mode: ModelListViewMode::Limits,
-        submit_action: ModelListSubmitAction::ModelSet { scope },
     }
 }

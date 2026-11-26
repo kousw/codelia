@@ -8,7 +8,7 @@ mod text;
 
 use crate::app::log_wrap::{cached_wrap_log_lines, selected_cell_ranges_for_row};
 use crate::app::theme::ui_colors;
-use crate::app::{AppState, RuntimeDialogRef, SelectionProjectionId, SyncPhase, TranscriptHitMap};
+use crate::app::{AppState, LocalPanel, SelectionProjectionId, SyncPhase, TranscriptHitMap};
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Text};
@@ -54,12 +54,12 @@ fn drawn_update_choice(
     app: &AppState,
     panel: Rect,
 ) -> Option<(String, usize)> {
-    let Some(RuntimeDialogRef::Pick(picker)) = app.overlays.runtime_dialogs.top() else {
-        return None;
-    };
-    if !picker.local_update_picker {
+    if app.overlays.runtime_dialogs.is_any_open() {
         return None;
     }
+    let Some(LocalPanel::UpdatePicker(picker)) = &app.overlays.local_panel else {
+        return None;
+    };
     let item = picker.items.get(picker.selected)?;
     // Verify the full ASCII option label and its selection marker in the cells
     // actually drawn, after wrapping and clipping. Composer text does not count.

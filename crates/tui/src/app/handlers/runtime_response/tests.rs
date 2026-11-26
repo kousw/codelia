@@ -13,7 +13,7 @@ use crate::app::runtime::{AgentMsg, MockRuntimeTx, RunControlMsg, RuntimeMsg, Ru
 use crate::app::state::{LogKind, LogLine};
 use crate::app::{
     AppState, ConfirmSlot, LocalPanel, LogComponentSpan, PasteTarget, PendingPromptRun, PendingRpc,
-    PendingRpcSlot, RuntimeDialogRef,
+    PendingRpcSlot, RuntimeDialogRef, RuntimePickDialog,
 };
 use crate::event_loop::input::{handle_non_main_key, handle_paste};
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -616,7 +616,7 @@ fn client_tool_timeout_clears_matching_choice_dialog_and_pending_id() {
                 .runtime_dialogs
                 .pick
                 .as_ref()
-                .map(|dialog| dialog.id.as_str()),
+                .map(RuntimePickDialog::id),
             Some("ui_choice_1")
         );
         assert!(app
@@ -705,7 +705,7 @@ fn confirm_preempts_client_choice_and_reveals_the_same_selection_on_close() {
     assert_eq!(tx.sent[0]["result"]["ok"], true);
     assert!(matches!(
         app.overlays.runtime_dialogs.top(),
-        Some(RuntimeDialogRef::Pick(pick)) if pick.id == "choice" && pick.selected == 1
+        Some(RuntimeDialogRef::Pick(RuntimePickDialog::List(pick))) if pick.id == "choice" && pick.selected == 1
     ));
 
     assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(true));
@@ -832,7 +832,7 @@ fn stale_client_tool_cancel_leaves_active_choice_untouched() {
                 .runtime_dialogs
                 .pick
                 .as_ref()
-                .map(|dialog| dialog.id.as_str()),
+                .map(RuntimePickDialog::id),
             Some("ui_choice_active")
         );
         assert!(app
@@ -2172,7 +2172,9 @@ fn pending_or_active_confirm_over_update_picker_clears_drawn_update_choice() {
     let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
     let mut app = AppState::default();
     let mut tx = MockRuntimeTx::default();
-    app.overlays.runtime_dialogs.pick = Some(crate::app::self_update::startup_picker());
+    app.overlays.local_panel = Some(LocalPanel::UpdatePicker(
+        crate::app::self_update::startup_picker(),
+    ));
 
     terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
     assert!(app.render_state.drawn_update_choice.is_some());
@@ -2193,6 +2195,63 @@ fn pending_or_active_confirm_over_update_picker_clears_drawn_update_choice() {
     assert!(activate_pending_confirm_dialog(&mut app));
     terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
     assert!(app.render_state.drawn_update_choice.is_none());
+}
+
+#[test]
+fn runtime_pick_or_prompt_over_update_picker_clears_drawn_update_choice() {
+    use crate::app::view::draw_ui;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    for request in [
+        pick_request("Pick"),
+        parse_runtime_output(
+            r#"{"jsonrpc":"2.0","id":"prompt","method":"ui.prompt.request","params":{"title":"Prompt","message":"Enter value"}}"#,
+        ),
+    ] {
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        let mut app = AppState::default();
+        let mut tx = MockRuntimeTx::default();
+        app.overlays.local_panel = Some(LocalPanel::UpdatePicker(
+            crate::app::self_update::startup_picker(),
+        ));
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+        assert!(app.render_state.drawn_update_choice.is_some());
+
+        assert!(apply_runtime_msg(&mut app, request, &mut tx));
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+        assert!(app.render_state.drawn_update_choice.is_none());
+        assert!(matches!(
+            app.overlays.local_panel,
+            Some(LocalPanel::UpdatePicker(_))
+        ));
+    }
+}
+
+#[test]
+fn startup_update_picker_yields_and_reopens_after_runtime_pick() {
+    use crate::app::startup_confirmations::{self, StartupConfirmations};
+
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    app.startup_confirmations = StartupConfirmations::from_list(&["update-mode".into()]);
+    assert!(startup_confirmations::poll(&mut app));
+
+    assert!(apply_runtime_msg(&mut app, pick_request("Pick"), &mut tx));
+    assert!(startup_confirmations::poll(&mut app));
+    assert!(app.overlays.local_panel.is_none());
+    assert!(!startup_confirmations::poll(&mut app));
+    assert!(app.startup_confirmations.is_pending());
+
+    let cancellation = parse_runtime_output(
+        r#"{"jsonrpc":"2.0","method":"ui.pick.cancelled","params":{"id":"runtime-pick"}}"#,
+    );
+    assert!(apply_runtime_msg(&mut app, cancellation, &mut tx));
+    assert!(startup_confirmations::poll(&mut app));
+    assert!(matches!(
+        &app.overlays.local_panel,
+        Some(LocalPanel::UpdatePicker(picker)) if picker.startup
+    ));
+    assert!(tx.sent.is_empty());
 }
 
 #[test]
@@ -2381,7 +2440,7 @@ fn client_context_panels_replace_local_panel_and_preserve_other_tiers() {
         ));
         assert_eq!(dialogs.prompt.as_ref().unwrap().state.id, "prompt");
         assert_eq!(dialogs.prompt.as_ref().unwrap().input.current(), "draft");
-        assert_eq!(dialogs.pick.as_ref().unwrap().id, "pick");
+        assert_eq!(dialogs.pick.as_ref().unwrap().id(), "pick");
         let queue_focus = app.overlays.queue_focus.as_ref().unwrap();
         assert_eq!(queue_focus.run_id, "run-1");
         assert_eq!(queue_focus.queue_id, "q1");
@@ -2389,55 +2448,203 @@ fn client_context_panels_replace_local_panel_and_preserve_other_tiers() {
     }
 }
 
-#[test]
-fn onboarding_model_pick_survives_delayed_session_list_and_replies_once() {
-    use crate::event_loop::input::handle_non_main_key;
-    use crossterm::event::{KeyCode, KeyModifiers};
-
-    let mut app = AppState::default();
-    let mut tx = MockRuntimeTx::default();
-
-    let pick = parse_runtime_output(
+fn pick_request(title: &str) -> RuntimeMsg {
+    parse_runtime_output(
         &json!({
             "jsonrpc": "2.0",
-            "id": "pick-onboard",
+            "id": "runtime-pick",
             "method": "ui.pick.request",
             "params": {
-                "title": "Select model (openai)",
-                "items": [
-                    { "id": "gpt-6-luna", "label": "gpt-6-luna", "detail": "ctx=128K | in=$1" }
-                ]
+                "title": title,
+                "items": [{ "id": "model-id", "label": "Display Model" }]
             }
         })
         .to_string(),
-    );
-    assert!(apply_runtime_msg(&mut app, pick, &mut tx));
-    assert!(app.overlays.has_onboarding_model_pick());
+    )
+}
 
-    // Delayed session.list response must not clobber the onboarding pick.
+fn ask_user_choice_request() -> RuntimeMsg {
+    parse_runtime_output(
+        r#"{"jsonrpc":"2.0","id":"client-choice","method":"client.tool.call","params":{"run_id":"run-1","name":"tui_ask_user_choice","arguments":{"title":"Choose next","choices":[{"id":"continue","label":"Continue"}]},"raw_arguments":"{}"}}"#,
+    )
+}
+
+#[test]
+fn onboarding_model_pick_cancels_only_on_matching_id() {
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    assert!(apply_runtime_msg(
+        &mut app,
+        pick_request("Select model (openai)"),
+        &mut tx
+    ));
+
+    for id in ["stale-pick", "runtime-pick"] {
+        let cancellation = parse_runtime_output(
+            &json!({"jsonrpc":"2.0","method":"ui.pick.cancelled","params":{"id":id}}).to_string(),
+        );
+        assert!(apply_runtime_msg(&mut app, cancellation, &mut tx));
+        if id == "stale-pick" {
+            assert!(matches!(
+                app.overlays.runtime_dialogs.pick,
+                Some(RuntimePickDialog::OnboardingModelList { ref request_id, .. })
+                    if request_id == "runtime-pick"
+            ));
+        } else {
+            assert!(app.overlays.runtime_dialogs.pick.is_none());
+        }
+    }
+    assert!(tx.sent.is_empty());
+}
+
+#[test]
+fn onboarding_model_pick_survives_local_panel_replacements_and_replies_once() {
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    assert!(apply_runtime_msg(
+        &mut app,
+        pick_request("Select model (openai)"),
+        &mut tx
+    ));
+    assert!(matches!(
+        app.overlays.runtime_dialogs.pick,
+        Some(RuntimePickDialog::OnboardingModelList { .. })
+    ));
+
     app.rpc_pending.insert(
         "sess-list".to_owned(),
         PendingRpc::SessionList { show_all: false },
     );
-    let sess_resp = parse_runtime_output(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "sess-list",
-            "result": { "sessions": [] }
-        })
-        .to_string(),
-    );
-    assert!(apply_runtime_msg(&mut app, sess_resp, &mut tx));
-    assert!(app.overlays.has_onboarding_model_pick());
+    let session_list =
+        parse_runtime_output(r#"{"jsonrpc":"2.0","id":"sess-list","result":{"sessions":[]}}"#);
+    assert!(apply_runtime_msg(&mut app, session_list, &mut tx));
+    assert!(matches!(
+        app.overlays.local_panel,
+        Some(LocalPanel::SessionList(_))
+    ));
 
-    // Pressing Enter submits the onboarding pick reply once with the original ID.
+    let selector = parse_runtime_output(
+        r#"{"jsonrpc":"2.0","id":"selector","method":"client.tool.call","params":{"run_id":"run-1","name":"tui_open_selector","arguments":{"items":[{"label":"Option A"}]},"raw_arguments":"{}"}}"#,
+    );
+    assert!(apply_runtime_msg(&mut app, selector, &mut tx));
+    assert!(matches!(
+        app.overlays.local_panel,
+        Some(LocalPanel::Context(_))
+    ));
+    assert_eq!(tx.sent[0]["id"], "selector");
+    assert_eq!(tx.sent[0]["result"]["ok"], true);
+
     assert_eq!(
         handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
         Some(true)
     );
-    assert_eq!(tx.sent.len(), 1);
-    assert_eq!(tx.sent[0]["id"], "pick-onboard");
-    assert_eq!(tx.sent[0]["result"]["ids"], json!(["gpt-6-luna"]));
+    assert!(app.overlays.runtime_dialogs.pick.is_none());
+    assert!(matches!(
+        app.overlays.local_panel,
+        Some(LocalPanel::Context(_))
+    ));
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        Some(true)
+    );
+    assert_eq!(tx.sent.len(), 2);
+    assert_eq!(tx.sent[1]["id"], "runtime-pick");
+    assert_eq!(tx.sent[1]["result"]["ids"], json!(["model-id"]));
+}
+
+#[test]
+fn runtime_pick_rejects_later_client_tool_choice() {
+    for title in ["Pick", "Select model (openai)"] {
+        let mut app = AppState::default();
+        let mut tx = MockRuntimeTx::default();
+        assert!(apply_runtime_msg(&mut app, pick_request(title), &mut tx));
+        assert!(apply_runtime_msg(
+            &mut app,
+            ask_user_choice_request(),
+            &mut tx
+        ));
+        assert_eq!(tx.sent.len(), 1);
+        assert_eq!(tx.sent[0]["id"], "client-choice");
+        assert_eq!(tx.sent[0]["result"]["error"], "pick dialog is busy");
+        assert!(app.rpc_pending.client_tool_choice_ids.is_empty());
+        assert_eq!(
+            app.overlays.runtime_dialogs.pick.as_ref().unwrap().id(),
+            "runtime-pick"
+        );
+    }
+}
+
+#[test]
+fn runtime_pick_declines_and_untracks_displaced_client_tool_choice() {
+    for title in ["Pick", "Select model (openai)"] {
+        let mut app = AppState::default();
+        let mut tx = MockRuntimeTx::default();
+        assert!(apply_runtime_msg(
+            &mut app,
+            ask_user_choice_request(),
+            &mut tx
+        ));
+        assert!(tx.sent.is_empty());
+        assert!(app
+            .rpc_pending
+            .client_tool_choice_ids
+            .contains("client-choice"));
+
+        assert!(apply_runtime_msg(&mut app, pick_request(title), &mut tx));
+        assert!(app.rpc_pending.client_tool_choice_ids.is_empty());
+        assert_eq!(tx.sent.len(), 1);
+        assert_eq!(tx.sent[0]["id"], "client-choice");
+        assert_eq!(tx.sent[0]["result"]["error"], "choice superseded");
+        assert_eq!(
+            app.overlays.runtime_dialogs.pick.as_ref().unwrap().id(),
+            "runtime-pick"
+        );
+
+        let cancellation = parse_runtime_output(
+            r#"{"jsonrpc":"2.0","method":"client.tool.cancel","params":{"request_id":"client-choice","run_id":"run-1","name":"tui_ask_user_choice","reason":"timeout"}}"#,
+        );
+        assert!(apply_runtime_msg(&mut app, cancellation, &mut tx));
+        assert_eq!(
+            handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+            Some(true)
+        );
+        assert_eq!(tx.sent.len(), 2);
+        assert_eq!(tx.sent[1]["id"], "runtime-pick");
+        assert_eq!(tx.sent[1]["result"]["ids"], json!(["model-id"]));
+    }
+}
+
+#[test]
+fn local_update_and_shell_rule_pickers_block_client_tool_choice() {
+    use crate::app::state::{ShellRulePicker, ShellRulePickerState};
+
+    let panels = [
+        LocalPanel::UpdatePicker(crate::app::self_update::startup_picker()),
+        LocalPanel::ShellRulePicker(ShellRulePickerState {
+            title: "Rules".into(),
+            message: None,
+            items: vec![],
+            selected: 0,
+            kind: ShellRulePicker::Choose { session_id: None },
+            review_offset: None,
+        }),
+    ];
+    for panel in panels {
+        let mut app = AppState::default();
+        let mut tx = MockRuntimeTx::default();
+        app.overlays.local_panel = Some(panel);
+        assert!(apply_runtime_msg(
+            &mut app,
+            ask_user_choice_request(),
+            &mut tx
+        ));
+        assert_eq!(tx.sent.len(), 1);
+        assert_eq!(tx.sent[0]["id"], "client-choice");
+        assert_eq!(tx.sent[0]["result"]["error"], "pick dialog is busy");
+        assert!(app.overlays.runtime_dialogs.pick.is_none());
+        assert!(app.overlays.local_panel.is_some());
+        assert!(app.rpc_pending.client_tool_choice_ids.is_empty());
+    }
 }
 
 #[test]
@@ -2496,4 +2703,229 @@ fn silent_model_list_preserves_open_skills_panel_and_alt_v_does_not_type_into_sk
     };
     assert_eq!(panel.search_query, "al");
     assert_eq!(panel.selected, 0);
+}
+
+#[test]
+fn ui_pick_cancelled_does_not_close_client_tool_choice_even_with_matching_id() {
+    use crate::event_loop::input::handle_non_main_key;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    assert!(apply_runtime_msg(
+        &mut app,
+        ask_user_choice_request(),
+        &mut tx
+    ));
+    assert!(app.overlays.runtime_dialogs.pick.is_some());
+
+    // A server ui.pick.cancelled must never cancel a ClientToolChoice (which belongs to client.tool.cancel).
+    let cancelled = parse_runtime_output(
+        r#"{"jsonrpc":"2.0","method":"ui.pick.cancelled","params":{"id":"client-choice"}}"#,
+    );
+    assert!(apply_runtime_msg(&mut app, cancelled, &mut tx));
+    assert!(app.overlays.runtime_dialogs.pick.is_some());
+    assert!(app
+        .rpc_pending
+        .client_tool_choice_ids
+        .contains("client-choice"));
+
+    // User can still answer the client tool choice normally.
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        Some(true)
+    );
+    assert_eq!(tx.sent.len(), 1);
+    assert_eq!(tx.sent[0]["id"], "client-choice");
+    assert_eq!(tx.sent[0]["result"]["ok"], true);
+    assert_eq!(
+        tx.sent[0]["result"]["result"]["value"]["selected_id"],
+        "continue"
+    );
+}
+
+#[test]
+fn overlapping_ui_pick_request_keeps_first_open_and_declines_second() {
+    use crate::event_loop::input::handle_non_main_key;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+
+    let first = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "pick-1",
+            "method": "ui.pick.request",
+            "params": {
+                "title": "First pick",
+                "items": [{ "id": "one", "label": "One" }],
+                "multi": false
+            }
+        })
+        .to_string(),
+    );
+    let second = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "pick-2",
+            "method": "ui.pick.request",
+            "params": {
+                "title": "Second pick",
+                "items": [{ "id": "two", "label": "Two" }],
+                "multi": false
+            }
+        })
+        .to_string(),
+    );
+
+    assert!(apply_runtime_msg(&mut app, first, &mut tx));
+    assert!(tx.sent.is_empty());
+
+    // Second server pick is declined immediately; first remains active and answerable.
+    assert!(apply_runtime_msg(&mut app, second, &mut tx));
+    assert_eq!(tx.sent.len(), 1);
+    assert_eq!(tx.sent[0]["id"], "pick-2");
+    assert_eq!(tx.sent[0]["result"]["ids"], json!([]));
+    assert_eq!(
+        app.overlays.runtime_dialogs.pick.as_ref().unwrap().id(),
+        "pick-1"
+    );
+
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        Some(true)
+    );
+    assert_eq!(tx.sent.len(), 2);
+    assert_eq!(tx.sent[1]["id"], "pick-1");
+    assert_eq!(tx.sent[1]["result"]["ids"], json!(["one"]));
+}
+
+#[test]
+fn local_lane_action_picker_esc_sends_no_rpc_and_survives_runtime_dialog_preemption() {
+    use crate::app::state::{LaneActionPickerState, PickDialogItem};
+    use crate::event_loop::input::handle_non_main_key;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    app.overlays.local_panel = Some(LocalPanel::LaneActionPicker(LaneActionPickerState {
+        lane_id: "lane-1".into(),
+        title: "Lane: lane-1".into(),
+        items: vec![PickDialogItem {
+            id: "focus".into(),
+            label: "Focus".into(),
+            detail: None,
+        }],
+        selected: 0,
+    }));
+
+    // A runtime prompt preempts without clobbering the local lane action picker.
+    let prompt = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "prompt-1",
+            "method": "ui.prompt.request",
+            "params": { "title": "Token", "message": "Enter token" }
+        })
+        .to_string(),
+    );
+    assert!(apply_runtime_msg(&mut app, prompt, &mut tx));
+    assert!(matches!(
+        app.overlays.local_panel,
+        Some(LocalPanel::LaneActionPicker(_))
+    ));
+
+    // Dismissing the runtime prompt reveals the local lane action picker again.
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut tx),
+        Some(true)
+    );
+    assert_eq!(tx.sent.len(), 1);
+    assert_eq!(tx.sent[0]["id"], "prompt-1");
+    assert!(matches!(
+        app.overlays.local_panel,
+        Some(LocalPanel::LaneActionPicker(_))
+    ));
+
+    // Esc on local LaneActionPicker closes it without sending any RPC.
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut tx),
+        Some(true)
+    );
+    assert!(app.overlays.local_panel.is_none());
+    assert_eq!(tx.sent.len(), 1);
+}
+
+#[test]
+fn local_update_and_shell_rule_pickers_block_selector_and_preview_client_tools() {
+    use crate::app::state::{ShellRulePicker, ShellRulePickerState};
+
+    let selector_req = || {
+        parse_runtime_output(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": "client-selector",
+                "method": "client.tool.call",
+                "params": {
+                    "run_id": "run-1",
+                    "name": "tui_open_selector",
+                    "arguments": {
+                        "title": "Select",
+                        "items": [{ "id": "a", "label": "Alpha" }]
+                    }
+                }
+            })
+            .to_string(),
+        )
+    };
+    let preview_req = || {
+        parse_runtime_output(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": "client-preview",
+                "method": "client.tool.call",
+                "params": {
+                    "run_id": "run-1",
+                    "name": "tui_preview_artifact",
+                    "arguments": {
+                        "title": "Preview",
+                        "content": "hello"
+                    }
+                }
+            })
+            .to_string(),
+        )
+    };
+
+    for make_panel in [
+        || LocalPanel::UpdatePicker(crate::app::self_update::startup_picker()),
+        || {
+            LocalPanel::ShellRulePicker(ShellRulePickerState {
+                title: "Rules".into(),
+                message: None,
+                items: vec![],
+                selected: 0,
+                kind: ShellRulePicker::Choose { session_id: None },
+                review_offset: None,
+            })
+        },
+    ] {
+        for (req, expected_id) in [
+            (selector_req(), "client-selector"),
+            (preview_req(), "client-preview"),
+        ] {
+            let mut app = AppState::default();
+            let mut tx = MockRuntimeTx::default();
+            app.overlays.local_panel = Some(make_panel());
+            assert!(apply_runtime_msg(&mut app, req, &mut tx));
+            assert_eq!(tx.sent.len(), 1);
+            assert_eq!(tx.sent[0]["id"], expected_id);
+            assert_eq!(tx.sent[0]["result"]["error"], "pick dialog is busy");
+            assert!(matches!(
+                app.overlays.local_panel,
+                Some(LocalPanel::UpdatePicker(_) | LocalPanel::ShellRulePicker(_))
+            ));
+        }
+    }
 }
