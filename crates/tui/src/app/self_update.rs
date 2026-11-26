@@ -104,7 +104,7 @@ impl LauncherPaths {
     }
 }
 
-fn request(app: &mut AppState, action: UpdateControlAction) -> Option<Effect> {
+fn ready_launcher(app: &mut AppState) -> Option<&LauncherPaths> {
     if app.pending_update_control.is_some() {
         app.push_line(
             LogKind::Status,
@@ -119,22 +119,16 @@ fn request(app: &mut AppState, action: UpdateControlAction) -> Option<Effect> {
         );
         return None;
     }
+    app.update_control_launcher.as_ref()
+}
+
+fn request(app: &mut AppState, action: UpdateControlAction) -> Option<Effect> {
+    ready_launcher(app)?;
     Some(Effect::StartUpdateControl(action))
 }
 
 pub(crate) fn start(app: &mut AppState, action: UpdateControlAction) {
-    if app.pending_update_control.is_some() {
-        app.push_line(
-            LogKind::Status,
-            "An update settings request is already in progress.",
-        );
-        return;
-    }
-    let Some(paths) = &app.update_control_launcher else {
-        app.push_line(
-            LogKind::Error,
-            "Update settings require launching the TUI with codelia.",
-        );
+    let Some(paths) = ready_launcher(app) else {
         return;
     };
     let mut command = Command::new(&paths.node);

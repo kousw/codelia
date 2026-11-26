@@ -154,6 +154,83 @@ impl LoopIo<TerminalBackend> for ProductionIo<'_> {
     }
 }
 
+struct LoopState {
+    needs_redraw: bool,
+    exit: ExitAction,
+    pending_mouse_capture: Option<Effect>,
+    update_choice_size: Option<ratatui::layout::Size>,
+    last_memory_sample_at: Instant,
+}
+
+impl LoopState {
+    fn new(now: Instant) -> Self {
+        Self {
+            needs_redraw: true,
+            exit: ExitAction::None,
+            pending_mouse_capture: None,
+            update_choice_size: None,
+            last_memory_sample_at: now - DEBUG_PERF_MEMORY_SAMPLE_INTERVAL,
+        }
+    }
+
+    fn apply<B: Backend, I: LoopIo<B>>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        app: &mut AppState,
+        tx: &mut dyn RuntimeTx,
+        io: &mut I,
+        result: UpdateResult,
+    ) -> bool {
+        if result.exit == ExitAction::ExitNow {
+            self.exit = ExitAction::ExitNow;
+            return true;
+        }
+        if result.exit == ExitAction::DrawThenExit {
+            self.exit = ExitAction::DrawThenExit;
+        }
+        self.needs_redraw |= result.needs_redraw;
+        for effect in result.effects {
+            if matches!(effect, Effect::SetMouseCapture(_)) {
+                // Keep terminal mode writes next to the draw they affect.
+                self.pending_mouse_capture = Some(effect);
+            } else {
+                self.execute_effect(terminal, app, tx, io, effect);
+            }
+        }
+        false
+    }
+
+    fn execute_effect<B: Backend, I: LoopIo<B>>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        app: &mut AppState,
+        tx: &mut dyn RuntimeTx,
+        io: &mut I,
+        effect: Effect,
+    ) {
+        if let Some(completion) = io.execute(terminal, app, effect) {
+            let nested = update(app, Msg::Local(completion), tx);
+            debug_assert!(nested.effects.is_empty());
+            if nested.exit != ExitAction::None {
+                self.exit = nested.exit;
+            }
+            self.needs_redraw |= nested.needs_redraw;
+        }
+    }
+
+    fn dispatch<B: Backend, I: LoopIo<B>>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        app: &mut AppState,
+        tx: &mut dyn RuntimeTx,
+        io: &mut I,
+        msg: Msg<'_>,
+    ) -> bool {
+        let result = update(app, msg, tx);
+        self.apply(terminal, app, tx, io, result)
+    }
+}
+
 fn run_loop<B: Backend, I: LoopIo<B>>(
     app: &mut AppState,
     terminal: &mut Terminal<B>,
@@ -167,166 +244,79 @@ where
     B::Error: 'static,
 {
     app.last_ctrl_c_at = None;
-    let mut needs_redraw = true;
-    let mut exit = ExitAction::None;
-    let mut pending_mouse_capture = None;
-    let mut update_choice_size = None;
-    let mut last_memory_sample_at = io.now() - DEBUG_PERF_MEMORY_SAMPLE_INTERVAL;
-
-    let apply_result = |terminal: &mut Terminal<B>,
-                        app: &mut AppState,
-                        tx: &mut dyn RuntimeTx,
-                        io: &mut I,
-                        pending_mouse_capture: &mut Option<Effect>,
-                        needs_redraw: &mut bool,
-                        exit: &mut ExitAction,
-                        result: UpdateResult|
-     -> bool {
-        if result.exit == ExitAction::ExitNow {
-            *exit = ExitAction::ExitNow;
-            return true;
-        }
-        if result.exit == ExitAction::DrawThenExit {
-            *exit = ExitAction::DrawThenExit;
-        }
-        *needs_redraw |= result.needs_redraw;
-        for effect in result.effects {
-            if matches!(effect, Effect::SetMouseCapture(_)) {
-                // Keep terminal mode writes next to the draw they affect.
-                *pending_mouse_capture = Some(effect);
-            } else if let Some(completion) = io.execute(terminal, app, effect) {
-                let nested = update(app, Msg::Local(completion), tx);
-                debug_assert!(nested.effects.is_empty());
-                if nested.exit != ExitAction::None {
-                    *exit = nested.exit;
-                }
-                *needs_redraw |= nested.needs_redraw;
-            }
-        }
-        false
-    };
+    let mut state = LoopState::new(io.now());
 
     loop {
-        needs_redraw |= drain_runtime_messages(app, rx, tx, |app, msg, tx| {
+        state.needs_redraw |= drain_runtime_messages(app, rx, tx, |app, msg, tx| {
             let result = update(app, Msg::Runtime(msg), tx);
             let redraw = result.needs_redraw;
-            let _ = apply_result(
-                terminal,
-                app,
-                tx,
-                io,
-                &mut pending_mouse_capture,
-                &mut needs_redraw,
-                &mut exit,
-                result,
-            );
+            let _ = state.apply(terminal, app, tx, io, result);
             redraw
         });
-        let result = update(app, Msg::Local(LocalMsg::PollImagePreview), tx);
-        let _ = apply_result(
+        let _ = state.dispatch(
             terminal,
             app,
             tx,
             io,
-            &mut pending_mouse_capture,
-            &mut needs_redraw,
-            &mut exit,
-            result,
+            Msg::Local(LocalMsg::PollImagePreview),
         );
         if let Some(completion) = self_update::poll(app) {
-            let result = update(app, Msg::Local(LocalMsg::UpdateControl(completion)), tx);
-            let _ = apply_result(
+            let _ = state.dispatch(
                 terminal,
                 app,
                 tx,
                 io,
-                &mut pending_mouse_capture,
-                &mut needs_redraw,
-                &mut exit,
-                result,
+                Msg::Local(LocalMsg::UpdateControl(completion)),
             );
         }
-        let result = update(app, Msg::Local(LocalMsg::PollStartupConfirmations), tx);
-        let _ = apply_result(
+        let _ = state.dispatch(
             terminal,
             app,
             tx,
             io,
-            &mut pending_mouse_capture,
-            &mut needs_redraw,
-            &mut exit,
-            result,
+            Msg::Local(LocalMsg::PollStartupConfirmations),
         );
         for (marker, result) in app.clipboard_import.poll() {
-            let result = update(
-                app,
-                Msg::Local(LocalMsg::ClipboardImported { marker, result }),
-                tx,
-            );
-            let _ = apply_result(
+            let _ = state.dispatch(
                 terminal,
                 app,
                 tx,
                 io,
-                &mut pending_mouse_capture,
-                &mut needs_redraw,
-                &mut exit,
-                result,
+                Msg::Local(LocalMsg::ClipboardImported { marker, result }),
             );
         }
 
         let startup_pending = app.startup_confirmations.is_pending();
-        let result = update(
-            app,
-            Msg::PreDrawTick {
-                startup_pending,
-                pending_initial_message,
-            },
-            tx,
-        );
-        let _ = apply_result(
+        let _ = state.dispatch(
             terminal,
             app,
             tx,
             io,
-            &mut pending_mouse_capture,
-            &mut needs_redraw,
-            &mut exit,
-            result,
+            Msg::PreDrawTick {
+                startup_pending,
+                pending_initial_message,
+            },
         );
-        if exit == ExitAction::None {
+        if state.exit == ExitAction::ExitNow {
+            break;
+        }
+        if state.exit == ExitAction::None {
             if let Some(status) = io.child_exit() {
-                let result = update(app, Msg::Local(LocalMsg::RuntimeExited(status)), tx);
-                let _ = apply_result(
+                let _ = state.dispatch(
                     terminal,
                     app,
                     tx,
                     io,
-                    &mut pending_mouse_capture,
-                    &mut needs_redraw,
-                    &mut exit,
-                    result,
+                    Msg::Local(LocalMsg::RuntimeExited(status)),
                 );
             }
         }
 
-        if let Some(effect) = pending_mouse_capture.take() {
-            if let Some(completion) = io.execute(terminal, app, effect) {
-                let result = update(app, Msg::Local(completion), tx);
-                let _ = apply_result(
-                    terminal,
-                    app,
-                    tx,
-                    io,
-                    &mut pending_mouse_capture,
-                    &mut needs_redraw,
-                    &mut exit,
-                    result,
-                );
-            }
+        if let Some(effect) = state.pending_mouse_capture.take() {
+            state.execute_effect(terminal, app, tx, io, effect);
         }
 
-        if needs_redraw {
+        if state.needs_redraw {
             let frame_started = io.now();
             let size_before = if !app.overlays.runtime_dialogs.is_any_open()
                 && matches!(app.overlays.local_panel, Some(LocalPanel::UpdatePicker(_)))
@@ -338,19 +328,19 @@ where
             let outcome = io.synchronized_draw(terminal, |terminal| {
                 draw_frame(terminal, app, mode.uses_inline_scrollback())
             })?;
-            update_choice_size = size_before.filter(|size| {
+            state.update_choice_size = size_before.filter(|size| {
                 app.render_state.drawn_update_choice.is_some()
                     && terminal.size().ok() == Some(*size)
             });
             app.record_perf_frame(io.now().duration_since(frame_started), outcome.draw_elapsed);
             if activate_pending_confirm_dialog(app) {
-                needs_redraw = true;
+                state.needs_redraw = true;
                 continue;
             }
-            needs_redraw = outcome.request_redraw;
+            state.needs_redraw = outcome.request_redraw;
             app.assert_render_invariants();
         }
-        if exit == ExitAction::DrawThenExit {
+        if state.exit == ExitAction::DrawThenExit {
             break;
         }
 
@@ -359,27 +349,19 @@ where
                 &event, Event::Key(key) if key.kind == KeyEventKind::Press && key.code == KeyCode::Enter
             ) || app.image_preview.is_open()
                 || app.render_state.drawn_update_choice.is_none()
-                || (update_choice_size.is_some() && terminal.size().ok() == update_choice_size);
+                || (state.update_choice_size.is_some()
+                    && terminal.size().ok() == state.update_choice_size);
             let input = TerminalInput {
                 event,
                 now: io.now(),
                 startup_pending,
                 owned_selection_enabled: mode == ResolvedTerminalMode::Alternate,
-                frame_dirty: needs_redraw,
+                frame_dirty: state.needs_redraw,
                 update_choice_size_matches,
             };
             let result = update(app, Msg::Terminal(input), tx);
             let skip_post_input_tick = result.skip_post_input_tick;
-            if apply_result(
-                terminal,
-                app,
-                tx,
-                io,
-                &mut pending_mouse_capture,
-                &mut needs_redraw,
-                &mut exit,
-                result,
-            ) {
+            if state.apply(terminal, app, tx, io, result) {
                 break;
             }
             if skip_post_input_tick {
@@ -388,39 +370,27 @@ where
         }
 
         let now = io.now();
-        let result = update(
-            app,
-            Msg::PostInputTick {
-                now,
-                startup_pending,
-            },
-            tx,
-        );
-        let _ = apply_result(
+        let _ = state.dispatch(
             terminal,
             app,
             tx,
             io,
-            &mut pending_mouse_capture,
-            &mut needs_redraw,
-            &mut exit,
-            result,
+            Msg::PostInputTick {
+                now,
+                startup_pending,
+            },
         );
         if app.debug_perf_enabled
-            && now.duration_since(last_memory_sample_at) >= DEBUG_PERF_MEMORY_SAMPLE_INTERVAL
+            && now.duration_since(state.last_memory_sample_at) >= DEBUG_PERF_MEMORY_SAMPLE_INTERVAL
         {
-            last_memory_sample_at = now;
+            state.last_memory_sample_at = now;
             let sample = io.memory_sample();
-            let result = update(app, Msg::Local(LocalMsg::MemorySample(sample)), tx);
-            let _ = apply_result(
+            let _ = state.dispatch(
                 terminal,
                 app,
                 tx,
                 io,
-                &mut pending_mouse_capture,
-                &mut needs_redraw,
-                &mut exit,
-                result,
+                Msg::Local(LocalMsg::MemorySample(sample)),
             );
         }
     }

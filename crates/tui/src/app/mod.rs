@@ -26,11 +26,11 @@ pub(crate) use crate::app::state::{
     ConfirmDialogState, ConfirmMode, ConfirmSlot, ContextPanelState, CursorPhase, LaneListItem,
     LaneListPanelState, LocalPanel, ModelListMode, ModelListPanelState, ModelListViewMode,
     ModelPickerState, ModelSetScope, OverlayState, PasteTarget, PickDialogItem, PromptDialogState,
-    PromptSlot, ProviderPickerState, QueueSteerPicker, ReasoningPickerState, RuntimeDialogRef,
+    PromptSlot, ProviderPickerState, QueueSteerPicker, ReasoningPickerState, RuntimeDialogKind,
     RuntimePickDialog, RuntimePickList, RuntimePickListKind, SelectionProjectionId, SelectionRange,
     SessionListPanelState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
-    StatusLineMode, SyncPhase, ThemeListPanelState, TranscriptHitMap, WrappedLogCache,
-    WrappedLogRow,
+    StatusLineMode, SyncPhase, ThemeListPanelState, TranscriptHitMap, VisibleRuntimeDialogRef,
+    WrappedLogCache, WrappedLogRow,
 };
 pub(crate) use app_state::{
     ActiveRunSubmitMode, AppState, ErrorDetailMode, InFlightSteer, LogComponentSpan, ModelFastMode,

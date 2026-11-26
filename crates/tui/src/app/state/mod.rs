@@ -23,8 +23,8 @@ pub(crate) use ui::{
     ContextPanelState, LaneActionPickerState, LaneListItem, LaneListPanelState, LocalPanel,
     ModelListMode, ModelListPanelState, ModelListViewMode, ModelPickerState, ModelSetScope,
     OverlayState, PasteTarget, PickDialogItem, PromptDialogState, PromptSlot, ProviderPickerState,
-    QueueSteerPicker, ReasoningPickerState, RuntimeDialogRef, RuntimePickDialog, RuntimePickList,
+    QueueSteerPicker, ReasoningPickerState, RuntimeDialogKind, RuntimePickDialog, RuntimePickList,
     RuntimePickListKind, SessionListPanelState, ShellRulePicker, ShellRulePickerState,
     SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, StatusLineMode,
-    ThemeListPanelState, ThemeName, UpdatePickerState,
+    ThemeListPanelState, ThemeName, UpdatePickerState, VisibleRuntimeDialogRef,
 };

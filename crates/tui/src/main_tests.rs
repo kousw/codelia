@@ -771,12 +771,11 @@ mod layer_boundary_guard {
         };
 
         for (line, path) in &paths {
-            if relative.starts_with("app/util") {
-                if path_starts_with(path, &["crate", "app"])
-                    && !path_starts_with(path, &["crate", "app", "util"])
-                {
-                    record(*line, path, "app/util may only reference crate::app::util");
-                }
+            if relative.starts_with("app/util")
+                && path_starts_with(path, &["crate", "app"])
+                && !path_starts_with(path, &["crate", "app", "util"])
+            {
+                record(*line, path, "app/util may only reference crate::app::util");
             }
             if relative == Path::new("app/effect.rs") && path_starts_with(path, &["crate"]) {
                 record(

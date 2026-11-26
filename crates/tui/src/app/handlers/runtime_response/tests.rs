@@ -13,7 +13,7 @@ use crate::app::runtime::{AgentMsg, MockRuntimeTx, RunControlMsg, RuntimeMsg, Ru
 use crate::app::state::{LogKind, LogLine};
 use crate::app::{
     AppState, ConfirmSlot, LocalPanel, LogComponentSpan, PasteTarget, PendingPromptRun, PendingRpc,
-    PendingRpcSlot, RuntimeDialogRef, RuntimePickDialog,
+    PendingRpcSlot, RuntimeDialogKind, RuntimePickDialog, VisibleRuntimeDialogRef,
 };
 use crate::event_loop::input::{handle_non_main_key, handle_paste};
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -653,9 +653,13 @@ fn receive_confirm(app: &mut AppState, tx: &mut MockRuntimeTx, id: &str) {
         .to_string(),
     );
     assert!(apply_runtime_msg(app, request, tx));
-    assert!(matches!(
+    assert_eq!(
         app.overlays.runtime_dialogs.top(),
-        Some(RuntimeDialogRef::Confirm(ConfirmSlot::Pending(state))) if state.id == id
+        Some(RuntimeDialogKind::ConfirmPending)
+    );
+    assert!(matches!(
+        app.overlays.runtime_dialogs.confirm,
+        Some(ConfirmSlot::Pending(ref state)) if state.id == id
     ));
 }
 
@@ -694,18 +698,22 @@ fn confirm_preempts_client_choice_and_reveals_the_same_selection_on_close() {
     assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(false));
     assert!(tx.sent.is_empty());
     assert!(activate_pending_confirm_dialog(&mut app));
-    assert!(matches!(
+    assert_eq!(
         app.overlays.runtime_dialogs.top(),
-        Some(RuntimeDialogRef::Confirm(ConfirmSlot::Active { .. }))
-    ));
+        Some(RuntimeDialogKind::ConfirmActive)
+    );
     assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Up), Some(true));
     assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(true));
     assert_eq!(tx.sent.len(), 1);
     assert_eq!(tx.sent[0]["id"], "confirm");
     assert_eq!(tx.sent[0]["result"]["ok"], true);
-    assert!(matches!(
+    assert_eq!(
         app.overlays.runtime_dialogs.top(),
-        Some(RuntimeDialogRef::Pick(RuntimePickDialog::List(pick))) if pick.id == "choice" && pick.selected == 1
+        Some(RuntimeDialogKind::Pick)
+    );
+    assert!(matches!(
+        app.overlays.runtime_dialogs.visible_top(),
+        Some(VisibleRuntimeDialogRef::Pick(RuntimePickDialog::List(pick))) if pick.id == "choice" && pick.selected == 1
     ));
 
     assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(true));
@@ -749,7 +757,12 @@ fn confirm_preempts_prompt_and_preserves_its_buffer_and_cursor() {
     assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(true));
     assert_eq!(tx.sent[0]["result"]["reason"], "n");
 
-    let Some(RuntimeDialogRef::Prompt(prompt)) = app.overlays.runtime_dialogs.top() else {
+    assert_eq!(
+        app.overlays.runtime_dialogs.top(),
+        Some(RuntimeDialogKind::Prompt)
+    );
+    let Some(VisibleRuntimeDialogRef::Prompt(prompt)) = app.overlays.runtime_dialogs.visible_top()
+    else {
         panic!("prompt should regain focus");
     };
     assert_eq!(prompt.state.id, "prompt");

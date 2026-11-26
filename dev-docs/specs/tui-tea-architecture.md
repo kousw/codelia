@@ -95,7 +95,7 @@ pub(crate) enum Msg<'a> {
 
 1. **Drain up to 300 runtime lines.** Parse each line against the live `SessionHistory` slot and active run ID. Apply `Msg::Runtime` before reading the next line. Hitting the cap requests redraw and yields to the rest of the tick.
 2. **Apply local updates.** Preempt the image preview when `app.has_interaction_panel()`, then poll it inside its feature module. Apply update-control completion, poll startup confirmations, then apply clipboard import completions.
-3. **Apply `PreDrawTick`.** Request the skills catalog when eligible. With startup complete, try the initial message, then queued dispatch. The shell checks `child.try_wait()` afterward. An observed exit generates `LocalMsg::RuntimeExited`, which logs the status and returns `DrawThenExit`.
+3. **Apply `PreDrawTick`.** Request the skills catalog when eligible. With startup complete, try the initial message, then queued dispatch. The shell checks `child.try_wait()` afterward only while no exit is pending. An observed exit generates `LocalMsg::RuntimeExited`, which logs the status and returns `DrawThenExit`.
 4. **Synchronize terminal mouse capture, then draw when requested.** The shell calls `draw_frame` inside synchronized update. Capture the terminal size before the frame only for an uncovered update picker. Keep it only if the selected option was drawn and the terminal size stayed stable. If a pending confirm promotes after the frame, redraw and continue before polling input. Honor `DrawThenExit` after this confirm check.
 5. **Poll input for 50 ms.** Pass the event through `Msg::Terminal`. Only press events reach the key handlers. Non-press events, image preview keys and a handled first Ctrl+C set `skip_post_input_tick`. A second Ctrl+C within two seconds logs `Force quitting...` and returns `ExitNow`, without drawing again. Enter invalidates an update choice if its recorded size differs from the live size. Resize clears drawn choice and text selection. Paste reaches the next step even if blocked.
 6. **Apply `PostInputTick`.** Tick goals when startup permits, update the spinner, and expire the selection notice. With `--debug-perf`, the shell samples TUI and child memory at intervals of at least one second and feeds the result through `Msg::Local`.
@@ -435,7 +435,7 @@ pub(crate) enum UpdateMode {
 }
 ```
 
-`app/effect.rs` owns these shared types. Initial mouse-capture setup happens once during terminal initialization in `main.rs`; interactive toggles (`F2`) emit `Effect::SetMouseCapture`, which the shell applies right before the next draw. It returns clipboard write results as `LocalMsg::ClipboardWritten`, which sets the notice and its expiry. The clipboard import effect starts the worker. `LocalMsg::ClipboardImportStarted` inserts the composer marker on success or logs status on failure. The update-control effect starts the local launcher helper. Its status/save result is applied separately through `LocalMsg::UpdateControl`. The image preview decoder remains encapsulated in `app/image_preview/`.
+`app/effect.rs` owns these shared types. Initial mouse-capture setup happens once during terminal initialization in `main.rs`; interactive toggles (`F2`) emit `Effect::SetMouseCapture`, which the shell applies right before the next draw. It returns clipboard write results as `LocalMsg::ClipboardWritten`, which sets the notice and its expiry. The clipboard import effect starts the worker after main-key handling has pruned unreferenced attachments. `LocalMsg::ClipboardImportStarted` inserts the composer marker on success or logs status on failure without re-pruning. The update-control effect starts the local launcher helper. Its status/save result is applied separately through `LocalMsg::UpdateControl`. The image preview decoder remains encapsulated in `app/image_preview/`.
 
 `entry/run_loop.rs` retains the production `run_tui_loop` entry point. The inner runner is generic over `B: Backend`. Its `LoopIo<B>` adapter supplies terminal events, child status and PID, the clock, effect execution, and synchronized drawing. Tests pair a scripted adapter with Ratatui `TestBackend` and `MockRuntimeTx`.
 
@@ -472,12 +472,13 @@ Verify changes to these contracts with:
 4. `cargo clippy --manifest-path crates/tui/Cargo.toml --all-targets` — verify **no new warnings** introduced by touched files (clippy is not a CI gate today).
 5. **CI-equivalent headless xterm scrollback check** (whenever `render/`, `view/`, `log_wrap.rs`, `app/frame.rs`, or `runtime/parser` is touched):
    ```bash
-   CODELIA_TUI_CAPTURE_PATH=/tmp/codelia-tui-scrollback.jsonl \
-     cargo test --manifest-path crates/tui/Cargo.toml --locked inline_native_scrollback_ansi_capture -- --nocapture
-   node scripts/check-tui-scrollback.mjs /tmp/codelia-tui-scrollback.jsonl
+   export CODELIA_TUI_EMULATOR_DIR=/tmp/codelia-tui-emulator
+   export CODELIA_TUI_CAPTURE_PATH=/tmp/codelia-tui-capture.json
+   npm install --prefix "$CODELIA_TUI_EMULATOR_DIR" --ignore-scripts --no-audit --no-fund --package-lock=false @xterm/headless@6.0.0
+   unset NO_COLOR
+   cargo test --manifest-path crates/tui/Cargo.toml --locked inline_native_scrollback_ansi_capture
    node --test scripts/check-tui-scrollback.test.mjs
    ```
-   *(Requires `@xterm/headless` installed in `node_modules` / CI environment.)*
 6. **Production PTY image preview check** (when preview input or overlay preemption changes):
    `python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui`
 7. `bun run check:protocol && bun run typecheck` (confirm workspace protocol/TS contracts remain untouched).

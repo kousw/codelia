@@ -13,7 +13,8 @@ pub(crate) use composer::{
 };
 pub use dialogs::{
     ConfirmDialogState, ConfirmMode, ConfirmSlot, PickDialogItem, PromptDialogState, PromptSlot,
-    RuntimeDialogRef, RuntimePickDialog, RuntimePickList, RuntimePickListKind,
+    RuntimeDialogKind, RuntimePickDialog, RuntimePickList, RuntimePickListKind,
+    VisibleRuntimeDialogRef,
 };
 pub use model::{
     ModelListMode, ModelListPanelState, ModelListViewMode, ModelPickerState, ModelSetScope,

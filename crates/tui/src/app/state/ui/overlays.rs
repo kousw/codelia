@@ -1,4 +1,4 @@
-use super::dialogs::{PickDialogItem, RuntimeDialogRef, RuntimeDialogs};
+use super::dialogs::{PickDialogItem, RuntimeDialogKind, RuntimeDialogs};
 use super::{
     ContextPanelState, LaneListPanelState, ModelListPanelState, ModelPickerState, ModelSetScope,
     ProviderPickerState, ReasoningPickerState, SessionListPanelState, SkillsListPanelState,
@@ -26,6 +26,14 @@ pub enum LocalPanel {
     UpdatePicker(UpdatePickerState),
     ShellRulePicker(ShellRulePickerState),
     LaneActionPicker(LaneActionPickerState),
+}
+
+impl LocalPanel {
+    /// Local pickers with explicit confirmation flows that client tools must not
+    /// silently clobber or open choices over.
+    pub fn blocks_client_tool_panel(&self) -> bool {
+        matches!(self, Self::UpdatePicker(_) | Self::ShellRulePicker(_))
+    }
 }
 
 pub struct LaneActionPickerState {
@@ -92,7 +100,7 @@ impl OverlayState {
             return PasteTarget::Blocked;
         }
         match self.runtime_dialogs.top() {
-            Some(RuntimeDialogRef::Prompt(_)) => PasteTarget::RuntimePrompt,
+            Some(RuntimeDialogKind::Prompt) => PasteTarget::RuntimePrompt,
             Some(_) => PasteTarget::Blocked,
             None if startup_pending || self.local_panel.is_some() || self.queue_focus.is_some() => {
                 PasteTarget::Blocked

@@ -7,7 +7,7 @@ mod suggestions;
 mod types;
 
 use crate::app::{
-    AppState, ConfirmSlot, LocalPanel, RuntimeDialogRef, RuntimePickDialog, RuntimePickListKind,
+    AppState, LocalPanel, RuntimePickDialog, RuntimePickListKind, VisibleRuntimeDialogRef,
 };
 
 use dialogs::{
@@ -35,7 +35,7 @@ pub(super) fn render_composer_panel(
     width: usize,
 ) -> Vec<ratatui::text::Line<'static>> {
     match app.overlays.runtime_dialogs.visible_top() {
-        Some(RuntimeDialogRef::Pick(RuntimePickDialog::List(pick))) => {
+        Some(VisibleRuntimeDialogRef::Pick(RuntimePickDialog::List(pick))) => {
             if let RuntimePickListKind::Approval { review_offset } = pick.kind {
                 return dialogs::render_approval_pick(pick, review_offset, view, max_lines, width);
             }
@@ -55,19 +55,16 @@ pub(super) fn render_composer_panel(
 
 pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
     if let Some(dialog) = app.overlays.runtime_dialogs.visible_top() {
-        return match dialog {
-            RuntimeDialogRef::Confirm(ConfirmSlot::Pending(_)) => None,
-            RuntimeDialogRef::Confirm(ConfirmSlot::Active { state, .. }) => {
-                Some(build_confirm_panel_view(state))
+        return Some(match dialog {
+            VisibleRuntimeDialogRef::Confirm { state, .. } => build_confirm_panel_view(state),
+            VisibleRuntimeDialogRef::Prompt(prompt) => build_prompt_panel_view(&prompt.state),
+            VisibleRuntimeDialogRef::Pick(RuntimePickDialog::List(pick)) => {
+                build_runtime_pick_list_view(pick)
             }
-            RuntimeDialogRef::Prompt(prompt) => Some(build_prompt_panel_view(&prompt.state)),
-            RuntimeDialogRef::Pick(RuntimePickDialog::List(pick)) => {
-                Some(build_runtime_pick_list_view(pick))
-            }
-            RuntimeDialogRef::Pick(RuntimePickDialog::OnboardingModelList { panel, .. }) => {
-                Some(build_model_list_panel_view(panel))
-            }
-        };
+            VisibleRuntimeDialogRef::Pick(RuntimePickDialog::OnboardingModelList {
+                panel, ..
+            }) => build_model_list_panel_view(panel),
+        });
     }
 
     match &app.overlays.local_panel {

@@ -14,8 +14,21 @@ pub struct PromptSlot {
     pub input: InputState,
 }
 
-pub enum RuntimeDialogRef<'a> {
-    Confirm(&'a ConfirmSlot),
+/// Highest-priority runtime dialog slot for input routing and safety guards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeDialogKind {
+    ConfirmPending,
+    ConfirmActive,
+    Prompt,
+    Pick,
+}
+
+/// Visible runtime dialog for rendering (`ConfirmSlot::Pending` is excluded by type).
+pub enum VisibleRuntimeDialogRef<'a> {
+    Confirm {
+        state: &'a ConfirmDialogState,
+        input: &'a InputState,
+    },
     Prompt(&'a PromptSlot),
     Pick(&'a RuntimePickDialog),
 }
@@ -31,26 +44,26 @@ pub struct RuntimeDialogs {
 impl RuntimeDialogs {
     /// Highest-priority dialog for input routing and safety guards (`confirm > prompt > pick`),
     /// including `ConfirmSlot::Pending` so keys are swallowed before its first visible frame.
-    pub fn top(&self) -> Option<RuntimeDialogRef<'_>> {
-        if let Some(confirm) = &self.confirm {
-            Some(RuntimeDialogRef::Confirm(confirm))
-        } else if let Some(prompt) = &self.prompt {
-            Some(RuntimeDialogRef::Prompt(prompt))
-        } else {
-            self.pick.as_ref().map(RuntimeDialogRef::Pick)
+    pub fn top(&self) -> Option<RuntimeDialogKind> {
+        match &self.confirm {
+            Some(ConfirmSlot::Pending(_)) => Some(RuntimeDialogKind::ConfirmPending),
+            Some(ConfirmSlot::Active { .. }) => Some(RuntimeDialogKind::ConfirmActive),
+            None if self.prompt.is_some() => Some(RuntimeDialogKind::Prompt),
+            None if self.pick.is_some() => Some(RuntimeDialogKind::Pick),
+            None => None,
         }
     }
 
     /// Highest-priority visible dialog for rendering (`active confirm > prompt > pick`).
     /// Skips `ConfirmSlot::Pending` so the pre-activation sync frame preserves the previous
     /// layout height and underlying dialog until the confirm panel is shown on the next frame.
-    pub fn visible_top(&self) -> Option<RuntimeDialogRef<'_>> {
-        if let Some(confirm @ ConfirmSlot::Active { .. }) = &self.confirm {
-            Some(RuntimeDialogRef::Confirm(confirm))
+    pub fn visible_top(&self) -> Option<VisibleRuntimeDialogRef<'_>> {
+        if let Some(ConfirmSlot::Active { state, input }) = &self.confirm {
+            Some(VisibleRuntimeDialogRef::Confirm { state, input })
         } else if let Some(prompt) = &self.prompt {
-            Some(RuntimeDialogRef::Prompt(prompt))
+            Some(VisibleRuntimeDialogRef::Prompt(prompt))
         } else {
-            self.pick.as_ref().map(RuntimeDialogRef::Pick)
+            self.pick.as_ref().map(VisibleRuntimeDialogRef::Pick)
         }
     }
 
@@ -154,6 +167,16 @@ impl RuntimePickDialog {
             Self::List(list) => &list.id,
             Self::OnboardingModelList { request_id, .. } => request_id,
         }
+    }
+
+    pub fn is_client_tool_choice(&self) -> bool {
+        matches!(
+            self,
+            Self::List(RuntimePickList {
+                kind: RuntimePickListKind::ClientToolChoice,
+                ..
+            })
+        )
     }
 }
 

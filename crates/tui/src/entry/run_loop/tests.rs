@@ -251,6 +251,26 @@ fn confirm_is_drawn_on_second_frame_before_the_first_input() {
 }
 
 #[test]
+fn confirm_promotion_with_child_exit_draws_twice_and_logs_exit_once() {
+    let mut io = TestIo::new([]);
+    let mut app = AppState {
+        enable_debug_print: true,
+        ..AppState::default()
+    };
+    let tx = io.run(&mut app, &[CONFIRM], None);
+    assert_eq!(io.steps, [Step::Draw, Step::Draw]);
+    assert!(tx.sent.is_empty());
+    let exit_logs = app
+        .log
+        .iter()
+        .filter(|line| line.plain_text() == "runtime exited: exit status: 0")
+        .count();
+    assert_eq!(exit_logs, 1);
+    assert!(io.frames[1].contains("Phase five confirmation"));
+    assert!(io.frames[1].contains("runtime exited: exit status: 0"));
+}
+
+#[test]
 fn runtime_exit_draws_final_frame_and_second_ctrl_c_exits_without_drawing() {
     let mut io = TestIo::new([]);
     let mut app = AppState {

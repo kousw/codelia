@@ -10,8 +10,8 @@ use crate::app::state::input::attachments::token_span_at;
 use crate::app::state::{InputState, LogKind, SelectionHitTest};
 use crate::app::util::sanitize_paste;
 use crate::app::{
-    AppState, ConfirmSlot, LocalPanel, PasteTarget, PendingRpc, PendingRpcSlot, PromptDialogState,
-    PromptSlot, RuntimeDialogRef, RuntimePickDialog, RuntimePickListKind,
+    AppState, LocalPanel, PasteTarget, PendingRpc, PendingRpcSlot, PromptDialogState, PromptSlot,
+    RuntimeDialogKind, RuntimePickDialog, RuntimePickListKind,
 };
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use serde_json::{json, Value};
@@ -723,14 +723,14 @@ pub(crate) fn handle_non_main_key(
     effects: &mut Vec<Effect>,
 ) -> Option<bool> {
     match app.overlays.runtime_dialogs.top() {
-        Some(RuntimeDialogRef::Confirm(ConfirmSlot::Pending(_))) => return Some(false),
-        Some(RuntimeDialogRef::Confirm(ConfirmSlot::Active { .. })) => {
+        Some(RuntimeDialogKind::ConfirmPending) => return Some(false),
+        Some(RuntimeDialogKind::ConfirmActive) => {
             return handle_confirm_key(app, key, modifiers, tx);
         }
-        Some(RuntimeDialogRef::Prompt(_)) => {
+        Some(RuntimeDialogKind::Prompt) => {
             return handle_prompt_key(app, key, modifiers, tx, effects)
         }
-        Some(RuntimeDialogRef::Pick(_)) => return handle_pick_key(app, key, tx),
+        Some(RuntimeDialogKind::Pick) => return handle_pick_key(app, key, tx),
         None => {}
     }
 

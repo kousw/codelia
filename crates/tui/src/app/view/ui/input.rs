@@ -1,7 +1,7 @@
 use crate::app::state::input::attachments::render_input_with_attachment_labels;
 use crate::app::state::InputState;
 use crate::app::util::text::{char_width, detect_continuation_prefix};
-use crate::app::{AppState, ConfirmSlot, RuntimeDialogRef};
+use crate::app::{AppState, VisibleRuntimeDialogRef};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
@@ -178,9 +178,9 @@ pub(super) fn render_input(
 
 pub(super) fn dialog_editor(app: &AppState) -> Option<(&InputState, bool)> {
     match app.overlays.runtime_dialogs.visible_top()? {
-        RuntimeDialogRef::Confirm(ConfirmSlot::Active { input, .. }) => Some((input, false)),
-        RuntimeDialogRef::Prompt(prompt) => Some((&prompt.input, prompt.state.secret)),
-        _ => None,
+        VisibleRuntimeDialogRef::Confirm { input, .. } => Some((input, false)),
+        VisibleRuntimeDialogRef::Prompt(prompt) => Some((&prompt.input, prompt.state.secret)),
+        VisibleRuntimeDialogRef::Pick(_) => None,
     }
 }
 

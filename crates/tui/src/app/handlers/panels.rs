@@ -142,7 +142,7 @@ pub(crate) fn request_session_open(app: &mut AppState, tx: &mut dyn RuntimeTx, s
     let id = tx.next_id();
     app.rpc_pending.insert(id.clone(), PendingRpc::SessionOpen);
     if let Err(error) = send_session_open(tx, &id, session_id) {
-        app.rpc_pending.remove_slot(PendingRpcSlot::SessionOpen);
+        app.rpc_pending.take(&id);
         app.push_error_report("send error", error.to_string());
     }
 }

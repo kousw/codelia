@@ -58,15 +58,7 @@ fn apply_ui_request(app: &mut AppState, request: ServerUiMsg, tx: &mut dyn Runti
                 .runtime_dialogs
                 .pick
                 .as_ref()
-                .is_some_and(|dialog| {
-                    !matches!(
-                        dialog,
-                        RuntimePickDialog::List(RuntimePickList {
-                            kind: RuntimePickListKind::ClientToolChoice,
-                            ..
-                        })
-                    ) && dialog.id() == id
-                })
+                .is_some_and(|dialog| !dialog.is_client_tool_choice() && dialog.id() == id)
             {
                 app.overlays.runtime_dialogs.pick = None;
             }

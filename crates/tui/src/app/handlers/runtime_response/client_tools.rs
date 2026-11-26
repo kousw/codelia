@@ -377,29 +377,40 @@ fn parse_ask_user_choice(args: &Value) -> Result<AskUserChoiceDialog, String> {
     })
 }
 
-fn handle_ask_user_choice(
+fn reply_client_tool_error(app: &mut AppState, tx: &mut dyn RuntimeTx, id: &str, message: &str) {
+    if let Err(error) = send_client_tool_error(tx, id, message) {
+        app.push_error_report("client tool response error", error.to_string());
+    }
+}
+
+fn reply_client_tool_text_success(
     app: &mut AppState,
-    request: ClientToolRequest,
     tx: &mut dyn RuntimeTx,
-) -> bool {
-    if app.overlays.runtime_dialogs.pick.is_some()
-        || matches!(
-            app.overlays.local_panel,
-            Some(LocalPanel::UpdatePicker(_) | LocalPanel::ShellRulePicker(_))
-        )
-    {
-        if let Err(error) = send_client_tool_error(tx, &request.id, "pick dialog is busy") {
-            app.push_error_report("client tool response error", error.to_string());
-        }
-        return true;
+    id: &str,
+    message: &str,
+) {
+    if let Err(error) = send_client_tool_text_success(tx, id, message) {
+        app.push_error_report("client tool response error", error.to_string());
+    }
+}
+
+fn local_picker_is_busy(app: &AppState) -> bool {
+    app.overlays
+        .local_panel
+        .as_ref()
+        .is_some_and(LocalPanel::blocks_client_tool_panel)
+}
+
+fn handle_ask_user_choice(app: &mut AppState, request: ClientToolRequest, tx: &mut dyn RuntimeTx) {
+    if app.overlays.runtime_dialogs.pick.is_some() || local_picker_is_busy(app) {
+        reply_client_tool_error(app, tx, &request.id, "pick dialog is busy");
+        return;
     }
     let dialog = match parse_ask_user_choice(&request.arguments) {
         Ok(dialog) => dialog,
         Err(message) => {
-            if let Err(error) = send_client_tool_error(tx, &request.id, &message) {
-                app.push_error_report("client tool response error", error.to_string());
-            }
-            return true;
+            reply_client_tool_error(app, tx, &request.id, &message);
+            return;
         }
     };
     app.rpc_pending
@@ -415,14 +426,13 @@ fn handle_ask_user_choice(
         chosen: Vec::new(),
         kind: RuntimePickListKind::ClientToolChoice,
     }));
-    true
 }
 
-fn handle_open_selector(
-    app: &mut AppState,
-    request: ClientToolRequest,
-    tx: &mut dyn RuntimeTx,
-) -> bool {
+fn handle_open_selector(app: &mut AppState, request: ClientToolRequest, tx: &mut dyn RuntimeTx) {
+    if local_picker_is_busy(app) {
+        reply_client_tool_error(app, tx, &request.id, "pick dialog is busy");
+        return;
+    }
     let title = arg_str(&request.arguments, "title")
         .unwrap_or("Selector")
         .to_string();
@@ -450,56 +460,32 @@ fn handle_open_selector(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    if matches!(
-        app.overlays.local_panel,
-        Some(LocalPanel::UpdatePicker(_) | LocalPanel::ShellRulePicker(_))
-    ) {
-        if let Err(error) = send_client_tool_error(tx, &request.id, "pick dialog is busy") {
-            app.push_error_report("client tool response error", error.to_string());
-        }
-        return true;
-    }
     app.overlays.local_panel = Some(LocalPanel::Context(ContextPanelState {
         title,
         header,
         rows,
         selected: 0,
     }));
-    if let Err(error) = send_client_tool_text_success(tx, &request.id, "selector opened") {
-        app.push_error_report("client tool response error", error.to_string());
-    }
-    true
+    reply_client_tool_text_success(app, tx, &request.id, "selector opened");
 }
 
-fn handle_preview_artifact(
-    app: &mut AppState,
-    request: ClientToolRequest,
-    tx: &mut dyn RuntimeTx,
-) -> bool {
+fn handle_preview_artifact(app: &mut AppState, request: ClientToolRequest, tx: &mut dyn RuntimeTx) {
+    if local_picker_is_busy(app) {
+        reply_client_tool_error(app, tx, &request.id, "pick dialog is busy");
+        return;
+    }
     let title = arg_str(&request.arguments, "title")
         .unwrap_or("Preview")
         .to_string();
     let kind = arg_str(&request.arguments, "kind").unwrap_or("text");
     let content = arg_str(&request.arguments, "content").unwrap_or("");
-    if matches!(
-        app.overlays.local_panel,
-        Some(LocalPanel::UpdatePicker(_) | LocalPanel::ShellRulePicker(_))
-    ) {
-        if let Err(error) = send_client_tool_error(tx, &request.id, "pick dialog is busy") {
-            app.push_error_report("client tool response error", error.to_string());
-        }
-        return true;
-    }
     app.overlays.local_panel = Some(LocalPanel::Context(ContextPanelState {
         title,
         header: format!("artifact kind={kind}"),
         rows: panel_rows_from_content(content),
         selected: 0,
     }));
-    if let Err(error) = send_client_tool_text_success(tx, &request.id, "artifact previewed") {
-        app.push_error_report("client tool response error", error.to_string());
-    }
-    true
+    reply_client_tool_text_success(app, tx, &request.id, "artifact previewed");
 }
 
 fn focus_latest_kind(app: &mut AppState, kind: LogKind) -> bool {
@@ -510,11 +496,7 @@ fn focus_latest_kind(app: &mut AppState, kind: LogKind) -> bool {
     true
 }
 
-fn handle_focus_context(
-    app: &mut AppState,
-    request: ClientToolRequest,
-    tx: &mut dyn RuntimeTx,
-) -> bool {
+fn handle_focus_context(app: &mut AppState, request: ClientToolRequest, tx: &mut dyn RuntimeTx) {
     let target = arg_str(&request.arguments, "target").unwrap_or("bottom");
     let focused = match target {
         "bottom" => {
@@ -536,7 +518,6 @@ fn handle_focus_context(
     ) {
         app.push_error_report("client tool response error", error.to_string());
     }
-    true
 }
 
 pub(super) fn apply_progress(app: &mut AppState, args: &Value, replay_run_id: Option<&str>) {
@@ -552,48 +533,33 @@ pub(super) fn apply_progress(app: &mut AppState, args: &Value, replay_run_id: Op
     }
 }
 
-fn handle_show_progress(
-    app: &mut AppState,
-    request: ClientToolRequest,
-    tx: &mut dyn RuntimeTx,
-) -> bool {
+fn handle_show_progress(app: &mut AppState, request: ClientToolRequest, tx: &mut dyn RuntimeTx) {
     apply_progress(app, &request.arguments, None);
-    if let Err(error) = send_client_tool_text_success(tx, &request.id, "progress shown") {
-        app.push_error_report("client tool response error", error.to_string());
-    }
-    true
+    reply_client_tool_text_success(app, tx, &request.id, "progress shown");
 }
 
 pub(super) fn handle_client_tool_request(
     app: &mut AppState,
     request: ClientToolRequest,
     tx: &mut dyn RuntimeTx,
-) -> bool {
+) {
     match request.name.as_str() {
         "tui_ask_user_choice" => handle_ask_user_choice(app, request, tx),
         "tui_open_selector" => handle_open_selector(app, request, tx),
         "tui_preview_artifact" => handle_preview_artifact(app, request, tx),
         "tui_focus_context" => handle_focus_context(app, request, tx),
         "tui_show_progress" => handle_show_progress(app, request, tx),
-        _ => {
-            if let Err(error) = send_client_tool_error(tx, &request.id, "unknown TUI client tool") {
-                app.push_error_report("client tool response error", error.to_string());
-            }
-            true
-        }
+        _ => reply_client_tool_error(app, tx, &request.id, "unknown TUI client tool"),
     }
 }
 
-pub(super) fn handle_client_tool_cancel(
-    app: &mut AppState,
-    cancellation: ClientToolCancel,
-) -> bool {
+pub(super) fn handle_client_tool_cancel(app: &mut AppState, cancellation: ClientToolCancel) {
     if !app
         .rpc_pending
         .client_tool_choice_ids
         .remove(&cancellation.request_id)
     {
-        return false;
+        return;
     }
 
     let matches_active_dialog = app
@@ -601,7 +567,9 @@ pub(super) fn handle_client_tool_cancel(
         .runtime_dialogs
         .pick
         .as_ref()
-        .is_some_and(|dialog| dialog.id() == cancellation.request_id);
+        .is_some_and(|dialog| {
+            dialog.is_client_tool_choice() && dialog.id() == cancellation.request_id
+        });
     if matches_active_dialog {
         app.overlays.runtime_dialogs.pick = None;
         let message = match cancellation.reason.as_str() {
@@ -610,7 +578,6 @@ pub(super) fn handle_client_tool_cancel(
         };
         app.push_line(LogKind::Status, message);
     }
-    true
 }
 
 #[cfg(test)]
