@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/protocol",
-	"version": "0.1.90",
+	"version": "0.1.91",
 	"license": "MIT",
 	"type": "module",
 	"files": [
@@ -21,7 +21,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/shared-types": "0.1.90",
+		"@codelia/shared-types": "0.1.91",
 		"zod": "^4.4.3"
 	},
 	"publishConfig": {
