@@ -1,5 +1,5 @@
-use super::RuntimeStdin;
 use crate::app::runtime::send_request;
+use crate::app::runtime::RuntimeTx;
 use crate::app::state::LogKind;
 use crate::app::AppState;
 use crate::protocol::{methods, AutoReviewConfigureParams, AutoReviewConfigureParamsAction};
@@ -13,12 +13,7 @@ fn action(args: &str) -> Option<&'static str> {
     }
 }
 
-pub(super) fn handle(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    args: &str,
-) {
+pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) {
     let Some(action) = action(args) else {
         app.push_line(LogKind::Error, "usage: /auto-approve [status|off]");
         return;
@@ -39,12 +34,12 @@ pub(super) fn handle(
         );
         return;
     }
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.auto_review_id = Some(id.clone());
     let params = AutoReviewConfigureParams {
         action: Some(AutoReviewConfigureParamsAction::from(action.to_owned())),
     };
-    if let Err(error) = send_request::<methods::AutoReviewConfigure>(writer, &id, &params) {
+    if let Err(error) = send_request::<methods::AutoReviewConfigure>(tx, &id, &params) {
         app.rpc_pending.auto_review_id = None;
         app.push_error_report("send Auto approve request", error.to_string());
     }

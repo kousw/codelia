@@ -1,5 +1,6 @@
 use crate::app::handlers::confirm::activate_pending_confirm_dialog;
 use crate::app::render::frame::draw_frame;
+use crate::app::runtime::RuntimeTx;
 use crate::app::state::LogKind;
 use crate::app::util::sample_memory;
 use crate::app::AppState;
@@ -10,7 +11,7 @@ use crate::event_loop::input::{
     handle_non_main_key, handle_paste, maybe_request_skills_catalog,
 };
 use crate::event_loop::runtime::{can_auto_start_initial_message, process_runtime_messages};
-use crate::event_loop::{RuntimeReceiver, RuntimeStdin};
+use crate::event_loop::RuntimeReceiver;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::fmt;
 use std::process::Child;
@@ -62,8 +63,7 @@ pub(crate) fn run_tui_loop(
     terminal_session: RunLoopTerminal<'_>,
     rx: &RuntimeReceiver,
     child: &mut Child,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     pending_initial_message: &mut Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let RunLoopTerminal {
@@ -78,7 +78,7 @@ pub(crate) fn run_tui_loop(
     let mut last_memory_sample_at = Instant::now() - DEBUG_PERF_MEMORY_SAMPLE_INTERVAL;
 
     loop {
-        if process_runtime_messages(app, rx, child_stdin, next_id) {
+        if process_runtime_messages(app, rx, tx) {
             needs_redraw = true;
         }
 
@@ -93,7 +93,7 @@ pub(crate) fn run_tui_loop(
         needs_redraw |= crate::app::startup_confirmations::poll(app);
         needs_redraw |= app.poll_clipboard_import();
 
-        maybe_request_skills_catalog(app, child_stdin, next_id);
+        maybe_request_skills_catalog(app, tx);
 
         let startup_pending = app.startup_confirmations.is_pending();
         if !startup_pending
@@ -101,21 +101,14 @@ pub(crate) fn run_tui_loop(
             && can_auto_start_initial_message(app)
         {
             if let Some(message) = pending_initial_message.take() {
-                if crate::app::handlers::command::start_prompt_run(
-                    app,
-                    child_stdin,
-                    next_id,
-                    &message,
-                ) {
+                if crate::app::handlers::command::start_prompt_run(app, tx, &message) {
                     app.clear_composer();
                 }
                 needs_redraw = true;
             }
         }
 
-        if !startup_pending
-            && crate::app::handlers::command::try_dispatch_queued_prompt(app, child_stdin, next_id)
-        {
+        if !startup_pending && crate::app::handlers::command::try_dispatch_queued_prompt(app, tx) {
             needs_redraw = true;
         }
 
@@ -182,7 +175,7 @@ pub(crate) fn run_tui_loop(
                                 break;
                             }
                         }
-                        if handle_ctrl_c(app, child_stdin, next_id) {
+                        if handle_ctrl_c(app, tx) {
                             last_ctrl_c_at = Some(now);
                             needs_redraw = true;
                             continue;
@@ -199,19 +192,10 @@ pub(crate) fn run_tui_loop(
                     {
                         app.render_state.drawn_update_choice = None;
                     }
-                    if let Some(redraw) =
-                        handle_non_main_key(app, key.code, key.modifiers, child_stdin, next_id)
-                    {
+                    if let Some(redraw) = handle_non_main_key(app, key.code, key.modifiers, tx) {
                         apply_redraw(&mut needs_redraw, redraw);
                     } else if !startup_pending
-                        && handle_main_key(
-                            app,
-                            key.code,
-                            key.modifiers,
-                            terminal,
-                            child_stdin,
-                            next_id,
-                        )
+                        && handle_main_key(app, key.code, key.modifiers, terminal, tx)
                     {
                         app.prune_unreferenced_attachments();
                         needs_redraw = true;
@@ -245,7 +229,7 @@ pub(crate) fn run_tui_loop(
         }
 
         let now = Instant::now();
-        if !startup_pending && crate::app::goal::tick(app, child_stdin, next_id, now) {
+        if !startup_pending && crate::app::goal::tick(app, tx, now) {
             needs_redraw = true;
         }
         if app.update_spinner(now) {

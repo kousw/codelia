@@ -16,6 +16,7 @@
   - `handlers/`: key-driven behavior
   - `runtime/`: RPC boundary
   - `util/`: shared helpers
+- RPC handlers take a synchronous `&mut dyn RuntimeTx` from `runtime/client.rs` so they can handle send failures immediately. Production uses `StdioRuntimeTx` to flush each JSON-RPC line, and handler tests use `MockRuntimeTx` to inspect sent values or inject a write error.
 - Permission preview diff parsing (runtime parser) supports syntax highlighting via fenced code language, explicit `permission.preview.language` hint, diff header extension inference, and `permission.preview.file_path` fallback when headers are missing.
 - `permission.preview` / `permission.ready` may include `tool_call_id`; TUI uses it to correlate preview vs `tool_result(edit)`, suppress duplicate diff bodies when the same non-truncated diff was already shown in preview, and ignore replayed duplicate `permission.ready` lines for the same tool call.
 - `client.tool.call` requests from runtime are handled in `handlers/runtime_response/client_tools.rs`. `tui_ask_user_choice` is the only blocking client tool and responds through the existing pick dialog; validate all primary choice objects before appending fallback rows so malformed model arguments cannot degrade into an `Other`-only dialog. A runtime `client.tool.cancel` clears the choice only when its `request_id` is still tracked and matches the active dialog, preventing timeout state from blocking later prompts without closing unrelated dialogs. Selector/preview/focus/progress tools update TUI state and return immediately.

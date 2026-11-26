@@ -1,8 +1,8 @@
 mod project_trust;
 
-use super::{runtime_response::push_shell_stream_preview, RuntimeStdin};
+use super::runtime_response::push_shell_stream_preview;
 use crate::app::app_state::{ShellRuleRpc, ShellRuleScope};
-use crate::app::runtime::{send_request, send_tool_call, RpcResponse};
+use crate::app::runtime::{send_request, send_tool_call, RpcResponse, RuntimeTx};
 use crate::app::state::{LogKind, PickDialogItem, PickDialogState, ShellRulePicker};
 use crate::app::AppState;
 use crate::protocol::{
@@ -139,18 +139,13 @@ fn scope_and_rule_id(value: &str) -> Option<(ShellRuleScope, &str)> {
     rule_id_valid(rule_id).then_some((scope, rule_id))
 }
 
-pub(crate) fn command(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    args: &str,
-) -> bool {
+pub(crate) fn command(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) -> bool {
     let args = args.trim_start();
     if let Some(source) = args
         .strip_prefix("run")
         .and_then(|rest| rest.strip_prefix(char::is_whitespace))
     {
-        return run(app, writer, next_id, source);
+        return run(app, tx, source);
     }
     let session_id = app.runtime_info.session_id.clone();
     let operation = match args.trim() {
@@ -197,11 +192,11 @@ pub(crate) fn command(
         );
         return true;
     }
-    let id = next_id();
+    let id = tx.next_id();
     let params = PermissionsListParams {
         include_system: None,
     };
-    if let Err(error) = send_request::<methods::PermissionsList>(writer, &id, &params) {
+    if let Err(error) = send_request::<methods::PermissionsList>(tx, &id, &params) {
         app.push_error_report("Could not request saved shell rules", error.to_string());
         return true;
     }
@@ -218,12 +213,7 @@ fn supports_run(app: &AppState) -> bool {
         && runtime.supports_shell_exec
 }
 
-fn run(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    source: &str,
-) -> bool {
+fn run(app: &mut AppState, tx: &mut dyn RuntimeTx, source: &str) -> bool {
     if source.trim().is_empty() {
         app.push_line(LogKind::Error, USAGE);
         return false;
@@ -247,11 +237,11 @@ fn run(
         );
         return false;
     }
-    let id = next_id();
+    let id = tx.next_id();
     let operation = ShellRuleRpc::Run {
         session_id: app.runtime_info.session_id.clone(),
     };
-    if let Err(error) = send_tool_call(writer, &id, "shell", json!({"command": source})) {
+    if let Err(error) = send_tool_call(tx, &id, "shell", json!({"command": source})) {
         app.push_error_report("Could not submit the shell command", error.to_string());
         return false;
     }
@@ -547,12 +537,7 @@ fn picker(
     }
 }
 
-pub(crate) fn select(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    picker_state: PickDialogState,
-) {
+pub(crate) fn select(app: &mut AppState, tx: &mut dyn RuntimeTx, picker_state: PickDialogState) {
     let (confirming, session_id) = match picker_state.shell_rule_picker {
         Some(ShellRulePicker::Trust {
             trusted,
@@ -578,14 +563,14 @@ pub(crate) fn select(
                 );
                 return;
             }
-            let id = next_id();
+            let id = tx.next_id();
             let params = ProjectAllowTrustSetParams {
                 workspace: workspace.clone(),
                 trusted,
                 expected_revision: revision,
             };
             if let Err(error) =
-                send_request::<methods::PermissionsProjectTrustSet>(writer, &id, &params)
+                send_request::<methods::PermissionsProjectTrustSet>(tx, &id, &params)
             {
                 app.push_error_report("Could not change project allow trust", error.to_string());
                 return;
@@ -666,8 +651,8 @@ pub(crate) fn select(
         app.push_line(LogKind::Status, "Wait for the pending permissions request.");
         return;
     }
-    let id = next_id();
-    if let Err(error) = send_request::<methods::PermissionsRemove>(writer, &id, &params) {
+    let id = tx.next_id();
+    if let Err(error) = send_request::<methods::PermissionsRemove>(tx, &id, &params) {
         app.push_error_report("Could not request permission removal", error.to_string());
         return;
     }

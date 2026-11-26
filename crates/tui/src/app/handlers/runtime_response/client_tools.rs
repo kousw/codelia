@@ -1,13 +1,11 @@
 use crate::app::runtime::{
     send_client_tool_error, send_client_tool_success, send_client_tool_text_success,
-    ClientToolCancel, ClientToolRequest,
+    ClientToolCancel, ClientToolRequest, RuntimeTx,
 };
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
 use crate::app::{AppState, ContextPanelState, PickDialogItem, PickDialogState};
 use serde_json::{json, Value};
 use std::collections::HashSet;
-
-use super::RuntimeStdin;
 
 const MAX_PANEL_ROWS: usize = 200;
 const PROGRESS_BAR_WIDTH: usize = 16;
@@ -379,11 +377,10 @@ fn parse_ask_user_choice(args: &Value) -> Result<AskUserChoiceDialog, String> {
 fn handle_ask_user_choice(
     app: &mut AppState,
     request: ClientToolRequest,
-    child_stdin: &mut RuntimeStdin,
+    tx: &mut dyn RuntimeTx,
 ) -> bool {
     if app.pick_dialog.is_some() {
-        if let Err(error) = send_client_tool_error(child_stdin, &request.id, "pick dialog is busy")
-        {
+        if let Err(error) = send_client_tool_error(tx, &request.id, "pick dialog is busy") {
             app.push_error_report("client tool response error", error.to_string());
         }
         return true;
@@ -391,7 +388,7 @@ fn handle_ask_user_choice(
     let dialog = match parse_ask_user_choice(&request.arguments) {
         Ok(dialog) => dialog,
         Err(message) => {
-            if let Err(error) = send_client_tool_error(child_stdin, &request.id, &message) {
+            if let Err(error) = send_client_tool_error(tx, &request.id, &message) {
                 app.push_error_report("client tool response error", error.to_string());
             }
             return true;
@@ -419,7 +416,7 @@ fn handle_ask_user_choice(
 fn handle_open_selector(
     app: &mut AppState,
     request: ClientToolRequest,
-    child_stdin: &mut RuntimeStdin,
+    tx: &mut dyn RuntimeTx,
 ) -> bool {
     let title = arg_str(&request.arguments, "title")
         .unwrap_or("Selector")
@@ -454,7 +451,7 @@ fn handle_open_selector(
         rows,
         selected: 0,
     });
-    if let Err(error) = send_client_tool_text_success(child_stdin, &request.id, "selector opened") {
+    if let Err(error) = send_client_tool_text_success(tx, &request.id, "selector opened") {
         app.push_error_report("client tool response error", error.to_string());
     }
     true
@@ -463,7 +460,7 @@ fn handle_open_selector(
 fn handle_preview_artifact(
     app: &mut AppState,
     request: ClientToolRequest,
-    child_stdin: &mut RuntimeStdin,
+    tx: &mut dyn RuntimeTx,
 ) -> bool {
     let title = arg_str(&request.arguments, "title")
         .unwrap_or("Preview")
@@ -476,9 +473,7 @@ fn handle_preview_artifact(
         rows: panel_rows_from_content(content),
         selected: 0,
     });
-    if let Err(error) =
-        send_client_tool_text_success(child_stdin, &request.id, "artifact previewed")
-    {
+    if let Err(error) = send_client_tool_text_success(tx, &request.id, "artifact previewed") {
         app.push_error_report("client tool response error", error.to_string());
     }
     true
@@ -495,7 +490,7 @@ fn focus_latest_kind(app: &mut AppState, kind: LogKind) -> bool {
 fn handle_focus_context(
     app: &mut AppState,
     request: ClientToolRequest,
-    child_stdin: &mut RuntimeStdin,
+    tx: &mut dyn RuntimeTx,
 ) -> bool {
     let target = arg_str(&request.arguments, "target").unwrap_or("bottom");
     let focused = match target {
@@ -512,7 +507,7 @@ fn handle_focus_context(
         _ => false,
     };
     if let Err(error) = send_client_tool_success(
-        child_stdin,
+        tx,
         &request.id,
         json!({ "focused": focused, "target": target }),
     ) {
@@ -537,10 +532,10 @@ pub(super) fn apply_progress(app: &mut AppState, args: &Value, replay_run_id: Op
 fn handle_show_progress(
     app: &mut AppState,
     request: ClientToolRequest,
-    child_stdin: &mut RuntimeStdin,
+    tx: &mut dyn RuntimeTx,
 ) -> bool {
     apply_progress(app, &request.arguments, None);
-    if let Err(error) = send_client_tool_text_success(child_stdin, &request.id, "progress shown") {
+    if let Err(error) = send_client_tool_text_success(tx, &request.id, "progress shown") {
         app.push_error_report("client tool response error", error.to_string());
     }
     true
@@ -549,18 +544,16 @@ fn handle_show_progress(
 pub(super) fn handle_client_tool_request(
     app: &mut AppState,
     request: ClientToolRequest,
-    child_stdin: &mut RuntimeStdin,
+    tx: &mut dyn RuntimeTx,
 ) -> bool {
     match request.name.as_str() {
-        "tui_ask_user_choice" => handle_ask_user_choice(app, request, child_stdin),
-        "tui_open_selector" => handle_open_selector(app, request, child_stdin),
-        "tui_preview_artifact" => handle_preview_artifact(app, request, child_stdin),
-        "tui_focus_context" => handle_focus_context(app, request, child_stdin),
-        "tui_show_progress" => handle_show_progress(app, request, child_stdin),
+        "tui_ask_user_choice" => handle_ask_user_choice(app, request, tx),
+        "tui_open_selector" => handle_open_selector(app, request, tx),
+        "tui_preview_artifact" => handle_preview_artifact(app, request, tx),
+        "tui_focus_context" => handle_focus_context(app, request, tx),
+        "tui_show_progress" => handle_show_progress(app, request, tx),
         _ => {
-            if let Err(error) =
-                send_client_tool_error(child_stdin, &request.id, "unknown TUI client tool")
-            {
+            if let Err(error) = send_client_tool_error(tx, &request.id, "unknown TUI client tool") {
                 app.push_error_report("client tool response error", error.to_string());
             }
             true
@@ -600,39 +593,12 @@ mod tests {
     use super::{
         build_progress_line, handle_ask_user_choice, handle_show_progress, parse_ask_user_choice,
     };
-    use crate::app::handlers::runtime_response::RuntimeStdin;
-    use crate::app::runtime::ClientToolRequest;
+    use crate::app::runtime::{ClientToolRequest, MockRuntimeTx, RuntimeTx};
     use crate::app::AppState;
     use serde_json::json;
-    use std::io::{BufWriter, Write};
-    use std::process::Stdio;
 
-    fn with_runtime_writer<T>(f: impl FnOnce(&mut RuntimeStdin) -> T) -> T {
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = std::process::Command::new("cmd");
-            command.args(["/C", "more"]);
-            command
-        };
-        #[cfg(not(windows))]
-        let mut command = {
-            let mut command = std::process::Command::new("sh");
-            command.args(["-c", "cat >/dev/null"]);
-            command
-        };
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .spawn()
-            .expect("spawn runtime writer");
-        let stdin = child.stdin.take().expect("child stdin");
-        let mut writer = BufWriter::new(stdin);
-        let out = f(&mut writer);
-        writer.flush().expect("flush runtime writer");
-        drop(writer);
-        let _ = child.kill();
-        let _ = child.wait();
-        out
+    fn with_runtime_tx(f: impl FnOnce(&mut dyn RuntimeTx)) {
+        f(&mut MockRuntimeTx::default());
     }
 
     fn client_tool_request(
@@ -653,7 +619,7 @@ mod tests {
 
     #[test]
     fn ask_user_choice_appends_fallback_options_when_enabled() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
 
             handle_ask_user_choice(
@@ -672,7 +638,7 @@ mod tests {
                         ]
                     }),
                 ),
-                writer,
+                tx,
             );
 
             let pick = app.pick_dialog.expect("pick dialog");
@@ -690,7 +656,7 @@ mod tests {
 
     #[test]
     fn ask_user_choice_rejects_missing_id_instead_of_showing_only_other() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
 
             handle_ask_user_choice(
@@ -704,7 +670,7 @@ mod tests {
                         "choices": [{ "label": "More details" }]
                     }),
                 ),
-                writer,
+                tx,
             );
 
             assert!(app.pick_dialog.is_none());
@@ -770,7 +736,7 @@ mod tests {
 
     #[test]
     fn progress_with_same_id_replaces_existing_line() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
 
             handle_show_progress(
@@ -784,7 +750,7 @@ mod tests {
                         "total": 4
                     }),
                 ),
-                writer,
+                tx,
             );
             handle_show_progress(
                 &mut app,
@@ -797,7 +763,7 @@ mod tests {
                         "message": "ready"
                     }),
                 ),
-                writer,
+                tx,
             );
 
             assert_eq!(app.log.len(), 1);
@@ -811,7 +777,7 @@ mod tests {
 
     #[test]
     fn progress_without_id_replaces_existing_phase_line() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
 
             handle_show_progress(
@@ -825,7 +791,7 @@ mod tests {
                         "total": 4
                     }),
                 ),
-                writer,
+                tx,
             );
             handle_show_progress(
                 &mut app,
@@ -838,7 +804,7 @@ mod tests {
                         "total": 4
                     }),
                 ),
-                writer,
+                tx,
             );
 
             assert_eq!(app.log.len(), 1);
@@ -856,7 +822,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::{Terminal, TerminalOptions, Viewport};
 
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             let mut terminal = Terminal::with_options(
                 TestBackend::new(100, 12),
@@ -873,7 +839,7 @@ mod tests {
                         "id": "build", "phase": "Build", "current": 1, "total": 2
                     }),
                 ),
-                writer,
+                tx,
             );
             for i in 0..20 {
                 app.push_line(LogKind::Assistant, format!("other output {i}"));
@@ -891,7 +857,7 @@ mod tests {
                         "message": "almost"
                     }),
                 ),
-                writer,
+                tx,
             );
             assert_eq!(app.log.len(), 22);
             assert!(app.log[0].plain_text().contains("50%"));
@@ -904,7 +870,7 @@ mod tests {
                         "id": "build", "phase": "Build", "status": "completed", "message": "finished"
                     }),
                 ),
-                writer,
+                tx,
             );
             assert_eq!(app.log.len(), 22);
             assert!(!app.progress_component_lines.contains_key("id:build"));

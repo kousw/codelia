@@ -1,18 +1,13 @@
-use super::RuntimeStdin;
 use crate::app::handlers::panels::request_session_list;
 use crate::app::runtime::send_session_update;
+use crate::app::runtime::RuntimeTx;
 use crate::app::state::LogKind;
 use crate::app::AppState;
 
-pub(super) fn handle(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    args: &str,
-) {
+pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) {
     let parts: Vec<_> = args.split_whitespace().collect();
     if parts.is_empty() || parts == ["list"] || parts == ["list", "--all"] {
-        request_session_list(app, writer, next_id, parts.len() == 2);
+        request_session_list(app, tx, parts.len() == 2);
         return;
     }
     let usage = "usage: /session [list [--all]|pin|unpin|archive|unarchive [session_id]]";
@@ -46,9 +41,9 @@ pub(super) fn handle(
         "archive" => (None, Some(true)),
         _ => (None, Some(false)),
     };
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.session_update_id = Some(id.clone());
-    if let Err(error) = send_session_update(writer, &id, &session_id, pinned, archived) {
+    if let Err(error) = send_session_update(tx, &id, &session_id, pinned, archived) {
         app.rpc_pending.session_update_id = None;
         app.push_error_report("send error", error.to_string());
     }

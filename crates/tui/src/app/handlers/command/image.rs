@@ -1,5 +1,4 @@
-use super::RuntimeStdin;
-use crate::app::runtime::{send_request, wire_value};
+use crate::app::runtime::{send_request, wire_value, RuntimeTx};
 use crate::app::state::LogKind;
 use crate::app::{AppState, PendingImageArtifactRequest};
 use crate::protocol::{
@@ -25,13 +24,7 @@ fn model_params(args: &str) -> Result<(&'static str, Value), &'static str> {
     }
 }
 
-pub(super) fn handle(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    args: &str,
-    artifact: bool,
-) {
+pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str, artifact: bool) {
     if !app.runtime_info.supports_image_generation {
         app.push_line(LogKind::Error, "Image generation/artifacts are unavailable in this runtime. Update the runtime or use a supported local environment.");
         return;
@@ -70,7 +63,7 @@ pub(super) fn handle(
             }
         }
     };
-    let id = next_id();
+    let id = tx.next_id();
     if artifact {
         app.rpc_pending.image_artifact_id = Some(PendingImageArtifactRequest {
             request_id: id.clone(),
@@ -84,17 +77,17 @@ pub(super) fn handle(
     }
     let sent = match method {
         "image.artifact.get" => send_request::<methods::ImageArtifactGet>(
-            writer,
+            tx,
             &id,
             &ImageArtifactGetParams {
                 artifact_id: args.to_string(),
             },
         ),
         "image.model.get" => {
-            send_request::<methods::ImageModelGet>(writer, &id, &ImageModelGetParams::default())
+            send_request::<methods::ImageModelGet>(tx, &id, &ImageModelGetParams::default())
         }
         _ => wire_value::<ImageModelConfigureParams>("image.model.configure", "params", params)
-            .and_then(|params| send_request::<methods::ImageModelConfigure>(writer, &id, &params)),
+            .and_then(|params| send_request::<methods::ImageModelConfigure>(tx, &id, &params)),
     };
     if let Err(error) = sent {
         app.rpc_pending.image_artifact_id = None;

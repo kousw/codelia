@@ -15,10 +15,76 @@ use crate::protocol::{UiConfirmResult, UiPickResult, UiPromptResult};
 use serde_json::{json, Value};
 use std::env;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
+
+/// Synchronous runtime RPC transport and request ID allocator.
+pub(crate) trait RuntimeTx {
+    fn next_id(&mut self) -> String;
+    fn send_line(&mut self, line: &str) -> io::Result<()>;
+}
+
+pub(crate) struct StdioRuntimeTx<'a> {
+    stdin: &'a mut BufWriter<ChildStdin>,
+    rpc_id: u64,
+}
+
+impl<'a> StdioRuntimeTx<'a> {
+    pub(crate) fn new(stdin: &'a mut BufWriter<ChildStdin>) -> Self {
+        Self { stdin, rpc_id: 0 }
+    }
+}
+
+impl RuntimeTx for StdioRuntimeTx<'_> {
+    fn next_id(&mut self) -> String {
+        self.rpc_id += 1;
+        self.rpc_id.to_string()
+    }
+
+    fn send_line(&mut self, line: &str) -> io::Result<()> {
+        self.stdin.write_all(line.as_bytes())?;
+        self.stdin.flush()
+    }
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct MockRuntimeTx {
+    rpc_id: u64,
+    id_prefix: String,
+    pub(crate) sent: Vec<Value>,
+    pub(crate) fail_next: Option<io::ErrorKind>,
+}
+
+#[cfg(test)]
+impl MockRuntimeTx {
+    pub(crate) fn with_id_prefix(prefix: &str) -> Self {
+        Self {
+            id_prefix: prefix.to_owned(),
+            ..Self::default()
+        }
+    }
+}
+
+#[cfg(test)]
+impl RuntimeTx for MockRuntimeTx {
+    fn next_id(&mut self) -> String {
+        self.rpc_id += 1;
+        format!("{}{}", self.id_prefix, self.rpc_id)
+    }
+
+    fn send_line(&mut self, line: &str) -> io::Result<()> {
+        if let Some(kind) = self.fail_next.take() {
+            return Err(kind.into());
+        }
+        let payload: Value = serde_json::from_str(line.trim_end())
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        self.sent.push(payload);
+        Ok(())
+    }
+}
 
 fn split_args(value: &str) -> Vec<String> {
     match shell_words::split(value) {
@@ -414,22 +480,20 @@ fn client_tool_definitions(method: &str) -> io::Result<Option<Vec<ClientToolDefi
 
 /// Writes a catalogued UI -> runtime request.
 pub(crate) fn send_request<R: ClientRequest>(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     params: &R::Params,
 ) -> std::io::Result<()> {
-    writer.write_all(crate::protocol::request_line::<R>(id, params).as_bytes())?;
-    writer.flush()
+    tx.send_line(&crate::protocol::request_line::<R>(id, params))
 }
 
 /// Writes the result of a catalogued runtime -> UI request.
 pub(crate) fn send_reply<R: ServerRequestReply>(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     result: &R::Result,
 ) -> std::io::Result<()> {
-    writer.write_all(crate::protocol::reply_line::<R>(id, result).as_bytes())?;
-    writer.flush()
+    tx.send_line(&crate::protocol::reply_line::<R>(id, result))
 }
 
 pub(crate) fn initialize_params(diagnostics: bool) -> InitializeParams {
@@ -453,16 +517,12 @@ pub(crate) fn initialize_params(diagnostics: bool) -> InitializeParams {
     }
 }
 
-pub fn send_initialize(
-    writer: &mut BufWriter<std::process::ChildStdin>,
-    id: &str,
-    diagnostics: bool,
-) -> std::io::Result<()> {
-    send_request::<methods::Initialize>(writer, id, &initialize_params(diagnostics))
+pub fn send_initialize(tx: &mut dyn RuntimeTx, id: &str, diagnostics: bool) -> std::io::Result<()> {
+    send_request::<methods::Initialize>(tx, id, &initialize_params(diagnostics))
 }
 
 pub fn send_confirm_response(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     ok: bool,
     remember: bool,
@@ -473,31 +533,27 @@ pub fn send_confirm_response(
         remember: Some(remember),
         reason: reason.map(str::to_owned),
     };
-    send_reply::<methods::UiConfirmRequest>(writer, id, &result)
+    send_reply::<methods::UiConfirmRequest>(tx, id, &result)
 }
 
 pub fn send_prompt_response(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     value: Option<&str>,
 ) -> std::io::Result<()> {
     let result = UiPromptResult {
         value: value.map(str::to_owned),
     };
-    send_reply::<methods::UiPromptRequest>(writer, id, &result)
+    send_reply::<methods::UiPromptRequest>(tx, id, &result)
 }
 
-pub fn send_pick_response(
-    writer: &mut BufWriter<std::process::ChildStdin>,
-    id: &str,
-    ids: &[String],
-) -> std::io::Result<()> {
+pub fn send_pick_response(tx: &mut dyn RuntimeTx, id: &str, ids: &[String]) -> std::io::Result<()> {
     let result = UiPickResult { ids: ids.to_vec() };
-    send_reply::<methods::UiPickRequest>(writer, id, &result)
+    send_reply::<methods::UiPickRequest>(tx, id, &result)
 }
 
 pub fn send_run_start(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     session_id: Option<&str>,
     input: Value,
@@ -512,11 +568,11 @@ pub fn send_run_start(
         ui_context: None,
         meta: None,
     };
-    send_request::<methods::RunStart>(writer, id, &params)
+    send_request::<methods::RunStart>(tx, id, &params)
 }
 
 pub(crate) fn send_goal_continue(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     offer: &crate::app::goal::GoalOffer,
 ) -> std::io::Result<()> {
@@ -529,11 +585,11 @@ pub(crate) fn send_goal_continue(
         tools: client_tool_definitions("goal.continue")?,
         ui_context: None,
     };
-    send_request::<methods::GoalContinue>(writer, id, &params)
+    send_request::<methods::GoalContinue>(tx, id, &params)
 }
 
 pub fn send_run_steer(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     run_id: &str,
     input: Value,
@@ -547,16 +603,16 @@ pub fn send_run_steer(
             .filter(|value| !value.trim().is_empty())
             .map(str::to_owned),
     };
-    send_request::<methods::RunSteer>(writer, id, &params)
+    send_request::<methods::RunSteer>(tx, id, &params)
 }
 
 pub fn send_client_tool_success(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     result: Value,
 ) -> std::io::Result<()> {
     send_client_tool_result(
-        writer,
+        tx,
         id,
         ClientToolCallResult::Success(ClientToolCallSuccess {
             result: Some(json!({ "type": "json", "value": result })),
@@ -565,12 +621,12 @@ pub fn send_client_tool_success(
 }
 
 pub fn send_client_tool_text_success(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     text: &str,
 ) -> std::io::Result<()> {
     send_client_tool_result(
-        writer,
+        tx,
         id,
         ClientToolCallResult::Success(ClientToolCallSuccess {
             result: Some(json!({ "type": "text", "text": text })),
@@ -579,12 +635,12 @@ pub fn send_client_tool_text_success(
 }
 
 pub fn send_client_tool_error(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     error: &str,
 ) -> std::io::Result<()> {
     send_client_tool_result(
-        writer,
+        tx,
         id,
         ClientToolCallResult::Failure(ClientToolCallFailure {
             error: error.to_owned(),
@@ -593,15 +649,15 @@ pub fn send_client_tool_error(
 }
 
 fn send_client_tool_result(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     result: ClientToolCallResult,
 ) -> std::io::Result<()> {
-    send_reply::<methods::ClientToolCall>(writer, id, &result)
+    send_reply::<methods::ClientToolCall>(tx, id, &result)
 }
 
 pub fn send_run_cancel(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     run_id: &str,
     reason: Option<&str>,
@@ -610,11 +666,11 @@ pub fn send_run_cancel(
         run_id: run_id.to_owned(),
         reason: reason.map(str::to_owned),
     };
-    send_request::<methods::RunCancel>(writer, id, &params)
+    send_request::<methods::RunCancel>(tx, id, &params)
 }
 
 pub fn send_session_list(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     limit: Option<usize>,
     show_all: bool,
@@ -629,11 +685,11 @@ pub fn send_session_list(
         workspace_root: None,
         include_archived: Some(show_all),
     };
-    send_request::<methods::SessionList>(writer, id, &params)
+    send_request::<methods::SessionList>(tx, id, &params)
 }
 
 pub fn send_session_update(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     session_id: &str,
     pinned: Option<bool>,
@@ -644,11 +700,11 @@ pub fn send_session_update(
         pinned,
         archived,
     };
-    send_request::<methods::SessionUpdate>(writer, id, &params)
+    send_request::<methods::SessionUpdate>(tx, id, &params)
 }
 
 pub fn send_auth_logout(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     clear_session: bool,
     provider: Option<&str>,
@@ -658,11 +714,11 @@ pub fn send_auth_logout(
         clear_session: Some(clear_session),
         confirmed: None,
     };
-    send_request::<methods::AuthLogout>(writer, id, &params)
+    send_request::<methods::AuthLogout>(tx, id, &params)
 }
 
 pub fn send_model_list(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     provider: Option<&str>,
     include_details: bool,
@@ -671,12 +727,12 @@ pub fn send_model_list(
         provider: provider.map(str::to_owned),
         include_details: Some(include_details),
     };
-    send_request::<methods::ModelList>(writer, id, &params)
+    send_request::<methods::ModelList>(tx, id, &params)
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn send_model_set(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     provider: Option<&str>,
     model: &str,
@@ -693,16 +749,12 @@ pub fn send_model_set(
         scope: scope.map(|scope| ModelSelectionSource::from(scope.to_owned())),
         reset: reset.then_some(true),
     };
-    send_request::<methods::ModelSet>(writer, id, &params)
+    send_request::<methods::ModelSet>(tx, id, &params)
 }
 
-pub fn send_theme_set(
-    writer: &mut BufWriter<std::process::ChildStdin>,
-    id: &str,
-    name: &str,
-) -> std::io::Result<()> {
+pub fn send_theme_set(tx: &mut dyn RuntimeTx, id: &str, name: &str) -> std::io::Result<()> {
     send_request::<methods::ThemeSet>(
-        writer,
+        tx,
         id,
         &ThemeSetParams {
             name: name.to_owned(),
@@ -711,7 +763,7 @@ pub fn send_theme_set(
 }
 
 pub fn send_shell_exec(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     command: &str,
     timeout_seconds: Option<u64>,
@@ -721,11 +773,11 @@ pub fn send_shell_exec(
         timeout_seconds: timeout_seconds.map(|value| value as f64),
         cwd: None,
     };
-    send_request::<methods::ShellExec>(writer, id, &params)
+    send_request::<methods::ShellExec>(tx, id, &params)
 }
 
 pub fn send_shell_start(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     command: &str,
     timeout_seconds: Option<u64>,
@@ -735,63 +787,44 @@ pub fn send_shell_start(
         timeout_seconds: timeout_seconds.map(|value| value as f64),
         cwd: None,
     };
-    send_request::<methods::ShellStart>(writer, id, &params)
+    send_request::<methods::ShellStart>(tx, id, &params)
 }
 
-pub fn send_shell_wait(
-    writer: &mut BufWriter<std::process::ChildStdin>,
-    id: &str,
-    task_id: &str,
-) -> std::io::Result<()> {
+pub fn send_shell_wait(tx: &mut dyn RuntimeTx, id: &str, task_id: &str) -> std::io::Result<()> {
     let params = ShellWaitParams {
         task_id: task_id.to_owned(),
         wait_timeout_seconds: None,
     };
-    send_request::<methods::ShellWait>(writer, id, &params)
+    send_request::<methods::ShellWait>(tx, id, &params)
 }
 
-pub fn send_shell_detach(
-    writer: &mut BufWriter<std::process::ChildStdin>,
-    id: &str,
-    task_id: &str,
-) -> std::io::Result<()> {
+pub fn send_shell_detach(tx: &mut dyn RuntimeTx, id: &str, task_id: &str) -> std::io::Result<()> {
     let params = ShellTaskIdParams {
         task_id: task_id.to_owned(),
     };
-    send_request::<methods::ShellDetach>(writer, id, &params)
+    send_request::<methods::ShellDetach>(tx, id, &params)
 }
 
-pub fn send_task_list(
-    writer: &mut BufWriter<std::process::ChildStdin>,
-    id: &str,
-) -> std::io::Result<()> {
-    send_request::<methods::TaskList>(writer, id, &TaskListParams::default())
+pub fn send_task_list(tx: &mut dyn RuntimeTx, id: &str) -> std::io::Result<()> {
+    send_request::<methods::TaskList>(tx, id, &TaskListParams::default())
 }
 
-pub fn send_task_status(
-    writer: &mut BufWriter<std::process::ChildStdin>,
-    id: &str,
-    task_id: &str,
-) -> std::io::Result<()> {
+pub fn send_task_status(tx: &mut dyn RuntimeTx, id: &str, task_id: &str) -> std::io::Result<()> {
     let params = TaskIdParams {
         task_id: task_id.to_owned(),
     };
-    send_request::<methods::TaskStatus>(writer, id, &params)
+    send_request::<methods::TaskStatus>(tx, id, &params)
 }
 
-pub fn send_task_cancel(
-    writer: &mut BufWriter<std::process::ChildStdin>,
-    id: &str,
-    task_id: &str,
-) -> std::io::Result<()> {
+pub fn send_task_cancel(tx: &mut dyn RuntimeTx, id: &str, task_id: &str) -> std::io::Result<()> {
     let params = TaskIdParams {
         task_id: task_id.to_owned(),
     };
-    send_request::<methods::TaskCancel>(writer, id, &params)
+    send_request::<methods::TaskCancel>(tx, id, &params)
 }
 
 pub fn send_tool_call(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     name: &str,
     arguments: Value,
@@ -800,22 +833,18 @@ pub fn send_tool_call(
         name: name.to_owned(),
         arguments: wire_value("tool.call", "arguments", arguments)?,
     };
-    send_request::<methods::ToolCall>(writer, id, &params)
+    send_request::<methods::ToolCall>(tx, id, &params)
 }
 
-pub fn send_mcp_list(
-    writer: &mut BufWriter<std::process::ChildStdin>,
-    id: &str,
-    scope: Option<&str>,
-) -> std::io::Result<()> {
+pub fn send_mcp_list(tx: &mut dyn RuntimeTx, id: &str, scope: Option<&str>) -> std::io::Result<()> {
     let params = McpListParams {
         scope: scope.map(|scope| McpListScope::from(scope.to_owned())),
     };
-    send_request::<methods::McpList>(writer, id, &params)
+    send_request::<methods::McpList>(tx, id, &params)
 }
 
 pub fn send_context_inspect(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     include_agents: bool,
     include_skills: bool,
@@ -824,11 +853,11 @@ pub fn send_context_inspect(
         include_agents: Some(include_agents),
         include_skills: Some(include_skills),
     };
-    send_request::<methods::ContextInspect>(writer, id, &params)
+    send_request::<methods::ContextInspect>(tx, id, &params)
 }
 
 pub fn send_skills_list(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     force_reload: bool,
 ) -> std::io::Result<()> {
@@ -836,11 +865,11 @@ pub fn send_skills_list(
         cwd: None,
         force_reload: Some(force_reload),
     };
-    send_request::<methods::SkillsList>(writer, id, &params)
+    send_request::<methods::SkillsList>(tx, id, &params)
 }
 
 pub fn send_session_history(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     session_id: &str,
     max_runs: Option<usize>,
@@ -851,18 +880,18 @@ pub fn send_session_history(
         max_runs: max_runs.map(|value| value as i64),
         max_events: max_events.map(|value| value as i64),
     };
-    send_request::<methods::SessionHistory>(writer, id, &params)
+    send_request::<methods::SessionHistory>(tx, id, &params)
 }
 
 pub fn send_session_open(
-    writer: &mut BufWriter<std::process::ChildStdin>,
+    tx: &mut dyn RuntimeTx,
     id: &str,
     session_id: &str,
 ) -> std::io::Result<()> {
     let params = SessionOpenParams {
         session_id: session_id.to_owned(),
     };
-    send_request::<methods::SessionOpen>(writer, id, &params)
+    send_request::<methods::SessionOpen>(tx, id, &params)
 }
 
 #[cfg(test)]
@@ -1023,16 +1052,26 @@ mod tests {
 
     #[test]
     fn tool_call_request_line_uses_the_generated_params() {
+        use super::{send_request, MockRuntimeTx, RuntimeTx};
+        use crate::protocol::methods::ToolCall;
+
         let params = crate::protocol::ToolCallParams {
             name: "lane_list".to_owned(),
             arguments: Some(serde_json::Map::new()),
         };
-        let line =
-            crate::protocol::request_line::<crate::protocol::methods::ToolCall>("id-1", &params);
-        let value: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
+        let mut tx = MockRuntimeTx::with_id_prefix("id-");
+        let id = tx.next_id();
+        send_request::<ToolCall>(&mut tx, &id, &params).unwrap();
+        let [value] = tx.sent.as_slice() else {
+            panic!("expected one tool request");
+        };
         assert_eq!(
-            value,
+            *value,
             json!({"jsonrpc":"2.0","id":"id-1","method":"tool.call","params":{"name":"lane_list","arguments":{}}})
+        );
+        assert_eq!(
+            format!("{value}\n"),
+            crate::protocol::request_line::<ToolCall>(&id, &params)
         );
     }
 

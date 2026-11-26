@@ -1,14 +1,11 @@
 use super::handlers::command::can_dispatch_prompt_now;
-use super::runtime::{send_goal_continue, send_request, RpcResponse};
+use super::runtime::{send_goal_continue, send_request, RpcResponse, RuntimeTx};
 use super::state::LogKind;
 use super::util::sanitize_paste;
 use super::AppState;
 use serde_json::Value;
-use std::io::BufWriter;
-use std::process::ChildStdin;
 use std::time::{Duration, Instant};
 
-type RuntimeStdin = BufWriter<ChildStdin>;
 const ACK_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) use crate::protocol::GoalSnapshot;
@@ -106,17 +103,17 @@ enum GoalRequest {
 
 fn request(
     app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    id: String,
+    tx: &mut dyn RuntimeTx,
     request: GoalRequest,
     kind: Request,
 ) -> bool {
+    let id = tx.next_id();
     let sent = match &request {
-        GoalRequest::Get(params) => send_request::<methods::GoalGet>(writer, &id, params),
-        GoalRequest::Set(params) => send_request::<methods::GoalSet>(writer, &id, params),
-        GoalRequest::Pause(params) => send_request::<methods::GoalPause>(writer, &id, params),
-        GoalRequest::Resume(params) => send_request::<methods::GoalResume>(writer, &id, params),
-        GoalRequest::Clear(params) => send_request::<methods::GoalClear>(writer, &id, params),
+        GoalRequest::Get(params) => send_request::<methods::GoalGet>(tx, &id, params),
+        GoalRequest::Set(params) => send_request::<methods::GoalSet>(tx, &id, params),
+        GoalRequest::Pause(params) => send_request::<methods::GoalPause>(tx, &id, params),
+        GoalRequest::Resume(params) => send_request::<methods::GoalResume>(tx, &id, params),
+        GoalRequest::Clear(params) => send_request::<methods::GoalClear>(tx, &id, params),
     };
     if let Err(error) = sent {
         app.push_error_report("goal send error", error.to_string());
@@ -126,12 +123,7 @@ fn request(
     true
 }
 
-pub(crate) fn command(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    args: &str,
-) -> bool {
+pub(crate) fn command(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) -> bool {
     if !app.goal.supported {
         app.push_line(
             LogKind::Error,
@@ -145,16 +137,10 @@ pub(crate) fn command(
             session_id: session.clone(),
             continuation_id: None,
         };
-        return request(
-            app,
-            writer,
-            next_id(),
-            GoalRequest::Get(params),
-            Request::Inspect,
-        );
+        return request(app, tx, GoalRequest::Get(params), Request::Inspect);
     }
     if args == "pause" {
-        if !pause(app, writer, next_id, false) {
+        if !pause(app, tx, false) {
             app.push_line(LogKind::Status, "No active goal on this connection.");
         }
         return true;
@@ -203,7 +189,7 @@ pub(crate) fn command(
             } else {
                 GoalRequest::Clear(target)
             };
-            return request(app, writer, next_id(), goal_request, kind);
+            return request(app, tx, goal_request, kind);
         }
         ("resume" | "clear", None) if args == subcommand => {
             app.push_line(LogKind::Status, "No goal in this session.");
@@ -230,15 +216,10 @@ pub(crate) fn command(
         }
         _ => params.objective = Some(args.to_owned()),
     }
-    request(app, writer, next_id(), GoalRequest::Set(params), kind)
+    request(app, tx, GoalRequest::Set(params), kind)
 }
 
-pub(crate) fn pause(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    interrupt: bool,
-) -> bool {
+pub(crate) fn pause(app: &mut AppState, tx: &mut dyn RuntimeTx, interrupt: bool) -> bool {
     let Some(snapshot) = app.goal.snapshot(app.runtime_info.session_id.as_deref()) else {
         return false;
     };
@@ -263,8 +244,7 @@ pub(crate) fn pause(
     app.goal.offer = None;
     if request(
         app,
-        writer,
-        next_id(),
+        tx,
         GoalRequest::Pause(params),
         Request::Change {
             bind_new_session: false,
@@ -508,12 +488,7 @@ fn expire_confirmation(app: &mut AppState, now: Instant) -> bool {
     expired
 }
 
-pub(crate) fn tick(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    now: Instant,
-) -> bool {
+pub(crate) fn tick(app: &mut AppState, tx: &mut dyn RuntimeTx, now: Instant) -> bool {
     if !app.goal.supported {
         return false;
     }
@@ -534,8 +509,7 @@ pub(crate) fn tick(
             };
             if !request(
                 app,
-                writer,
-                next_id(),
+                tx,
                 GoalRequest::Get(params),
                 Request::Check {
                     deadline: now + ACK_TIMEOUT,
@@ -556,8 +530,7 @@ pub(crate) fn tick(
         if let Some(session) = session {
             return request(
                 app,
-                writer,
-                next_id(),
+                tx,
                 GoalRequest::Get(GoalGetParams {
                     session_id: Some(session),
                     continuation_id: None,
@@ -573,10 +546,10 @@ pub(crate) fn tick(
     let Some(offer) = app.goal.offer.take() else {
         return false;
     };
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.run_start_id = Some(id.clone());
     app.update_run_status("starting".into());
-    let sent = send_goal_continue(writer, &id, &offer);
+    let sent = send_goal_continue(tx, &id, &offer);
     let check_at = match sent {
         Ok(()) => now + ACK_TIMEOUT,
         Err(error) => {

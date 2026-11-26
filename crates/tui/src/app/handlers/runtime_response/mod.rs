@@ -16,16 +16,15 @@ mod tasks;
 use self::formatters::push_rpc_error;
 use crate::app::handlers;
 use crate::app::handlers::theme::apply_theme_from_name;
-use crate::app::runtime::{parse_runtime_output, parse_runtime_output_with_history, RpcResponse};
+use crate::app::runtime::{
+    parse_runtime_output, parse_runtime_output_with_history, RpcResponse, RuntimeTx,
+};
 use crate::app::state::LogKind;
 use crate::app::{AppState, PendingRpcMatch};
 use crate::protocol::{methods, InitializeResult, InitializeResultShellSandboxIssue};
-use std::io::BufWriter;
-use std::process::ChildStdin;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::TryRecvError;
 
-pub(crate) type RuntimeStdin = BufWriter<ChildStdin>;
 pub(crate) type RuntimeReceiver = Receiver<String>;
 
 pub(super) use formatters::push_shell_stream_preview;
@@ -51,8 +50,7 @@ pub(crate) fn can_auto_start_initial_message(app: &AppState) -> bool {
 pub(crate) fn process_runtime_messages(
     app: &mut AppState,
     rx: &RuntimeReceiver,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> bool {
     let mut needs_redraw = false;
     let mut processed = 0usize;
@@ -69,7 +67,7 @@ pub(crate) fn process_runtime_messages(
                 } else {
                     parse_runtime_output(&line)
                 };
-                if parsed_output::apply_parsed_output(app, parsed, child_stdin, next_id) {
+                if parsed_output::apply_parsed_output(app, parsed, tx) {
                     needs_redraw = true;
                 }
             }
@@ -305,17 +303,11 @@ mod scoped_logout_tests {
     }
 }
 
-fn handle_rpc_response(
-    app: &mut AppState,
-    response: RpcResponse,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-) -> bool {
+fn handle_rpc_response(app: &mut AppState, response: RpcResponse, tx: &mut dyn RuntimeTx) -> bool {
     if crate::app::goal::handle_response(app, &response) {
         return true;
     }
-    if crate::app::handlers::command::upload::handle_response(app, &response, child_stdin, next_id)
-    {
+    if crate::app::handlers::command::upload::handle_response(app, &response, tx) {
         return true;
     }
     if let Some(pending) = app
@@ -332,7 +324,7 @@ fn handle_rpc_response(
                 session::handle_session_history_response(app, response)
             }
             PendingRpcMatch::SessionOpen => {
-                session::handle_session_open_response(app, response, child_stdin, next_id)
+                session::handle_session_open_response(app, response, tx)
             }
             PendingRpcMatch::ModelList { mode, scope } => {
                 model::handle_model_list_response(app, mode, scope, response)
@@ -343,12 +335,8 @@ fn handle_rpc_response(
             }
             PendingRpcMatch::LaneList => lane::handle_lane_list_response(app, response),
             PendingRpcMatch::LaneStatus => lane::handle_lane_status_response(app, response),
-            PendingRpcMatch::LaneClose => {
-                lane::handle_lane_close_response(app, response, child_stdin, next_id)
-            }
-            PendingRpcMatch::LaneCreate => {
-                lane::handle_lane_create_response(app, response, child_stdin, next_id)
-            }
+            PendingRpcMatch::LaneClose => lane::handle_lane_close_response(app, response, tx),
+            PendingRpcMatch::LaneCreate => lane::handle_lane_create_response(app, response, tx),
             PendingRpcMatch::SkillsList => skills::handle_skills_list_response(app, response),
             PendingRpcMatch::ContextInspect => {
                 context_inspect::handle_context_inspect_response(app, response)
@@ -356,7 +344,7 @@ fn handle_rpc_response(
             PendingRpcMatch::Logout => run_control::handle_logout_response(app, response),
             PendingRpcMatch::ShellExec => run_control::handle_shell_exec_response(app, response),
             PendingRpcMatch::ShellStart => {
-                run_control::handle_shell_start_response(app, response, child_stdin, next_id)
+                run_control::handle_shell_start_response(app, response, tx)
             }
             PendingRpcMatch::ShellWait => run_control::handle_shell_wait_response(app, response),
             PendingRpcMatch::ShellDetach => {

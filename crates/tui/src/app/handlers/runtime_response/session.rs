@@ -1,7 +1,6 @@
 use super::formatters::push_rpc_error;
 use super::panel_builders::build_session_list_panel;
-use super::RuntimeStdin;
-use crate::app::runtime::{send_model_list, RpcResponse};
+use crate::app::runtime::{send_model_list, RpcResponse, RuntimeTx};
 use crate::app::state::LogKind;
 use crate::app::{AppState, ModelListMode};
 use crate::protocol::{decode_result, methods, rpc_error_code, SessionListResult};
@@ -23,8 +22,7 @@ pub(super) fn handle_session_list_response(app: &mut AppState, response: RpcResp
 pub(super) fn handle_session_open_response(
     app: &mut AppState,
     response: RpcResponse,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) {
     if let Some(error) = response.error {
         // Older runtimes bind on the first run.start instead; nothing to report.
@@ -46,10 +44,10 @@ pub(super) fn handle_session_open_response(
     {
         return;
     }
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.model_list_id = Some(id.clone());
     app.rpc_pending.model_list_mode = Some(ModelListMode::Silent);
-    if let Err(error) = send_model_list(child_stdin, &id, None, false) {
+    if let Err(error) = send_model_list(tx, &id, None, false) {
         app.rpc_pending.model_list_id = None;
         app.rpc_pending.model_list_mode = None;
         app.push_error_report("send error", error.to_string());
@@ -160,37 +158,17 @@ fn apply_session_list_result(app: &mut AppState, result: &SessionListResult) {
     ));
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::handle_session_open_response;
-    use crate::app::runtime::RpcResponse;
+    use crate::app::runtime::{MockRuntimeTx, RpcResponse};
     use crate::app::{AppState, ModelListMode};
     use serde_json::json;
-    use std::io::{BufWriter, Read};
-    use std::process::Stdio;
 
-    fn run_open_response(app: &mut AppState, response: RpcResponse) -> String {
-        let mut child = std::process::Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("capture runtime writes");
-        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
-        let mut next = 0_u64;
-        handle_session_open_response(app, response, &mut writer, &mut || {
-            next += 1;
-            format!("id-{next}")
-        });
-        drop(writer);
-        let mut output = String::new();
-        child
-            .stdout
-            .take()
-            .unwrap()
-            .read_to_string(&mut output)
-            .unwrap();
-        child.wait().unwrap();
-        output
+    fn run_open_response(app: &mut AppState, response: RpcResponse) -> Vec<serde_json::Value> {
+        let mut tx = MockRuntimeTx::with_id_prefix("id-");
+        handle_session_open_response(app, response, &mut tx);
+        tx.sent
     }
 
     fn response(
@@ -208,7 +186,8 @@ mod tests {
     fn session_open_success_refreshes_the_model_silently() {
         let mut app = AppState::default();
         let output = run_open_response(&mut app, response(Some(json!({"session_id": "s1"})), None));
-        assert!(output.contains("\"method\":\"model.list\""), "{output}");
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0]["method"], "model.list");
         assert_eq!(app.rpc_pending.model_list_id.as_deref(), Some("id-1"));
         assert_eq!(app.rpc_pending.model_list_mode, Some(ModelListMode::Silent));
         assert!(app.log.is_empty());
@@ -220,7 +199,7 @@ mod tests {
         app.rpc_pending.model_list_id = Some("picker".to_string());
         app.rpc_pending.model_list_mode = Some(ModelListMode::Picker);
         let output = run_open_response(&mut app, response(Some(json!({"session_id": "s1"})), None));
-        assert!(output.is_empty(), "{output}");
+        assert!(output.is_empty(), "{output:?}");
         assert_eq!(app.rpc_pending.model_list_id.as_deref(), Some("picker"));
         assert_eq!(app.rpc_pending.model_list_mode, Some(ModelListMode::Picker));
     }
@@ -235,7 +214,7 @@ mod tests {
                 Some(json!({"code": -32601, "message": "method not found"})),
             ),
         );
-        assert!(output.is_empty(), "{output}");
+        assert!(output.is_empty(), "{output:?}");
         assert!(app.log.is_empty());
     }
 
@@ -249,7 +228,7 @@ mod tests {
                 Some(json!({"code": -32004, "message": "session not found"})),
             ),
         );
-        assert!(output.is_empty(), "{output}");
+        assert!(output.is_empty(), "{output:?}");
         assert!(app
             .log
             .iter()

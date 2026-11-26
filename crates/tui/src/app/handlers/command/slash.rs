@@ -1,7 +1,7 @@
 use crate::app::runtime::{
     send_auth_logout, send_context_inspect, send_mcp_list, send_model_set, send_run_start,
     send_skills_list, send_task_cancel, send_task_list, send_task_status, send_theme_set,
-    send_tool_call,
+    send_tool_call, RuntimeTx,
 };
 use crate::app::state::{
     command_suggestion_rows, parse_theme_name, theme_options, LogKind, ThemeListPanelState,
@@ -12,7 +12,7 @@ use crate::app::{
 };
 use serde_json::json;
 
-use super::{RuntimeStdin, COMMAND_SUGGESTION_LIMIT, MODEL_PROVIDERS, TASKS_USAGE_MESSAGE};
+use super::{COMMAND_SUGGESTION_LIMIT, MODEL_PROVIDERS, TASKS_USAGE_MESSAGE};
 
 fn parse_scope_filter(value: &str) -> Option<SkillsScopeFilter> {
     match value {
@@ -25,8 +25,7 @@ fn parse_scope_filter(value: &str) -> Option<SkillsScopeFilter> {
 
 pub(super) fn handle_compact_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     trimmed: &str,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
@@ -51,10 +50,10 @@ pub(super) fn handle_compact_command<'a>(
     app.push_line(LogKind::User, "> /compact");
     app.update_run_status("starting".to_string());
     app.push_line(LogKind::Status, "Starting forced compaction ...");
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.run_start_id = Some(id.clone());
     if let Err(error) = send_run_start(
-        child_stdin,
+        tx,
         &id,
         app.runtime_info.session_id.as_deref(),
         json!({ "type": "text", "text": "" }),
@@ -68,8 +67,7 @@ pub(super) fn handle_compact_command<'a>(
 
 pub(super) fn handle_model_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     let mut scope = ModelSetScope::Config;
@@ -83,7 +81,7 @@ pub(super) fn handle_model_command<'a>(
             app.push_line(LogKind::Error, "usage: /model [--session] [provider/]name");
             return;
         }
-        send_model_set_for_scope(app, child_stdin, next_id, model, scope);
+        send_model_set_for_scope(app, tx, model, scope);
         return;
     }
 
@@ -92,8 +90,7 @@ pub(super) fn handle_model_command<'a>(
 
 pub(super) fn handle_model_session_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     if let Some(model) = parts.next() {
@@ -109,10 +106,10 @@ pub(super) fn handle_model_session_command<'a>(
             app.reasoning_picker = None;
             app.skills_list_panel = None;
             app.theme_list_panel = None;
-            let id = next_id();
+            let id = tx.next_id();
             app.rpc_pending.model_set_id = Some(id.clone());
             if let Err(error) = send_model_set(
-                child_stdin,
+                tx,
                 &id,
                 None,
                 "",
@@ -133,7 +130,7 @@ pub(super) fn handle_model_session_command<'a>(
             );
             return;
         }
-        send_model_set_for_scope(app, child_stdin, next_id, model, ModelSetScope::Session);
+        send_model_set_for_scope(app, tx, model, ModelSetScope::Session);
         return;
     }
 
@@ -142,8 +139,7 @@ pub(super) fn handle_model_session_command<'a>(
 
 fn send_model_set_for_scope(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     model: &str,
     scope: ModelSetScope,
 ) {
@@ -151,14 +147,14 @@ fn send_model_set_for_scope(
     app.reasoning_picker = None;
     app.skills_list_panel = None;
     app.theme_list_panel = None;
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.model_set_id = Some(id.clone());
     let (provider, name) = model
         .split_once('/')
         .map(|(provider, name)| (Some(provider), name))
         .unwrap_or((app.runtime_info.current_provider.as_deref(), model));
     if let Err(error) = send_model_set(
-        child_stdin,
+        tx,
         &id,
         provider,
         name,
@@ -222,8 +218,7 @@ mod responses_provider_tests {
 
 pub(super) fn handle_fast_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     let requested = match parts.next() {
@@ -258,7 +253,7 @@ pub(super) fn handle_fast_command<'a>(
     app.reasoning_picker = None;
     app.skills_list_panel = None;
     app.theme_list_panel = None;
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.model_set_id = Some(id.clone());
     let scope = if app.runtime_info.current_model_source.as_deref() == Some("session") {
         ModelSetScope::Session
@@ -266,7 +261,7 @@ pub(super) fn handle_fast_command<'a>(
         ModelSetScope::Config
     };
     if let Err(error) = send_model_set(
-        child_stdin,
+        tx,
         &id,
         app.runtime_info.current_provider.as_deref(),
         &model,
@@ -282,8 +277,7 @@ pub(super) fn handle_fast_command<'a>(
 
 pub(super) fn handle_context_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     if !app.runtime_info.supports_context_inspect {
@@ -303,11 +297,11 @@ pub(super) fn handle_context_command<'a>(
         app.push_line(LogKind::Error, "usage: /context [brief]");
         return;
     }
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.context_inspect_id = Some(id.clone());
     app.skills_list_panel = None;
     app.theme_list_panel = None;
-    if let Err(error) = send_context_inspect(child_stdin, &id, include_agents, include_skills) {
+    if let Err(error) = send_context_inspect(tx, &id, include_agents, include_skills) {
         app.rpc_pending.context_inspect_id = None;
         app.push_error_report("send error", error.to_string());
     }
@@ -315,8 +309,7 @@ pub(super) fn handle_context_command<'a>(
 
 pub(super) fn handle_skills_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     if !app.runtime_info.supports_skills_list {
@@ -396,9 +389,9 @@ pub(super) fn handle_skills_command<'a>(
     app.theme_list_panel = None;
     app.rpc_pending.skills_query = Some(query);
     app.rpc_pending.skills_scope = Some(scope_filter);
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.skills_list_id = Some(id.clone());
-    if let Err(error) = send_skills_list(child_stdin, &id, force_reload) {
+    if let Err(error) = send_skills_list(tx, &id, force_reload) {
         app.rpc_pending.skills_list_id = None;
         app.rpc_pending.skills_query = None;
         app.rpc_pending.skills_scope = None;
@@ -408,8 +401,7 @@ pub(super) fn handle_skills_command<'a>(
 
 pub(super) fn handle_theme_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     let arg = parts.next();
@@ -437,9 +429,9 @@ pub(super) fn handle_theme_command<'a>(
             app.push_line(LogKind::Status, "Theme update request already running");
             return;
         }
-        let id = next_id();
+        let id = tx.next_id();
         app.rpc_pending.theme_set_id = Some(id.clone());
-        if let Err(error) = send_theme_set(child_stdin, &id, target.as_str()) {
+        if let Err(error) = send_theme_set(tx, &id, target.as_str()) {
             app.rpc_pending.theme_set_id = None;
             app.push_error_report("send error", error.to_string());
             return;
@@ -493,8 +485,7 @@ pub(super) fn handle_theme_command<'a>(
 
 pub(super) fn handle_mcp_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     if !app.runtime_info.supports_mcp_list {
@@ -506,12 +497,12 @@ pub(super) fn handle_mcp_command<'a>(
         app.push_line(LogKind::Error, "usage: /mcp [server-id]");
         return;
     }
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.mcp_list_id = Some(id.clone());
     app.rpc_pending.mcp_detail_id = detail_id;
     app.skills_list_panel = None;
     app.theme_list_panel = None;
-    if let Err(error) = send_mcp_list(child_stdin, &id, Some("loaded")) {
+    if let Err(error) = send_mcp_list(tx, &id, Some("loaded")) {
         app.rpc_pending.mcp_list_id = None;
         app.rpc_pending.mcp_detail_id = None;
         app.push_error_report("send error", error.to_string());
@@ -535,8 +526,7 @@ pub(super) fn handle_help_command<'a>(
 
 pub(super) fn handle_tasks_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     if !app.runtime_info.supports_tasks {
@@ -550,9 +540,9 @@ pub(super) fn handle_tasks_command<'a>(
                 app.push_line(LogKind::Error, TASKS_USAGE_MESSAGE);
                 return;
             }
-            let id = next_id();
+            let id = tx.next_id();
             app.rpc_pending.task_list_id = Some(id.clone());
-            if let Err(error) = send_task_list(child_stdin, &id) {
+            if let Err(error) = send_task_list(tx, &id) {
                 app.rpc_pending.task_list_id = None;
                 app.push_error_report("send error", error.to_string());
             }
@@ -566,9 +556,9 @@ pub(super) fn handle_tasks_command<'a>(
                 app.push_line(LogKind::Error, TASKS_USAGE_MESSAGE);
                 return;
             }
-            let id = next_id();
+            let id = tx.next_id();
             app.rpc_pending.task_status_id = Some(id.clone());
-            if let Err(error) = send_task_status(child_stdin, &id, task_id) {
+            if let Err(error) = send_task_status(tx, &id, task_id) {
                 app.rpc_pending.task_status_id = None;
                 app.push_error_report("send error", error.to_string());
             }
@@ -582,9 +572,9 @@ pub(super) fn handle_tasks_command<'a>(
                 app.push_line(LogKind::Error, TASKS_USAGE_MESSAGE);
                 return;
             }
-            let id = next_id();
+            let id = tx.next_id();
             app.rpc_pending.task_cancel_id = Some(id.clone());
-            if let Err(error) = send_task_cancel(child_stdin, &id, task_id) {
+            if let Err(error) = send_task_cancel(tx, &id, task_id) {
                 app.rpc_pending.task_cancel_id = None;
                 app.push_error_report("send error", error.to_string());
             }
@@ -640,8 +630,7 @@ pub(super) fn handle_errors_command<'a>(
 
 pub(super) fn handle_lane_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     if parts.next().is_some() {
@@ -660,9 +649,9 @@ pub(super) fn handle_lane_command<'a>(
     app.lane_list_panel = None;
     app.theme_list_panel = None;
 
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.lane_list_id = Some(id.clone());
-    if let Err(error) = send_tool_call(child_stdin, &id, "lane_list", json!({})) {
+    if let Err(error) = send_tool_call(tx, &id, "lane_list", json!({})) {
         app.rpc_pending.lane_list_id = None;
         app.push_error_report("send error", error.to_string());
     }
@@ -670,8 +659,7 @@ pub(super) fn handle_lane_command<'a>(
 
 pub(super) fn handle_logout_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     trimmed: &str,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
@@ -701,9 +689,9 @@ pub(super) fn handle_logout_command<'a>(
 
     app.input.record_history(trimmed);
     app.push_line(LogKind::User, format!("> {trimmed}"));
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.logout_id = Some(id.clone());
-    if let Err(error) = send_auth_logout(child_stdin, &id, true, provider) {
+    if let Err(error) = send_auth_logout(tx, &id, true, provider) {
         app.rpc_pending.logout_id = None;
         app.push_error_report("send error", error.to_string());
     }

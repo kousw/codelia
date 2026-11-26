@@ -1,11 +1,12 @@
+use crate::app::runtime::RuntimeTx;
 use crate::app::state::LogKind;
 use crate::app::{ActiveRunSubmitMode, AppState, PROMPT_DISPATCH_MAX_ATTEMPTS};
 use std::time::Instant;
 
 use super::prompt::send_steer_submission;
 use super::{
-    RuntimeStdin, QUEUE_CANCEL_USAGE_MESSAGE, QUEUE_CLEAR_USAGE_MESSAGE, QUEUE_EMPTY_MESSAGE,
-    QUEUE_LIST_LIMIT, QUEUE_MODE_USAGE_MESSAGE, QUEUE_STEER_USAGE_MESSAGE, QUEUE_USAGE_MESSAGE,
+    QUEUE_CANCEL_USAGE_MESSAGE, QUEUE_CLEAR_USAGE_MESSAGE, QUEUE_EMPTY_MESSAGE, QUEUE_LIST_LIMIT,
+    QUEUE_MODE_USAGE_MESSAGE, QUEUE_STEER_USAGE_MESSAGE, QUEUE_USAGE_MESSAGE,
 };
 
 fn queue_age_label(queued_at: Instant, now: Instant) -> String {
@@ -124,8 +125,7 @@ pub(crate) fn open_queue_steer_picker(app: &mut AppState) {
 pub(crate) fn handle_queue_steer_picker_key(
     app: &mut AppState,
     key: crossterm::event::KeyCode,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     use crossterm::event::KeyCode;
     let picker = app.queue_steer_picker.as_ref()?;
@@ -144,7 +144,7 @@ pub(crate) fn handle_queue_steer_picker_key(
             .map(|p| p.queue_id.clone());
         app.queue_steer_picker = None;
         if let Some(id) = id {
-            handle_queue_steer(app, child_stdin, next_id, &id);
+            handle_queue_steer(app, tx, &id);
         }
         return Some(true);
     }
@@ -164,12 +164,7 @@ pub(crate) fn handle_queue_steer_picker_key(
     Some(true)
 }
 
-fn handle_queue_steer(
-    app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    target: &str,
-) {
+fn handle_queue_steer(app: &mut AppState, tx: &mut dyn RuntimeTx, target: &str) {
     if app.pending_prompt_queue.is_empty() {
         app.push_line(LogKind::Status, QUEUE_EMPTY_MESSAGE);
         return;
@@ -209,7 +204,7 @@ fn handle_queue_steer(
     };
 
     let queue_id = item.queue_id.clone();
-    if send_steer_submission(app, child_stdin, next_id, &run_id, item) {
+    if send_steer_submission(app, tx, &run_id, item) {
         app.push_line(
             LogKind::Status,
             format!("Promoted queued prompt {queue_id} to mid-run steer."),
@@ -219,8 +214,7 @@ fn handle_queue_steer(
 
 pub(super) fn handle_queue_command<'a>(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     let Some(subcommand) = parts.next() else {
@@ -321,12 +315,7 @@ pub(super) fn handle_queue_command<'a>(
             handle_queue_mode(app, parts);
         }
         "steer" => {
-            handle_queue_steer(
-                app,
-                child_stdin,
-                next_id,
-                &parts.collect::<Vec<_>>().join(" "),
-            );
+            handle_queue_steer(app, tx, &parts.collect::<Vec<_>>().join(" "));
         }
         "retry" => {
             if parts.next().is_some() {

@@ -1,10 +1,9 @@
-use super::RuntimeStdin;
 use crate::app::handlers;
 use crate::app::handlers::confirm::handle_confirm_key;
 use crate::app::log_wrap::selected_text_for_range;
 use crate::app::runtime::{
     send_client_tool_error, send_client_tool_success, send_pick_response, send_prompt_response,
-    send_run_cancel, send_shell_detach, send_tool_call,
+    send_run_cancel, send_shell_detach, send_tool_call, RuntimeTx,
 };
 use crate::app::state::{InputState, LogKind, SelectionHitTest};
 use crate::app::util::attachments::token_span_at;
@@ -17,11 +16,7 @@ use std::time::{Duration, Instant};
 
 const SHIFT_ENTER_BACKSLASH_WINDOW: Duration = Duration::from_millis(80);
 
-pub(crate) fn handle_ctrl_c(
-    app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-) -> bool {
+pub(crate) fn handle_ctrl_c(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool {
     if app.rpc_pending.run_cancel_id.is_some() {
         app.push_line(
             LogKind::Status,
@@ -30,14 +25,14 @@ pub(crate) fn handle_ctrl_c(
         return true;
     }
 
-    if crate::app::goal::pause(app, child_stdin, next_id, true) {
+    if crate::app::goal::pause(app, tx, true) {
         return true;
     }
 
     if let Some(run_id) = app.runtime_info.active_run_id.clone() {
-        let id = next_id();
+        let id = tx.next_id();
         app.rpc_pending.run_cancel_id = Some(id.clone());
-        if let Err(error) = send_run_cancel(child_stdin, &id, &run_id, Some("user interrupted")) {
+        if let Err(error) = send_run_cancel(tx, &id, &run_id, Some("user interrupted")) {
             app.rpc_pending.run_cancel_id = None;
             app.push_error_report("send error", error.to_string());
         } else {
@@ -60,20 +55,16 @@ pub(crate) fn handle_ctrl_c(
     false
 }
 
-pub(crate) fn maybe_request_skills_catalog(
-    app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-) {
+pub(crate) fn maybe_request_skills_catalog(app: &mut AppState, tx: &mut dyn RuntimeTx) {
     if !app.runtime_info.supports_skills_list {
         return;
     }
     if app.skills_catalog_loaded || app.rpc_pending.skills_list_id.is_some() {
         return;
     }
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.skills_list_id = Some(id.clone());
-    if let Err(error) = crate::app::runtime::send_skills_list(child_stdin, &id, false) {
+    if let Err(error) = crate::app::runtime::send_skills_list(tx, &id, false) {
         app.rpc_pending.skills_list_id = None;
         app.skills_catalog_loaded = true;
         app.push_error_report("send error", error.to_string());
@@ -174,8 +165,7 @@ pub(crate) fn handle_main_key(
     key: KeyCode,
     modifiers: KeyModifiers,
     terminal: &mut TuiTerminal,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> bool {
     let now = Instant::now();
     let is_plain_backslash = matches!(key, KeyCode::Char('\\')) && modifiers.is_empty();
@@ -220,9 +210,9 @@ pub(crate) fn handle_main_key(
                 app.push_line(LogKind::Status, "Shell detach is already pending.");
                 return true;
             }
-            let id = next_id();
+            let id = tx.next_id();
             app.rpc_pending.shell_detach_id = Some(id.clone());
-            if let Err(error) = send_shell_detach(child_stdin, &id, &task_id) {
+            if let Err(error) = send_shell_detach(tx, &id, &task_id) {
                 app.rpc_pending.shell_detach_id = None;
                 app.push_error_report("send error", error.to_string());
             }
@@ -247,16 +237,15 @@ pub(crate) fn handle_main_key(
             } else if !app.input.current().is_empty() || !app.pending_image_attachments.is_empty() {
                 app.clear_composer();
                 true
-            } else if crate::app::goal::pause(app, child_stdin, next_id, true) {
+            } else if crate::app::goal::pause(app, tx, true) {
                 true
             } else if app.is_running() {
                 if app.rpc_pending.run_cancel_id.is_some() {
                     true
                 } else if let Some(run_id) = app.runtime_info.active_run_id.clone() {
-                    let id = next_id();
+                    let id = tx.next_id();
                     app.rpc_pending.run_cancel_id = Some(id.clone());
-                    if let Err(error) =
-                        send_run_cancel(child_stdin, &id, &run_id, Some("user interrupted"))
+                    if let Err(error) = send_run_cancel(tx, &id, &run_id, Some("user interrupted"))
                     {
                         app.rpc_pending.run_cancel_id = None;
                         app.push_error_report("send error", error.to_string());
@@ -315,7 +304,7 @@ pub(crate) fn handle_main_key(
                 }
             }
             app.pending_shift_enter_backslash = None;
-            handlers::handle_enter(app, child_stdin, next_id)
+            handlers::handle_enter(app, tx)
         }
         (KeyCode::Tab, mods) if mods.is_empty() => {
             handlers::complete_slash_command(&mut app.input)
@@ -458,8 +447,7 @@ fn handle_prompt_key(
     app: &mut AppState,
     key: KeyCode,
     modifiers: KeyModifiers,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     let prompt = app.prompt_dialog.as_ref()?;
     let prompt_id = prompt.id.clone();
@@ -473,7 +461,7 @@ fn handle_prompt_key(
             app.prompt_input.clear();
             app.rpc_pending.new_lane_seed_context = None;
             if prompt_id != "lane:new-task" && prompt_id != "lane:new-seed" {
-                if let Err(error) = send_prompt_response(child_stdin, &prompt_id, None) {
+                if let Err(error) = send_prompt_response(tx, &prompt_id, None) {
                     app.push_error_report("prompt response error", error.to_string());
                 }
             }
@@ -519,10 +507,9 @@ fn handle_prompt_key(
                     if !seed.is_empty() {
                         args.insert("seed_context".to_string(), Value::String(seed.to_string()));
                     }
-                    let id = next_id();
+                    let id = tx.next_id();
                     app.rpc_pending.lane_create_id = Some(id.clone());
-                    if let Err(error) =
-                        send_tool_call(child_stdin, &id, "lane_create", Value::Object(args))
+                    if let Err(error) = send_tool_call(tx, &id, "lane_create", Value::Object(args))
                     {
                         app.rpc_pending.lane_create_id = None;
                         app.push_error_report("send error", error.to_string());
@@ -531,8 +518,7 @@ fn handle_prompt_key(
                 return Some(true);
             }
 
-            if let Err(error) = send_prompt_response(child_stdin, &prompt_id, Some(value.as_str()))
-            {
+            if let Err(error) = send_prompt_response(tx, &prompt_id, Some(value.as_str())) {
                 app.push_error_report("prompt response error", error.to_string());
             }
         }
@@ -546,12 +532,7 @@ fn handle_prompt_key(
     Some(handled)
 }
 
-fn handle_pick_key(
-    app: &mut AppState,
-    key: KeyCode,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-) -> Option<bool> {
+fn handle_pick_key(app: &mut AppState, key: KeyCode, tx: &mut dyn RuntimeTx) -> Option<bool> {
     let pick = app.pick_dialog.as_mut()?;
     if let Some(offset) = pick.review_offset.as_mut() {
         match key {
@@ -594,7 +575,7 @@ fn handle_pick_key(
     if pick.shell_rule_picker.is_some() && matches!(key, KeyCode::Enter | KeyCode::Esc) {
         if let Some(picker) = app.pick_dialog.take() {
             if key == KeyCode::Enter {
-                handlers::shell_rules::select(app, child_stdin, next_id, picker);
+                handlers::shell_rules::select(app, tx, picker);
             }
         }
         return Some(true);
@@ -608,13 +589,13 @@ fn handle_pick_key(
             let id = pick.id.clone();
             app.pick_dialog = None;
             if app.rpc_pending.client_tool_choice_ids.remove(&id) {
-                if let Err(error) = send_client_tool_error(child_stdin, &id, "choice cancelled") {
+                if let Err(error) = send_client_tool_error(tx, &id, "choice cancelled") {
                     app.push_error_report("client tool response error", error.to_string());
                 }
                 return Some(true);
             }
             let ids: Vec<String> = Vec::new();
-            if let Err(error) = send_pick_response(child_stdin, &id, &ids) {
+            if let Err(error) = send_pick_response(tx, &id, &ids) {
                 app.push_error_report("pick response error", error.to_string());
             }
         }
@@ -651,7 +632,7 @@ fn handle_pick_key(
             if app.rpc_pending.client_tool_choice_ids.remove(&id) {
                 let selected_id = ids.first().cloned();
                 let result = json!({ "selected_id": selected_id });
-                if let Err(error) = send_client_tool_success(child_stdin, &id, result) {
+                if let Err(error) = send_client_tool_success(tx, &id, result) {
                     app.push_error_report("client tool response error", error.to_string());
                 }
                 return Some(true);
@@ -659,12 +640,12 @@ fn handle_pick_key(
 
             if let Some(lane_id) = id.strip_prefix("lane:action:") {
                 if let Some(action) = ids.first() {
-                    let request_id = next_id();
+                    let request_id = tx.next_id();
                     match action.as_str() {
                         "status" => {
                             app.rpc_pending.lane_status_id = Some(request_id.clone());
                             if let Err(error) = send_tool_call(
-                                child_stdin,
+                                tx,
                                 &request_id,
                                 "lane_status",
                                 json!({ "lane_id": lane_id }),
@@ -676,7 +657,7 @@ fn handle_pick_key(
                         "close" => {
                             app.rpc_pending.lane_close_id = Some(request_id.clone());
                             if let Err(error) = send_tool_call(
-                                child_stdin,
+                                tx,
                                 &request_id,
                                 "lane_close",
                                 json!({ "lane_id": lane_id }),
@@ -691,7 +672,7 @@ fn handle_pick_key(
                 return Some(true);
             }
 
-            if let Err(error) = send_pick_response(child_stdin, &id, &ids) {
+            if let Err(error) = send_pick_response(tx, &id, &ids) {
                 app.push_error_report("pick response error", error.to_string());
             }
         }
@@ -845,33 +826,29 @@ pub(crate) fn handle_non_main_key(
     app: &mut AppState,
     key: KeyCode,
     modifiers: KeyModifiers,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    if let Some(redraw) = handle_confirm_key(app, key, modifiers, child_stdin) {
+    if let Some(redraw) = handle_confirm_key(app, key, modifiers, tx) {
         return Some(redraw);
     }
     if app.pending_confirm_dialog.is_some() {
         return Some(false);
     }
 
-    if let Some(redraw) = handle_prompt_key(app, key, modifiers, child_stdin, next_id) {
+    if let Some(redraw) = handle_prompt_key(app, key, modifiers, tx) {
         return Some(redraw);
     }
 
-    if let Some(redraw) = handle_pick_key(app, key, child_stdin, next_id) {
+    if let Some(redraw) = handle_pick_key(app, key, tx) {
         return Some(redraw);
     }
 
-    if let Some(redraw) =
-        crate::app::handlers::panels::handle_session_list_panel_key(app, key, child_stdin, next_id)
+    if let Some(redraw) = crate::app::handlers::panels::handle_session_list_panel_key(app, key, tx)
     {
         return Some(redraw);
     }
 
-    if let Some(redraw) =
-        crate::app::handlers::panels::handle_lane_list_panel_key(app, key, child_stdin, next_id)
-    {
+    if let Some(redraw) = crate::app::handlers::panels::handle_lane_list_panel_key(app, key, tx) {
         return Some(redraw);
     }
 
@@ -879,9 +856,7 @@ pub(crate) fn handle_non_main_key(
         return Some(redraw);
     }
 
-    if let Some(redraw) =
-        crate::app::handlers::panels::handle_theme_list_panel_key(app, key, child_stdin, next_id)
-    {
+    if let Some(redraw) = crate::app::handlers::panels::handle_theme_list_panel_key(app, key, tx) {
         return Some(redraw);
     }
 
@@ -889,61 +864,41 @@ pub(crate) fn handle_non_main_key(
         return Some(redraw);
     }
 
-    if let Some(redraw) =
-        crate::app::handlers::panels::handle_model_list_panel_key(app, key, child_stdin, next_id)
-    {
+    if let Some(redraw) = crate::app::handlers::panels::handle_model_list_panel_key(app, key, tx) {
         return Some(redraw);
     }
 
-    if let Some(redraw) =
-        crate::app::handlers::panels::handle_provider_picker_key(app, key, child_stdin, next_id)
-    {
+    if let Some(redraw) = crate::app::handlers::panels::handle_provider_picker_key(app, key, tx) {
         return Some(redraw);
     }
 
-    if let Some(redraw) =
-        crate::app::handlers::panels::handle_model_picker_key(app, key, child_stdin, next_id)
-    {
+    if let Some(redraw) = crate::app::handlers::panels::handle_model_picker_key(app, key, tx) {
         return Some(redraw);
     }
 
-    if let Some(redraw) =
-        crate::app::handlers::panels::handle_reasoning_picker_key(app, key, child_stdin, next_id)
-    {
+    if let Some(redraw) = crate::app::handlers::panels::handle_reasoning_picker_key(app, key, tx) {
         return Some(redraw);
     }
 
     if app.queue_picker_focused() && !modifiers.is_empty() {
         return Some(false);
     }
-    handlers::handle_queue_steer_picker_key(app, key, child_stdin, next_id)
+    handlers::handle_queue_steer_picker_key(app, key, tx)
 }
 
 #[cfg(test)]
-#[cfg(unix)]
 mod shell_rule_tests {
     use super::*;
     use crate::app::handlers::runtime_response::process_runtime_messages;
-    use std::io::BufWriter;
-    use std::process::{Command, Stdio};
+    use crate::app::runtime::MockRuntimeTx;
     use std::sync::mpsc;
 
     #[test]
     fn saved_shell_rules_list_exact_values_and_remove_only_the_confirmed_scope() {
-        let mut child = Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("capture permissions requests");
-        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut tx = MockRuntimeTx::with_id_prefix("permissions-");
         let mut app = AppState::default();
         app.runtime_info.session_id = Some("session-1".into());
-        let (tx, rx) = mpsc::channel();
-        let mut counter = 0;
-        let mut next_id = || {
-            counter += 1;
-            format!("permissions-{counter}")
-        };
+        let (sender, rx) = mpsc::channel();
         let exact_id = "a".repeat(64);
         let legacy_id = "b".repeat(64);
         let source_id = "c".repeat(64);
@@ -963,28 +918,22 @@ mod shell_rule_tests {
              "executable":"/bin/example","argv0":"example","launchKind":"source",
              "args":["test"],"cwd":"/one","profile":"development","scope":"project"}
         ]});
-        let submit = |app: &mut AppState,
-                      writer: &mut RuntimeStdin,
-                      mut next_id: &mut dyn FnMut() -> String,
-                      input: &str| {
+        let submit = |app: &mut AppState, tx: &mut dyn RuntimeTx, input: &str| {
             app.input.set_from(input);
-            assert!(handlers::handle_enter(app, writer, &mut next_id));
+            assert!(handlers::handle_enter(app, tx));
         };
-        let respond = |app: &mut AppState,
-                       writer: &mut RuntimeStdin,
-                       mut next_id: &mut dyn FnMut() -> String,
-                       id: &str,
-                       result: &Value| {
-            tx.send(json!({"jsonrpc":"2.0","id":id,"result":result}).to_string())
+        let respond = |app: &mut AppState, tx: &mut dyn RuntimeTx, id: &str, result: &Value| {
+            sender
+                .send(json!({"jsonrpc":"2.0","id":id,"result":result}).to_string())
                 .expect("fixture response");
-            assert!(process_runtime_messages(app, &rx, writer, &mut next_id));
+            assert!(process_runtime_messages(app, &rx, tx));
         };
 
-        submit(&mut app, &mut writer, &mut next_id, "/permissions");
+        submit(&mut app, &mut tx, "/permissions");
         assert!(app.rpc_pending.shell_rules.is_none());
         app.runtime_info.supports_permissions_rw = true;
-        submit(&mut app, &mut writer, &mut next_id, "/permissions list");
-        respond(&mut app, &mut writer, &mut next_id, "permissions-1", &list);
+        submit(&mut app, &mut tx, "/permissions list");
+        respond(&mut app, &mut tx, "permissions-1", &list);
         let log = |app: &AppState| {
             app.log
                 .iter()
@@ -1019,38 +968,34 @@ mod shell_rule_tests {
                 ],
             ),
         ] {
-            submit(&mut app, &mut writer, &mut next_id, "/permissions remove");
-            respond(&mut app, &mut writer, &mut next_id, id, &list);
+            submit(&mut app, &mut tx, "/permissions remove");
+            respond(&mut app, &mut tx, id, &list);
             for key in keys {
-                assert_eq!(
-                    handle_pick_key(&mut app, key, &mut writer, &mut next_id),
-                    Some(true)
-                );
+                assert_eq!(handle_pick_key(&mut app, key, &mut tx), Some(true));
             }
             assert!(app.pick_dialog.is_none());
         }
         respond(
             &mut app,
-            &mut writer,
-            &mut next_id,
+            &mut tx,
             "permissions-5",
             &json!({"launch_rule_id":legacy_id,"scope":"session","removed":1}),
         );
         assert!(log(&app).contains("Removed the session shell rule."));
 
-        submit(&mut app, &mut writer, &mut next_id, "/permissions remove");
-        respond(&mut app, &mut writer, &mut next_id, "permissions-6", &list);
+        submit(&mut app, &mut tx, "/permissions remove");
+        respond(&mut app, &mut tx, "permissions-6", &list);
         assert_eq!(
-            handle_pick_key(&mut app, KeyCode::Enter, &mut writer, &mut next_id),
+            handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
             Some(true)
         );
         app.runtime_info.session_id = Some("session-2".into());
         assert_eq!(
-            handle_pick_key(&mut app, KeyCode::Down, &mut writer, &mut next_id),
+            handle_pick_key(&mut app, KeyCode::Down, &mut tx),
             Some(true)
         );
         assert_eq!(
-            handle_pick_key(&mut app, KeyCode::Enter, &mut writer, &mut next_id),
+            handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
             Some(true)
         );
         assert!(log(&app).contains("The session changed."));
@@ -1058,11 +1003,11 @@ mod shell_rule_tests {
         // Remembered tools are independent of the launch-rule store.
         let tool_list = json!({"approval_mode":null,"paths":{"global":"/config.json","project":null},"rules":[],"remembered_tools":[{"tool":"webfetch"}]});
         for (request_id, confirm) in [("permissions-7", false), ("permissions-8", true)] {
-            submit(&mut app, &mut writer, &mut next_id, "/permissions remove");
-            respond(&mut app, &mut writer, &mut next_id, request_id, &tool_list);
+            submit(&mut app, &mut tx, "/permissions remove");
+            respond(&mut app, &mut tx, request_id, &tool_list);
             assert_eq!(app.pick_dialog.as_ref().unwrap().items.len(), 1);
             assert_eq!(
-                handle_pick_key(&mut app, KeyCode::Enter, &mut writer, &mut next_id),
+                handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
                 Some(true)
             );
             let dialog = app.pick_dialog.as_ref().unwrap();
@@ -1070,31 +1015,24 @@ mod shell_rule_tests {
             assert_eq!(dialog.selected, 0);
             if confirm {
                 assert_eq!(
-                    handle_pick_key(&mut app, KeyCode::Down, &mut writer, &mut next_id),
+                    handle_pick_key(&mut app, KeyCode::Down, &mut tx),
                     Some(true)
                 );
             }
             assert_eq!(
-                handle_pick_key(&mut app, KeyCode::Enter, &mut writer, &mut next_id),
+                handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
                 Some(true)
             );
             assert_eq!(app.rpc_pending.shell_rules.is_some(), confirm);
         }
         respond(
             &mut app,
-            &mut writer,
-            &mut next_id,
+            &mut tx,
             "permissions-9",
             &json!({"remembered_tool":"webfetch","scope":"project","removed":1}),
         );
         assert!(log(&app).contains(r#"Personal workspace permission cleared for "webfetch"."#));
-        drop(writer);
-        let requests: Vec<Value> =
-            String::from_utf8(child.wait_with_output().expect("output").stdout)
-                .expect("utf8")
-                .lines()
-                .map(|line| serde_json::from_str(line).expect("json request"))
-                .collect();
+        let requests = &tx.sent;
         assert_eq!(requests.len(), 9);
         assert_eq!(requests[8]["method"], "permissions.remove");
         assert_eq!(
@@ -1120,32 +1058,17 @@ mod shell_rule_tests {
 
     #[test]
     fn project_allow_confirmation_sends_only_the_reviewed_workspace_and_revision() {
-        let mut child = Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut writer = BufWriter::new(child.stdin.take().unwrap());
+        let mut tx = MockRuntimeTx::default();
         let mut app = AppState::default();
         app.runtime_info.supports_permissions_rw = true;
         app.runtime_info.supports_project_allow_trust = true;
-        let mut n = 0;
-        let mut next_id = || {
-            n += 1;
-            n.to_string()
-        };
-        let (tx, rx) = mpsc::channel();
+        let (sender, rx) = mpsc::channel();
         for confirm in [false, true] {
             app.input.set_from("/permissions trust");
-            assert!(handlers::handle_enter(&mut app, &mut writer, &mut next_id));
+            assert!(handlers::handle_enter(&mut app, &mut tx));
             let id = app.rpc_pending.shell_rules.as_ref().unwrap().0.clone();
-            tx.send(json!({"id":id,"jsonrpc":"2.0","result":{"approval_mode":null,"paths":{"global":"/config.json","project":null},"rules":[],"project_allow_trust":{"trusted":false,"workspace":"/workspace","revision":"snapshot-1","rules":[{"tool":"shell","command":"cargo test"}]}}}).to_string()).unwrap();
-            assert!(process_runtime_messages(
-                &mut app,
-                &rx,
-                &mut writer,
-                &mut next_id
-            ));
+            sender.send(json!({"id":id,"jsonrpc":"2.0","result":{"approval_mode":null,"paths":{"global":"/config.json","project":null},"rules":[],"project_allow_trust":{"trusted":false,"workspace":"/workspace","revision":"snapshot-1","rules":[{"tool":"shell","command":"cargo test"}]}}}).to_string()).unwrap();
+            assert!(process_runtime_messages(&mut app, &rx, &mut tx));
             let dialog = app.pick_dialog.as_ref().unwrap();
             let message = dialog.message.as_ref().unwrap();
             assert!(message.contains("future edits"));
@@ -1153,22 +1076,17 @@ mod shell_rule_tests {
             assert_eq!(dialog.selected, 0);
             if confirm {
                 assert_eq!(
-                    handle_pick_key(&mut app, KeyCode::Down, &mut writer, &mut next_id),
+                    handle_pick_key(&mut app, KeyCode::Down, &mut tx),
                     Some(true)
                 );
             }
             assert_eq!(
-                handle_pick_key(&mut app, KeyCode::Enter, &mut writer, &mut next_id),
+                handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
                 Some(true)
             );
             assert_eq!(app.rpc_pending.shell_rules.is_some(), confirm);
         }
-        drop(writer);
-        let requests: Vec<Value> = String::from_utf8(child.wait_with_output().unwrap().stdout)
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
+        let requests = &tx.sent;
         assert_eq!(requests.len(), 3);
         assert_eq!(requests[2]["method"], "permissions.projectTrust.set");
         assert_eq!(
@@ -1179,15 +1097,9 @@ mod shell_rule_tests {
 
     #[test]
     fn permissions_run_sends_raw_operator_shell_source_only_to_a_compatible_idle_runtime() {
-        let mut child = Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("capture operator shell requests");
-        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut tx = MockRuntimeTx::default();
         let mut app = AppState::default();
-        let (tx, rx) = mpsc::channel();
-        let mut next_id = || "operator-shell".to_owned();
+        let (sender, rx) = mpsc::channel();
         let source = "  example 'file name' \"\"\n  ";
         let input = format!("/permissions run {source}");
         let mut capabilities = json!({"supports_permissions_rw":true,"supports_tool_call":true,"supports_shell_exec":true,"supports_ui_requests":true});
@@ -1195,31 +1107,32 @@ mod shell_rule_tests {
         for structured in [false, true] {
             capabilities["supports_structured_approval"] = json!(structured);
             app.rpc_pending.initialize_id = Some("initialize".to_owned());
-            tx.send(
-                json!({"jsonrpc":"2.0","id":"initialize","result":{
-                    "protocol_version":"0", "server":{"name":"runtime","version":"test"},
-                    "server_capabilities":capabilities
-                }})
-                .to_string(),
-            )
-            .expect("fixture initialization");
-            process_runtime_messages(&mut app, &rx, &mut writer, &mut next_id);
+            sender
+                .send(
+                    json!({"jsonrpc":"2.0","id":"initialize","result":{
+                        "protocol_version":"0", "server":{"name":"runtime","version":"test"},
+                        "server_capabilities":capabilities
+                    }})
+                    .to_string(),
+                )
+                .expect("fixture initialization");
+            process_runtime_messages(&mut app, &rx, &mut tx);
             if structured {
                 app.run_status = Some("running".to_owned());
             }
             app.input.set_from(&input);
-            assert!(handlers::handle_enter(&mut app, &mut writer, &mut next_id));
+            assert!(handlers::handle_enter(&mut app, &mut tx));
             assert!(!app.rpc_pending.shell_rule_run_pending());
             assert_eq!(app.input.current(), input);
         }
 
         app.run_status = None;
-        assert!(handlers::handle_enter(&mut app, &mut writer, &mut next_id));
+        assert!(handlers::handle_enter(&mut app, &mut tx));
         assert!(app.rpc_pending.shell_rule_run_pending());
         assert!(!handlers::can_dispatch_prompt_now(&app));
         assert!(app.input.current().is_empty());
 
-        tx.send(
+        sender.send(
             json!({"jsonrpc":"2.0","id":"approval-pick","method":"ui.pick.request","params":{
                 "title":"Approve shell?","message":source,"approval":true,"items":[
                     {"id":"approval-request/allow_once","label":"Allow once"},
@@ -1229,30 +1142,17 @@ mod shell_rule_tests {
             .to_string(),
         )
         .expect("fixture approval pick");
-        assert!(process_runtime_messages(
-            &mut app,
-            &rx,
-            &mut writer,
-            &mut next_id
-        ));
+        assert!(process_runtime_messages(&mut app, &rx, &mut tx));
         assert!(app.pick_dialog.as_ref().is_some_and(|pick| pick.approval));
         for key in [KeyCode::Down, KeyCode::Enter] {
-            assert_eq!(
-                handle_pick_key(&mut app, key, &mut writer, &mut next_id),
-                Some(true)
-            );
+            assert_eq!(handle_pick_key(&mut app, key, &mut tx), Some(true));
         }
         assert!(app.rpc_pending.shell_rule_run_pending());
 
-        tx.send(json!({"jsonrpc":"2.0","id":"operator-shell","result":{"ok":true,"result":{
+        sender.send(json!({"jsonrpc":"2.0","id":"1","result":{"ok":true,"result":{
             "state":"completed","exit_code":0,"stdout":"fixture output","stderr":"fixture diagnostics"
         }}}).to_string()).expect("fixture shell result");
-        assert!(process_runtime_messages(
-            &mut app,
-            &rx,
-            &mut writer,
-            &mut next_id
-        ));
+        assert!(process_runtime_messages(&mut app, &rx, &mut tx));
         assert!(!app.rpc_pending.shell_rule_run_pending());
         assert!(app.pending_shell_results.is_empty());
         let log = app
@@ -1266,13 +1166,7 @@ mod shell_rule_tests {
         assert!(log.contains("fixture output"));
         assert!(log.contains("fixture diagnostics"));
 
-        drop(writer);
-        let output = String::from_utf8(child.wait_with_output().expect("capture output").stdout)
-            .expect("UTF-8 requests");
-        let requests: Vec<Value> = output
-            .lines()
-            .map(|line| serde_json::from_str(line).expect("JSON request"))
-            .collect();
+        let requests = &tx.sent;
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0]["method"], "tool.call");
         assert_eq!(
@@ -1290,20 +1184,14 @@ mod shell_rule_tests {
 #[cfg(unix)]
 mod update_tests {
     use super::*;
+    use crate::app::runtime::MockRuntimeTx;
     use crate::app::self_update::{self, LauncherPaths};
     use ratatui::{backend::TestBackend, Terminal};
-    use std::io::{BufWriter, Write};
-    use std::process::{Command, Stdio};
+    use std::io::Write;
 
     #[test]
     fn update_command_and_picker_never_reply_to_runtime() {
-        let mut runtime = Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("runtime fixture");
-        let mut writer = BufWriter::new(runtime.stdin.take().unwrap());
-        let mut next_id = || "unexpected-rpc".into();
+        let mut tx = MockRuntimeTx::default();
         let fixture = std::env::temp_dir().join(format!("codelia-update-{}", std::process::id()));
         let mut script = std::fs::OpenOptions::new()
             .write(true)
@@ -1344,16 +1232,11 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
             }
         };
 
-        fn pick_auto_in_short_terminal(
-            app: &mut AppState,
-            writer: &mut RuntimeStdin,
-            next_id: &mut impl FnMut() -> String,
-            enlarge: bool,
-        ) {
+        fn pick_auto_in_short_terminal(app: &mut AppState, tx: &mut dyn RuntimeTx, enlarge: bool) {
             let mut terminal = Terminal::new(TestBackend::new(80, 7)).unwrap();
             let mut key = |app: &mut AppState, code| {
                 assert_eq!(
-                    handle_non_main_key(app, code, KeyModifiers::NONE, writer, next_id),
+                    handle_non_main_key(app, code, KeyModifiers::NONE, tx),
                     Some(true)
                 );
             };
@@ -1393,7 +1276,7 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
 
         for key in [KeyCode::Esc, KeyCode::Enter] {
             app.input.set_from("/update");
-            assert!(handlers::handle_enter(&mut app, &mut writer, &mut next_id));
+            assert!(handlers::handle_enter(&mut app, &mut tx));
             assert!(app.input.current().is_empty());
             poll(&mut app);
             let picker = app.pick_dialog.as_ref().expect("local update picker");
@@ -1403,11 +1286,8 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
                 picker.message.as_deref(),
                 Some("Current: 1.2.3. Update candidate (latest): 1.2.4.")
             );
-            pick_auto_in_short_terminal(&mut app, &mut writer, &mut next_id, key == KeyCode::Enter);
-            assert_eq!(
-                handle_pick_key(&mut app, key, &mut writer, &mut next_id),
-                Some(true)
-            );
+            pick_auto_in_short_terminal(&mut app, &mut tx, key == KeyCode::Enter);
+            assert_eq!(handle_pick_key(&mut app, key, &mut tx), Some(true));
             assert!(app.pick_dialog.is_none());
             assert_eq!(app.pending_update_control.is_some(), key == KeyCode::Enter);
         }
@@ -1446,9 +1326,9 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
             let picker = app.pick_dialog.as_ref().unwrap();
             assert!(self_update::is_startup_picker(picker));
             assert_eq!(picker.items[picker.selected].id, "notify");
-            pick_auto_in_short_terminal(&mut app, &mut writer, &mut next_id, key == KeyCode::Enter);
+            pick_auto_in_short_terminal(&mut app, &mut tx, key == KeyCode::Enter);
             assert_eq!(
-                handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut writer, &mut next_id),
+                handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut tx),
                 Some(true)
             );
             assert!(app.pick_dialog.is_none());
@@ -1465,9 +1345,7 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
             assert!(!startup_confirmations::poll(&mut app));
             assert!(!app.startup_confirmations.is_pending());
         }
-        writer.flush().unwrap();
-        drop(writer);
-        assert!(runtime.wait_with_output().unwrap().stdout.is_empty());
+        assert!(tx.sent.is_empty());
     }
 }
 

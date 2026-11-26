@@ -5,8 +5,8 @@ use super::formatters::{
 use super::panel_builders::build_onboarding_model_list_panel;
 use crate::app::handlers::confirm::handle_confirm_request;
 use crate::app::runtime::{
-    ParsedOutput, PermissionReadyUpdate, ReplayProgressEvent, ToolCallResultUpdate, UiPickRequest,
-    UiPromptRequest, UnreadableSteerApplied,
+    ParsedOutput, PermissionReadyUpdate, ReplayProgressEvent, RuntimeTx, ToolCallResultUpdate,
+    UiPickRequest, UiPromptRequest, UnreadableSteerApplied,
 };
 use crate::app::state::{LogKind, LogLine, LogTone};
 use crate::app::{
@@ -15,8 +15,6 @@ use crate::app::{
 };
 use std::collections::{HashSet, VecDeque};
 use std::time::Instant;
-
-use super::RuntimeStdin;
 
 const UNKNOWN_RUN_SCOPE: &str = "unknown";
 
@@ -405,8 +403,7 @@ pub(super) fn fallback_unconsumed_steers(
 pub(super) fn apply_parsed_output(
     app: &mut AppState,
     parsed: ParsedOutput,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> bool {
     let ParsedOutput {
         stream_update,
@@ -720,7 +717,7 @@ pub(super) fn apply_parsed_output(
     }
     let mut needs_redraw = true;
     if let Some(response) = rpc_response {
-        if super::handle_rpc_response(app, response, child_stdin, next_id) {
+        if super::handle_rpc_response(app, response, tx) {
             needs_redraw = true;
         }
     }
@@ -750,10 +747,10 @@ pub(super) fn apply_parsed_output(
         };
         let id = rejection.id.as_str();
         let sent = match rejection.method.as_str() {
-            "ui.confirm.request" => send_confirm_response(child_stdin, id, false, false, None),
-            "ui.prompt.request" => send_prompt_response(child_stdin, id, None),
-            "ui.pick.request" => send_pick_response(child_stdin, id, &[]),
-            _ => send_client_tool_error(child_stdin, id, &rejection.message),
+            "ui.confirm.request" => send_confirm_response(tx, id, false, false, None),
+            "ui.prompt.request" => send_prompt_response(tx, id, None),
+            "ui.pick.request" => send_pick_response(tx, id, &[]),
+            _ => send_client_tool_error(tx, id, &rejection.message),
         };
         if let Err(error) = sent {
             app.push_error_report("protocol reply send error", error.to_string());
@@ -761,7 +758,7 @@ pub(super) fn apply_parsed_output(
         needs_redraw = true;
     }
     if let Some(request) = client_tool_request {
-        if super::client_tools::handle_client_tool_request(app, request, child_stdin) {
+        if super::client_tools::handle_client_tool_request(app, request, tx) {
             needs_redraw = true;
         }
     }
@@ -824,20 +821,18 @@ mod tests {
         fallback_unconsumed_steers, register_pending_component_lines, resolve_tool_component_key,
         take_active_compaction_key, tool_component_key, PendingComponentStart, UNKNOWN_RUN_SCOPE,
     };
-    use crate::app::handlers::runtime_response::RuntimeStdin;
     use crate::app::runtime::parser::test_support::{
         parse_runtime_output, parse_runtime_output_with_history,
     };
+    use crate::app::runtime::{MockRuntimeTx, RuntimeTx};
     use crate::app::state::{LogKind, LogLine};
     use crate::app::{AppState, LogComponentSpan, PendingPromptRun};
     use serde_json::json;
-    use std::io::{BufWriter, Write};
-    use std::process::Stdio;
     use std::time::Instant;
 
     #[test]
     fn streaming_partial_survives_cancel_and_final_is_rendered_once() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.active_run_id = Some("run".into());
             for event in [
@@ -848,7 +843,7 @@ mod tests {
                     &json!({"method":"agent.event","params":{"run_id":"run","event":event}})
                         .to_string(),
                 );
-                apply_parsed_output(&mut app, parsed, writer, &mut || "id".into());
+                apply_parsed_output(&mut app, parsed, tx);
             }
             app.flush_stream_output();
             assert!(app
@@ -863,12 +858,12 @@ mod tests {
             let terminal = parse_runtime_output(
                 r#"{"method":"run.status","params":{"run_id":"run","status":"cancelled"}}"#,
             );
-            apply_parsed_output(&mut app, terminal, writer, &mut || "id".into());
+            apply_parsed_output(&mut app, terminal, tx);
             assert!(app.stream_preview.segments().is_empty());
             let final_event = parse_runtime_output(
                 r#"{"method":"agent.event","params":{"run_id":"run","event":{"type":"final","content":"canonical answer"}}}"#,
             );
-            apply_parsed_output(&mut app, final_event, writer, &mut || "id".into());
+            apply_parsed_output(&mut app, final_event, tx);
             assert_eq!(
                 app.log
                     .iter()
@@ -886,13 +881,13 @@ mod tests {
 
     #[test]
     fn structured_errors_show_context_only_on_failure_and_keep_safe_details_for_errors_show() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.current_model = Some("fixture-model".into());
             let healthy = parse_runtime_output(
                 r#"{"method":"run.status","params":{"run_id":"run","status":"running"}}"#,
             );
-            apply_parsed_output(&mut app, healthy, writer, &mut || "id".into());
+            apply_parsed_output(&mut app, healthy, tx);
             assert!(app.last_error_detail.is_none());
             assert!(!app
                 .log
@@ -901,7 +896,7 @@ mod tests {
             let failure = parse_runtime_output(
                 r#"{"method":"run.status","params":{"run_id":"run","status":"error","message":"Google request failed.","error":{"name":"ProviderFailureError","message":"Google request failed.","provider":"google","kind":"provider","status":503,"attempts":1,"max_attempts":3,"detail":"The response stream ended before completion.","code":"response_incomplete","hint":"Retry; if it repeats, share /errors show.","stack":"private-stack"}}}"#,
             );
-            apply_parsed_output(&mut app, failure, writer, &mut || "id".into());
+            apply_parsed_output(&mut app, failure, tx);
             let shown = app
                 .log
                 .iter()
@@ -924,11 +919,11 @@ mod tests {
         });
     }
 
-    fn feed_event(app: &mut AppState, writer: &mut RuntimeStdin, event: serde_json::Value) {
+    fn feed_event(app: &mut AppState, tx: &mut dyn RuntimeTx, event: serde_json::Value) {
         let parsed = parse_runtime_output(
             &json!({"method":"agent.event","params":{"run_id":"run","event":event}}).to_string(),
         );
-        apply_parsed_output(app, parsed, writer, &mut || "id".into());
+        apply_parsed_output(app, parsed, tx);
     }
 
     fn transcript_frame(app: &mut AppState) -> ratatui::buffer::Buffer {
@@ -942,15 +937,15 @@ mod tests {
 
     #[test]
     fn shorter_final_replaces_uncommitted_stream_suffix() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.active_run_id = Some("run".into());
             feed_event(
                 &mut app,
-                writer,
+                tx,
                 json!({"type":"text.delta","stream_id":"s","index":0,"delta":"hello wrong"}),
             );
-            feed_event(&mut app, writer, json!({"type":"final","content":"hello"}));
+            feed_event(&mut app, tx, json!({"type":"final","content":"hello"}));
             let text = app
                 .log
                 .iter()
@@ -964,7 +959,7 @@ mod tests {
 
     #[test]
     fn interleaved_text_and_reasoning_confirm_all_text_segments_once() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.active_run_id = Some("run".into());
             for event in [
@@ -974,7 +969,7 @@ mod tests {
                 json!({"type":"reasoning","content":"thought"}),
                 json!({"type":"final","content":"first\nsecond"}),
             ] {
-                feed_event(&mut app, writer, event);
+                feed_event(&mut app, tx, event);
             }
             for value in ["first", "second"] {
                 assert_eq!(
@@ -991,23 +986,23 @@ mod tests {
 
     #[test]
     fn public_delta_blocks_join_without_duplicate_canonical_final() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.active_run_id = Some("run".into());
             feed_event(
                 &mut app,
-                writer,
+                tx,
                 json!({"type":"text.delta","stream_id":"s","index":0,"delta":"first"}),
             );
             feed_event(
                 &mut app,
-                writer,
+                tx,
                 json!({"type":"text.delta","stream_id":"s","index":1,"delta":"second"}),
             );
             let before = transcript_frame(&mut app);
             feed_event(
                 &mut app,
-                writer,
+                tx,
                 json!({"type":"final","content":"first\nsecond"}),
             );
             assert_eq!(before, transcript_frame(&mut app));
@@ -1021,7 +1016,7 @@ mod tests {
 
     #[test]
     fn full_markdown_frame_is_unchanged_at_canonical_final() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.update_run_status("running".into());
             app.runtime_info.active_run_id = Some("run".into());
@@ -1035,7 +1030,7 @@ mod tests {
             for chunk in content.split_inclusive('\n') {
                 feed_event(
                     &mut app,
-                    writer,
+                    tx,
                     json!({"type":"text.delta","stream_id":"s","index":0,"delta":chunk}),
                 );
             }
@@ -1044,7 +1039,7 @@ mod tests {
             let scrolled = transcript_frame(&mut app);
             assert_ne!(before, scrolled);
             assert_eq!(scrolled, transcript_frame(&mut app));
-            feed_event(&mut app, writer, json!({"type":"final","content":content}));
+            feed_event(&mut app, tx, json!({"type":"final","content":content}));
             assert_eq!(scrolled, transcript_frame(&mut app));
             app.scroll_from_bottom = 0;
             assert_eq!(before, transcript_frame(&mut app));
@@ -1059,29 +1054,29 @@ mod tests {
 
     #[test]
     fn reasoning_handoff_keeps_the_answer_and_its_position() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.active_run_id = Some("run".into());
             feed_event(
                 &mut app,
-                writer,
+                tx,
                 json!({"type":"reasoning.delta","stream_id":"s","index":0,"delta":"thinking\nmore thought"}),
             );
             feed_event(
                 &mut app,
-                writer,
+                tx,
                 json!({"type":"text.delta","stream_id":"s","index":0,"delta":"# Result\n- **one**\n- two"}),
             );
             let before = transcript_frame(&mut app);
             feed_event(
                 &mut app,
-                writer,
+                tx,
                 json!({"type":"reasoning","content":"thinking\nmore thought"}),
             );
             assert_eq!(before, transcript_frame(&mut app));
             feed_event(
                 &mut app,
-                writer,
+                tx,
                 json!({"type":"final","content":"# Result\n- **one**\n- two"}),
             );
             assert_eq!(before, transcript_frame(&mut app));
@@ -1090,22 +1085,22 @@ mod tests {
 
     #[test]
     fn retry_clears_abandoned_transcript_but_replayed_final_does_not_consume_live_output() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.active_run_id = Some("run".into());
             feed_event(
                 &mut app,
-                writer,
+                tx,
                 json!({"type":"text.delta","stream_id":"s","index":0,"delta":"partial"}),
             );
             let replay = parse_runtime_output(
                 r#"{"method":"agent.event","params":{"run_id":"run","meta":{"replayed":true},"event":{"type":"final","content":"partial"}}}"#,
             );
-            apply_parsed_output(&mut app, replay, writer, &mut || "id".into());
+            apply_parsed_output(&mut app, replay, tx);
             assert_eq!(app.stream_preview.segments()[0].content, "partial");
             feed_event(
                 &mut app,
-                writer,
+                tx,
                 json!({"type":"llm.retry","provider":"openai","failure_kind":"network","next_attempt":2,"max_attempts":3,"delay_ms":1000}),
             );
             assert!(app.stream_preview.segments().is_empty());
@@ -1120,37 +1115,13 @@ mod tests {
         });
     }
 
-    fn with_runtime_writer<T>(f: impl FnOnce(&mut RuntimeStdin) -> T) -> T {
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = std::process::Command::new("cmd");
-            command.args(["/C", "more"]);
-            command
-        };
-        #[cfg(not(windows))]
-        let mut command = {
-            let mut command = std::process::Command::new("sh");
-            command.args(["-c", "cat >/dev/null"]);
-            command
-        };
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .spawn()
-            .expect("spawn runtime writer");
-        let stdin = child.stdin.take().expect("child stdin");
-        let mut writer = BufWriter::new(stdin);
-        let out = f(&mut writer);
-        writer.flush().expect("flush runtime writer");
-        drop(writer);
-        let _ = child.kill();
-        let _ = child.wait();
-        out
+    fn with_runtime_tx(f: impl FnOnce(&mut dyn RuntimeTx)) {
+        f(&mut MockRuntimeTx::default());
     }
 
     #[test]
     fn progress_tool_events_show_only_progress_and_preserve_errors() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             let events = [
                 json!({"method":"agent.event", "params":{"event":{
@@ -1167,12 +1138,7 @@ mod tests {
                 }}}),
             ];
             for event in events {
-                apply_parsed_output(
-                    &mut app,
-                    parse_runtime_output(&event.to_string()),
-                    writer,
-                    &mut || "id".into(),
-                );
+                apply_parsed_output(&mut app, parse_runtime_output(&event.to_string()), tx);
             }
             assert_eq!(app.log.len(), 1);
             let text = app.log[0].plain_text();
@@ -1183,12 +1149,7 @@ mod tests {
                 "type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p2",
                 "is_error":true, "result":"error: unavailable"
             }}});
-            apply_parsed_output(
-                &mut app,
-                parse_runtime_output(&error.to_string()),
-                writer,
-                &mut || "id".into(),
-            );
+            apply_parsed_output(&mut app, parse_runtime_output(&error.to_string()), tx);
             assert!(app
                 .log
                 .iter()
@@ -1196,16 +1157,9 @@ mod tests {
         });
     }
 
-    #[cfg(unix)]
     #[test]
     fn replayed_progress_is_restored_only_after_success_without_client_rpc() {
-        use std::io::Read;
-        let mut child = std::process::Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("capture runtime writes");
-        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut tx = MockRuntimeTx::default();
         let mut app = AppState::default();
         let events = [
             json!({"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p1", "args":{"id":"build", "phase":"Build", "current":1, "total":4}}),
@@ -1217,12 +1171,7 @@ mod tests {
         ];
         for (index, event) in events.into_iter().enumerate() {
             let raw = json!({"method":"agent.event", "params": {"run_id":"old-run", "meta":{"replayed":true}, "event":event}}).to_string();
-            apply_parsed_output(
-                &mut app,
-                parse_runtime_output(&raw),
-                &mut writer,
-                &mut || "id".into(),
-            );
+            apply_parsed_output(&mut app, parse_runtime_output(&raw), &mut tx);
             if index == 0 {
                 assert!(app.log.is_empty());
             }
@@ -1240,18 +1189,10 @@ mod tests {
             .iter()
             .any(|line| line.plain_text().contains("invalid")));
         assert!(app.pending_history_progress.is_empty());
-        drop(writer);
-        let mut output = String::new();
-        child
-            .stdout
-            .take()
-            .unwrap()
-            .read_to_string(&mut output)
-            .unwrap();
-        child.wait().unwrap();
         assert!(
-            output.is_empty(),
-            "history replay sent client RPC: {output}"
+            tx.sent.is_empty(),
+            "history replay sent client RPC: {:?}",
+            tx.sent
         );
     }
 
@@ -1279,7 +1220,7 @@ mod tests {
 
     #[test]
     fn replayed_progress_keys_are_isolated_between_runs() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             for run_id in ["run-a", "run-b"] {
                 for event in [
@@ -1287,9 +1228,7 @@ mod tests {
                     json!({"type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p1", "result":"progress shown"}),
                 ] {
                     let raw = json!({"method":"agent.event", "params":{"run_id":run_id, "meta":{"replayed":true}, "event":event}}).to_string();
-                    apply_parsed_output(&mut app, parse_runtime_output(&raw), writer, &mut || {
-                        "id".into()
-                    });
+                    apply_parsed_output(&mut app, parse_runtime_output(&raw), tx);
                 }
             }
             assert_eq!(app.log.len(), 2);
@@ -1301,10 +1240,10 @@ mod tests {
     #[test]
     fn session_history_replays_legacy_progress_and_clears_pending_tracking() {
         use std::sync::mpsc;
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.rpc_pending.session_history_id = Some("history".to_string());
-            let (tx, rx) = mpsc::channel();
+            let (sender, rx) = mpsc::channel();
             for (seq, event) in [
                 json!({"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p1", "args":{"id":"build", "phase":"Build", "current":1, "total":2}}),
                 json!({"type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p1", "result":"progress shown"}),
@@ -1312,18 +1251,19 @@ mod tests {
             .into_iter()
             .enumerate()
             {
-                tx.send(
+                sender.send(
                     json!({"method":"agent.event", "params":{"run_id":"old-run", "seq":seq, "event":event}})
                         .to_string(),
                 )
                 .unwrap();
             }
-            tx.send(
-                json!({"jsonrpc":"2.0", "id":"history", "result":{"runs":1,"events_sent":2}})
-                    .to_string(),
-            )
-            .unwrap();
-            super::super::process_runtime_messages(&mut app, &rx, writer, &mut || "id".into());
+            sender
+                .send(
+                    json!({"jsonrpc":"2.0", "id":"history", "result":{"runs":1,"events_sent":2}})
+                        .to_string(),
+                )
+                .unwrap();
+            super::super::process_runtime_messages(&mut app, &rx, tx);
             assert!(app.log.iter().any(
                 |line| line.plain_text().contains("Build") && line.plain_text().contains("50%")
             ));
@@ -1337,7 +1277,7 @@ mod tests {
 
     #[test]
     fn terminal_run_status_adds_dispatch_cooldown() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.pending_prompt_queue.push_back(PendingPromptRun {
                 seq: 1,
@@ -1358,9 +1298,7 @@ mod tests {
                 r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed"}}"#,
             );
 
-            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || {
-                "id-1".to_string()
-            }));
+            assert!(apply_parsed_output(&mut app, parsed, tx));
             assert!(app.next_queue_dispatch_retry_at.is_some());
             assert!(app.runtime_info.active_run_id.is_none());
             assert_eq!(app.run_status.as_deref(), Some("completed"));
@@ -1369,15 +1307,13 @@ mod tests {
 
     #[test]
     fn llm_metrics_follow_active_run_and_retain_last_known_values() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
-            let mut next_id = || "id-1".to_string();
             let mut apply = |app: &mut AppState, method: &str, params: serde_json::Value| {
                 apply_parsed_output(
                     app,
                     parse_runtime_output(&json!({"method": method, "params": params}).to_string()),
-                    writer,
-                    &mut next_id,
+                    tx,
                 );
             };
             apply(
@@ -1462,7 +1398,7 @@ mod tests {
 
     #[test]
     fn client_tool_timeout_clears_matching_choice_dialog_and_pending_id() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             let request = parse_runtime_output(
                 &json!({
@@ -1481,9 +1417,7 @@ mod tests {
                 })
                 .to_string(),
             );
-            assert!(apply_parsed_output(&mut app, request, writer, &mut || {
-                "id-1".to_string()
-            }));
+            assert!(apply_parsed_output(&mut app, request, tx));
             assert_eq!(
                 app.pick_dialog.as_ref().map(|dialog| dialog.id.as_str()),
                 Some("ui_choice_1")
@@ -1496,12 +1430,7 @@ mod tests {
             let cancellation = parse_runtime_output(
                 r#"{"jsonrpc":"2.0","method":"client.tool.cancel","params":{"request_id":"ui_choice_1","run_id":"run-1","name":"tui_ask_user_choice","reason":"timeout"}}"#,
             );
-            assert!(apply_parsed_output(
-                &mut app,
-                cancellation,
-                writer,
-                &mut || "id-2".to_string()
-            ));
+            assert!(apply_parsed_output(&mut app, cancellation, tx));
 
             assert!(app.pick_dialog.is_none());
             assert!(!app
@@ -1518,24 +1447,17 @@ mod tests {
 
     #[test]
     fn stale_client_tool_cancel_leaves_active_choice_untouched() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             let request = parse_runtime_output(
                 r#"{"jsonrpc":"2.0","id":"ui_choice_active","method":"client.tool.call","params":{"run_id":"run-1","name":"tui_ask_user_choice","arguments":{"title":"Choose next","choices":[{"id":"continue","label":"Continue"}]},"raw_arguments":"{}"}}"#,
             );
-            assert!(apply_parsed_output(&mut app, request, writer, &mut || {
-                "id-1".to_string()
-            }));
+            assert!(apply_parsed_output(&mut app, request, tx));
 
             let stale_cancellation = parse_runtime_output(
                 r#"{"jsonrpc":"2.0","method":"client.tool.cancel","params":{"request_id":"ui_choice_stale","run_id":"run-1","name":"tui_ask_user_choice","reason":"timeout"}}"#,
             );
-            assert!(apply_parsed_output(
-                &mut app,
-                stale_cancellation,
-                writer,
-                &mut || "id-2".to_string()
-            ));
+            assert!(apply_parsed_output(&mut app, stale_cancellation, tx));
 
             assert_eq!(
                 app.pick_dialog.as_ref().map(|dialog| dialog.id.as_str()),
@@ -1550,7 +1472,7 @@ mod tests {
 
     #[test]
     fn subagent_failure_replaces_wait_header_with_named_failure() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.push_line(LogKind::ToolCall, "Wait for agent: 13c77088");
             app.pending_component_lines.insert(
@@ -1564,7 +1486,7 @@ mod tests {
                     "result":{"name":"MapleScope3", "state":"failed", "termination_reason":"execution_error", "failure_message":"Model session is missing"}
                 }}
             }).to_string());
-            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || "id".into()));
+            assert!(apply_parsed_output(&mut app, parsed, tx));
             assert_eq!(
                 app.log[0].plain_text(),
                 "✖ Agent: MapleScope3 — failed (execution_error)"
@@ -1575,7 +1497,7 @@ mod tests {
 
     #[test]
     fn shell_tool_result_replaces_pending_shell_call_with_fallback_summary() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.push_line(LogKind::ToolCall, "Shell: git status --short");
             app.pending_component_lines.insert(
@@ -1607,9 +1529,7 @@ mod tests {
                 .to_string(),
             );
 
-            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || {
-                "id-1".to_string()
-            }));
+            assert!(apply_parsed_output(&mut app, parsed, tx));
             assert_eq!(
                 app.log[0].plain_text(),
                 "✔ Shell: git status --short (12 ms)"
@@ -1626,7 +1546,7 @@ mod tests {
 
     #[test]
     fn denied_shell_reports_reason_once_and_preserves_safe_call_context() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             for (command, reason, expected_header) in [
                 (
                     "git status --short",
@@ -1658,9 +1578,7 @@ mod tests {
 
                 for event in [call, result] {
                     let parsed = parse_runtime_output(&event.to_string());
-                    assert!(apply_parsed_output(&mut app, parsed, writer, &mut || {
-                        "id-1".to_string()
-                    }));
+                    assert!(apply_parsed_output(&mut app, parsed, tx));
                 }
 
                 assert_eq!(app.log.len(), 2);
@@ -1672,7 +1590,7 @@ mod tests {
 
     #[test]
     fn webfetch_tool_result_replaces_pending_call_with_fallback_summary() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.push_line(LogKind::ToolCall, "WebFetch: www.google.com");
             app.pending_component_lines.insert(
@@ -1706,9 +1624,7 @@ mod tests {
                 .to_string(),
             );
 
-            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || {
-                "id-1".to_string()
-            }));
+            assert!(apply_parsed_output(&mut app, parsed, tx));
             assert_eq!(
                 app.log[0].plain_text(),
                 "✔ WebFetch: www.google.com/ (49 KB, 227 ms, truncated)"
@@ -1722,7 +1638,7 @@ mod tests {
 
     #[test]
     fn non_shell_tool_result_keeps_existing_summary_and_only_adds_status_icon() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.push_line(LogKind::ToolCall, "Read: crates/tui/src/main.rs");
             app.pending_component_lines.insert(
@@ -1747,9 +1663,7 @@ mod tests {
                 .to_string(),
             );
 
-            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || {
-                "id-1".to_string()
-            }));
+            assert!(apply_parsed_output(&mut app, parsed, tx));
             assert_eq!(app.log[0].plain_text(), "✔ Read: crates/tui/src/main.rs");
             assert_eq!(app.log.len(), 1);
         });
@@ -1757,7 +1671,7 @@ mod tests {
 
     #[test]
     fn apply_patch_tool_result_suppresses_duplicate_diff_after_permission_preview() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.push_line(LogKind::ToolCall, "ApplyPatch: 1 file(s)");
             app.pending_component_lines.insert(
@@ -1768,17 +1682,13 @@ mod tests {
             let preview = parse_runtime_output(
                 r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"apply_patch","tool_call_id":"tool-apply-1","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}"#,
             );
-            assert!(apply_parsed_output(&mut app, preview, writer, &mut || {
-                "id-1".to_string()
-            }));
+            assert!(apply_parsed_output(&mut app, preview, tx));
             let preview_len = app.log.len();
 
             let result = parse_runtime_output(
                 r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"apply_patch","tool_call_id":"tool-apply-1","result":{"summary":"Applied patch to 1 file(s)","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}}"#,
             );
-            assert!(apply_parsed_output(&mut app, result, writer, &mut || {
-                "id-2".to_string()
-            }));
+            assert!(apply_parsed_output(&mut app, result, tx));
 
             assert_eq!(app.log.len(), preview_len);
             assert_eq!(app.log[0].plain_text(), "✔ ApplyPatch: 1 file(s)");
@@ -1794,14 +1704,12 @@ mod tests {
 
     #[test]
     fn permission_ready_replay_with_same_tool_call_id_is_suppressed() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             let first = parse_runtime_output(
                 r#"{"method":"agent.event","params":{"event":{"type":"permission.ready","tool":"shell","tool_call_id":"shell-confirm-1"}}}"#,
             );
-            assert!(apply_parsed_output(&mut app, first, writer, &mut || {
-                "id-1".to_string()
-            }));
+            assert!(apply_parsed_output(&mut app, first, tx));
             let first_len = app.log.len();
             assert!(
                 app.log
@@ -1813,9 +1721,7 @@ mod tests {
             let second = parse_runtime_output(
                 r#"{"method":"agent.event","params":{"event":{"type":"permission.ready","tool":"shell","tool_call_id":"shell-confirm-1"}}}"#,
             );
-            assert!(apply_parsed_output(&mut app, second, writer, &mut || {
-                "id-2".to_string()
-            }));
+            assert!(apply_parsed_output(&mut app, second, tx));
 
             assert_eq!(app.log.len(), first_len);
             assert_eq!(
@@ -2057,7 +1963,7 @@ mod tests {
     fn steer_applied_removes_in_flight_steer_and_unconsumed_steers_fallback_ordered() {
         use crate::app::InFlightSteer;
 
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.update_run_status("running".to_string());
             app.runtime_info.active_run_id = Some("run-1".to_string());
@@ -2122,7 +2028,7 @@ mod tests {
             let applied = parse_runtime_output(
                 r#"{"method":"agent.event","params":{"run_id":"run-1","event":{"type":"steer_applied","steer_id":"s1","content":"RAW_MODEL_PAYLOAD"}}}"#,
             );
-            apply_parsed_output(&mut app, applied, writer, &mut || "id-1".into());
+            apply_parsed_output(&mut app, applied, tx);
             assert_eq!(app.in_flight_steers.len(), 1);
             let transcript = app
                 .log
@@ -2141,7 +2047,7 @@ mod tests {
             let completed = parse_runtime_output(
                 r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed","unconsumed_steer_ids":["s2"]}}"#,
             );
-            apply_parsed_output(&mut app, completed, writer, &mut || "id-2".into());
+            apply_parsed_output(&mut app, completed, tx);
 
             assert!(app.in_flight_steers.is_empty());
             assert_eq!(app.pending_prompt_queue.len(), 2);
@@ -2154,7 +2060,7 @@ mod tests {
     fn image_model_responses_require_status_only_for_get() {
         use crate::app::runtime::RpcResponse;
 
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             for (payload, missing) in [
                 (
                     json!({"message": "status", "state": "available"}),
@@ -2174,8 +2080,7 @@ mod tests {
                         result: Some(payload),
                         error: None
                     },
-                    writer,
-                    &mut || "rpc".into(),
+                    tx,
                 ));
                 assert!(app.rpc_pending.image_model_get_id.is_none());
                 assert!(app.log.iter().any(|line| {
@@ -2194,8 +2099,7 @@ mod tests {
                     result: Some(json!({"message": "Image settings unchanged."})),
                     error: None
                 },
-                writer,
-                &mut || "rpc".into(),
+                tx,
             ));
             assert!(app.rpc_pending.image_model_configure_id.is_none());
             assert!(app
@@ -2213,12 +2117,12 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../packages/protocol/tests/fixtures/steer-cancel.jsonl"
         ));
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut events = trace.lines().map(parse_runtime_output);
             let mut app = AppState::default();
             let running = events.next().unwrap();
             assert_eq!(running.status.as_deref(), Some("running"));
-            apply_parsed_output(&mut app, running, writer, &mut || "rpc".into());
+            apply_parsed_output(&mut app, running, tx);
             let run_id = app.runtime_info.active_run_id.clone().unwrap();
 
             let submission = |seq, server_id: &str, text: &str| InFlightSteer {
@@ -2247,7 +2151,7 @@ mod tests {
             let applied = events.next().unwrap();
             assert_eq!(applied.applied_steer_id.as_deref(), Some("s1"));
             assert_eq!(applied.applied_steer_client_id.as_deref(), Some("c-1"));
-            apply_parsed_output(&mut app, applied, writer, &mut || "rpc".into());
+            apply_parsed_output(&mut app, applied, tx);
             assert!(app.in_flight_steers.is_empty());
             assert!(app.pending_prompt_queue.is_empty());
 
@@ -2276,7 +2180,7 @@ mod tests {
                 cancelled.unconsumed_client_steer_ids.as_deref(),
                 Some(["c-2".to_owned()].as_slice())
             );
-            apply_parsed_output(&mut app, cancelled, writer, &mut || "rpc".into());
+            apply_parsed_output(&mut app, cancelled, tx);
             assert!(events.next().is_none());
             assert!(app.in_flight_steers.is_empty());
             assert_eq!(
@@ -2294,7 +2198,7 @@ mod tests {
     fn steer_applied_and_cancel_fallback_match_server_steer_id_without_client_id_collision() {
         use crate::app::InFlightSteer;
 
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.update_run_status("running".to_string());
             app.runtime_info.active_run_id = Some("run-1".to_string());
@@ -2354,7 +2258,7 @@ mod tests {
             let applied = parse_runtime_output(
                 r#"{"method":"agent.event","params":{"run_id":"run-1","event":{"type":"steer_applied","steer_id":"s1","content":"steer two"}}}"#,
             );
-            apply_parsed_output(&mut app, applied, writer, &mut || "id-1".into());
+            apply_parsed_output(&mut app, applied, tx);
             assert_eq!(app.in_flight_steers.len(), 1);
             assert_eq!(app.in_flight_steers[0].submission.user_text, "steer one");
 
@@ -2362,7 +2266,7 @@ mod tests {
             let cancelled = parse_runtime_output(
                 r#"{"method":"run.status","params":{"run_id":"run-1","status":"cancelled","unconsumed_steer_ids":["s2"]}}"#,
             );
-            apply_parsed_output(&mut app, cancelled, writer, &mut || "id-2".into());
+            apply_parsed_output(&mut app, cancelled, tx);
 
             assert!(app.in_flight_steers.is_empty());
             assert_eq!(app.pending_prompt_queue.len(), 1);
@@ -2404,7 +2308,7 @@ mod tests {
     fn inconsistent_applied_steer_ids_keep_matching_candidates_paused_after_run_end() {
         use crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS as PAUSED;
 
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             for (client_id, client_attempts) in [("unknown", 0), ("cs-1", PAUSED)] {
                 let mut app = AppState::default();
                 app.runtime_info.active_run_id = Some("run-1".into());
@@ -2423,7 +2327,7 @@ mod tests {
                     })
                     .to_string(),
                 );
-                apply_parsed_output(&mut app, applied, writer, &mut || "id-1".into());
+                apply_parsed_output(&mut app, applied, tx);
                 assert_eq!(app.in_flight_steers.len(), 3, "{client_id}");
                 assert!(app.log.iter().any(|line| {
                     matches!(line.kind(), LogKind::Error)
@@ -2434,7 +2338,7 @@ mod tests {
                 let completed = parse_runtime_output(
                     r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed"}}"#,
                 );
-                apply_parsed_output(&mut app, completed, writer, &mut || "id-2".into());
+                apply_parsed_output(&mut app, completed, tx);
                 let attempts: Vec<_> = app
                     .pending_prompt_queue
                     .iter()
@@ -2468,7 +2372,7 @@ mod tests {
     #[test]
     fn a_confirmed_steer_id_wins_over_one_read_from_a_malformed_result() {
         use crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.active_run_id = Some("run-1".to_string());
             // A's result was malformed but carried s1; B's valid result confirmed s1.
@@ -2484,14 +2388,14 @@ mod tests {
             let applied = parse_runtime_output(
                 r#"{"method":"agent.event","params":{"run_id":"run-1","event":{"type":"steer_applied","steer_id":"s1","content":"steer B"}}}"#,
             );
-            apply_parsed_output(&mut app, applied, writer, &mut || "id-1".into());
+            apply_parsed_output(&mut app, applied, tx);
             assert_eq!(app.in_flight_steers.len(), 1);
             assert_eq!(app.in_flight_steers[0].submission.user_text, "steer A");
 
             let completed = parse_runtime_output(
                 r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed"}}"#,
             );
-            apply_parsed_output(&mut app, completed, writer, &mut || "id-2".into());
+            apply_parsed_output(&mut app, completed, tx);
             // B was applied and is gone; A returns paused, never resent automatically.
             assert_eq!(app.pending_prompt_queue.len(), 1);
             assert_eq!(app.pending_prompt_queue[0].user_text, "steer A");
@@ -2545,32 +2449,18 @@ mod tests {
 
     #[test]
     fn malformed_secret_prompt_is_declined_without_opening_the_input_dialog() {
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = std::process::Command::new("cmd");
-            command.args(["/C", "more"]);
-            command
-        };
-        #[cfg(not(windows))]
-        let mut command = std::process::Command::new("cat");
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut writer = BufWriter::new(child.stdin.take().unwrap());
+        let mut tx = MockRuntimeTx::default();
         let mut app = AppState::default();
         let parsed = crate::app::runtime::parse_runtime_output(
             r#"{"jsonrpc":"2.0","id":"ui-1","method":"ui.prompt.request","params":{"title":"Secret","message":"Enter password","secret":null}}"#,
         );
-        apply_parsed_output(&mut app, parsed, &mut writer, &mut || "id".into());
-        drop(writer);
-        let output = child.wait_with_output().unwrap();
-        assert!(output.status.success());
+        apply_parsed_output(&mut app, parsed, &mut tx);
         assert!(app.prompt_dialog.is_none());
-        let reply: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let [reply] = tx.sent.as_slice() else {
+            panic!("expected one prompt reply");
+        };
         assert_eq!(
-            reply,
+            *reply,
             json!({"jsonrpc":"2.0","id":"ui-1","result":{"value":null}})
         );
     }
@@ -2578,7 +2468,7 @@ mod tests {
     #[test]
     fn an_unreadable_steer_applied_pauses_the_run_steers() {
         use crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             for run_id in [Some(json!("run-1")), None, Some(json!(10))] {
                 let mut app = AppState::default();
                 app.runtime_info.active_run_id = Some("run-1".to_string());
@@ -2594,13 +2484,13 @@ mod tests {
                 }
                 let applied = crate::app::runtime::parse_runtime_output(&notification.to_string());
                 assert!(applied.applied_steer_id.is_none());
-                apply_parsed_output(&mut app, applied, writer, &mut || "id-1".into());
+                apply_parsed_output(&mut app, applied, tx);
                 assert_eq!(app.in_flight_steers.len(), 1);
 
                 let completed = parse_runtime_output(
                     r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed"}}"#,
                 );
-                apply_parsed_output(&mut app, completed, writer, &mut || "id-2".into());
+                apply_parsed_output(&mut app, completed, tx);
                 assert_eq!(app.pending_prompt_queue.len(), 1);
                 assert_eq!(
                     app.pending_prompt_queue[0].dispatch_attempts,

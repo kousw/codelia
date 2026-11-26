@@ -1,9 +1,7 @@
-use crate::app::runtime::{send_shell_exec, send_shell_start};
+use crate::app::runtime::{send_shell_exec, send_shell_start, RuntimeTx};
 use crate::app::state::LogKind;
 use crate::app::{AppState, PendingShellResult};
 use serde_json::json;
-
-use super::RuntimeStdin;
 
 pub(super) fn build_shell_result_prefix(results: &[PendingShellResult]) -> Option<String> {
     if results.is_empty() {
@@ -51,8 +49,7 @@ pub(super) fn resolve_bang_command(raw_input: &str, bang_mode: bool) -> String {
 
 pub(super) fn handle_bang_command(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     raw_input: &str,
 ) -> bool {
     if app.rpc_pending.shell_rule_run_pending() {
@@ -90,11 +87,11 @@ pub(super) fn handle_bang_command(
         app.push_line(LogKind::Error, "bang command is empty");
         return false;
     }
-    let id = next_id();
+    let id = tx.next_id();
     app.push_line(LogKind::Status, format!("bang exec started: {}", command));
     if app.runtime_info.supports_shell_tasks {
         app.rpc_pending.shell_start_id = Some(id.clone());
-        if let Err(error) = send_shell_start(child_stdin, &id, &command, None) {
+        if let Err(error) = send_shell_start(tx, &id, &command, None) {
             app.rpc_pending.shell_start_id = None;
             app.push_line(LogKind::Error, format!("send error: {error}"));
             return false;
@@ -102,7 +99,7 @@ pub(super) fn handle_bang_command(
         return true;
     }
     app.rpc_pending.shell_exec_id = Some(id.clone());
-    if let Err(error) = send_shell_exec(child_stdin, &id, &command, None) {
+    if let Err(error) = send_shell_exec(tx, &id, &command, None) {
         app.rpc_pending.shell_exec_id = None;
         app.push_line(LogKind::Error, format!("send error: {error}"));
         return false;

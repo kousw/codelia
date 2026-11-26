@@ -3,7 +3,9 @@ mod entry;
 mod event_loop;
 use codelia_protocol as protocol;
 
-use crate::app::runtime::{send_initialize, shutdown_runtime, spawn_runtime};
+use crate::app::runtime::{
+    send_initialize, shutdown_runtime, spawn_runtime, RuntimeTx, StdioRuntimeTx,
+};
 use crate::app::view::desired_height;
 use crate::entry::run_loop::{run_tui_loop, RunLoopTerminal};
 
@@ -56,14 +58,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|(flag, mode)| (*flag, mode.as_str())),
     )?;
     let run_result = (|| -> Result<(), Box<dyn std::error::Error>> {
-        let mut rpc_id = 0_u64;
-        let mut next_id = || {
-            rpc_id += 1;
-            rpc_id.to_string()
-        };
-
-        let initialize_id = next_id();
-        send_initialize(&mut child_stdin, &initialize_id, diagnostics)?;
+        let mut tx = StdioRuntimeTx::new(&mut child_stdin);
+        let initialize_id = tx.next_id();
+        send_initialize(&mut tx, &initialize_id, diagnostics)?;
 
         let mut app = build_initial_app(
             debug_print,
@@ -87,16 +84,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut terminal = setup_terminal(terminal_mode, inline_height)?;
         app.mouse_capture_enabled = terminal_mode.default_mouse_capture();
         set_mouse_capture(&mut terminal, app.mouse_capture_enabled);
-        request_initial_model_list(&mut app, &mut child_stdin, &mut next_id);
-        apply_resume_startup(&mut app, &mut child_stdin, &mut next_id, resume_mode);
+        request_initial_model_list(&mut app, &mut tx);
+        apply_resume_startup(&mut app, &mut tx, resume_mode);
 
         let loop_result = run_tui_loop(
             &mut app,
             RunLoopTerminal::new(&mut terminal, terminal_mode),
             &rx,
             &mut child,
-            &mut child_stdin,
-            &mut next_id,
+            &mut tx,
             &mut pending_initial_message,
         );
 

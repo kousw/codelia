@@ -1,4 +1,4 @@
-use crate::app::runtime::{send_run_start, send_run_steer};
+use crate::app::runtime::{send_run_start, send_run_steer, RuntimeTx};
 use crate::app::state::LogKind;
 use crate::app::util::attachments::{
     build_run_input_payload, referenced_attachment_ids, render_input_text_with_attachment_labels,
@@ -9,7 +9,7 @@ use crate::app::{
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use super::{build_shell_result_prefix, RuntimeStdin, QUEUE_PREVIEW_MAX_CHARS};
+use super::{build_shell_result_prefix, QUEUE_PREVIEW_MAX_CHARS};
 
 fn truncate_preview(text: &str, max: usize) -> String {
     if max == 0 {
@@ -119,8 +119,7 @@ fn push_user_prompt_lines(app: &mut AppState, submission: &PendingPromptRun) {
 
 fn dispatch_prompt_submission(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     submission: &PendingPromptRun,
 ) -> bool {
     app.input.record_history(&submission.display_text);
@@ -128,10 +127,10 @@ fn dispatch_prompt_submission(
     app.last_assistant_text = None;
     push_user_prompt_lines(app, submission);
     app.update_run_status("starting".to_string());
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.run_start_id = Some(id.clone());
     if let Err(error) = send_run_start(
-        child_stdin,
+        tx,
         &id,
         app.runtime_info.session_id.as_deref(),
         submission.input_payload.clone(),
@@ -147,8 +146,7 @@ fn dispatch_prompt_submission(
 
 pub(super) fn send_steer_submission(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     run_id: &str,
     mut submission: PendingPromptRun,
 ) -> bool {
@@ -165,20 +163,19 @@ pub(super) fn send_steer_submission(
         insert_pending_prompt_ordered(&mut app.pending_prompt_queue, submission);
         return true;
     }
-    send_ready_steer(app, child_stdin, next_id, run_id, submission)
+    send_ready_steer(app, tx, run_id, submission)
 }
 
 pub(super) fn send_ready_steer(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     run_id: &str,
     mut submission: PendingPromptRun,
 ) -> bool {
     app.input.record_history(&submission.display_text);
     app.scroll_from_bottom = 0;
     let client_steer_id = app.allocate_client_steer_id();
-    let rpc_id = next_id();
+    let rpc_id = tx.next_id();
     let input_payload = submission.input_payload.clone();
     let steer = InFlightSteer {
         client_steer_id: client_steer_id.clone(),
@@ -192,13 +189,7 @@ pub(super) fn send_ready_steer(
     app.rpc_pending
         .run_steer_ids
         .insert(rpc_id.clone(), client_steer_id.clone());
-    if let Err(error) = send_run_steer(
-        child_stdin,
-        &rpc_id,
-        run_id,
-        input_payload,
-        Some(&client_steer_id),
-    ) {
+    if let Err(error) = send_run_steer(tx, &rpc_id, run_id, input_payload, Some(&client_steer_id)) {
         app.rpc_pending.run_steer_ids.remove(&rpc_id);
         if let Some(pos) = app
             .in_flight_steers
@@ -254,12 +245,8 @@ pub(super) fn can_dispatch_prompt_now(app: &AppState) -> bool {
         && app.theme_list_panel.is_none()
 }
 
-pub(super) fn try_dispatch_queued_prompt(
-    app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-) -> bool {
-    if let Some(progress) = super::upload::drive(app, child_stdin, next_id) {
+pub(super) fn try_dispatch_queued_prompt(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool {
+    if let Some(progress) = super::upload::drive(app, tx) {
         return progress;
     }
     if app.dispatching_prompt.is_some() || app.pending_prompt_queue.is_empty() {
@@ -280,7 +267,7 @@ pub(super) fn try_dispatch_queued_prompt(
     app.dispatching_prompt = Some(next_prompt);
 
     let sent = if let Some(dispatching) = app.dispatching_prompt.clone() {
-        dispatch_prompt_submission(app, child_stdin, next_id, &dispatching)
+        dispatch_prompt_submission(app, tx, &dispatching)
     } else {
         false
     };
@@ -305,8 +292,7 @@ pub(super) fn try_dispatch_queued_prompt(
 
 pub(super) fn start_explicit_steer_run(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     raw_arg: &str,
 ) -> bool {
     let trimmed = raw_arg.trim();
@@ -316,7 +302,7 @@ pub(super) fn start_explicit_steer_run(
     }
 
     if !app.is_running() {
-        return start_prompt_run(app, child_stdin, next_id, raw_arg);
+        return start_prompt_run(app, tx, raw_arg);
     }
 
     if !app.runtime_info.supports_run_steer {
@@ -343,14 +329,13 @@ pub(super) fn start_explicit_steer_run(
     if submission.shell_result_count > 0 {
         app.pending_shell_results.clear();
     }
-    let _ = send_steer_submission(app, child_stdin, next_id, &run_id, submission);
+    let _ = send_steer_submission(app, tx, &run_id, submission);
     true
 }
 
 pub(super) fn start_prompt_run(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     raw_input: &str,
 ) -> bool {
     if raw_input.trim().is_empty() {
@@ -369,7 +354,7 @@ pub(super) fn start_prompt_run(
             if submission.shell_result_count > 0 {
                 app.pending_shell_results.clear();
             }
-            let _ = send_steer_submission(app, child_stdin, next_id, &run_id, submission);
+            let _ = send_steer_submission(app, tx, &run_id, submission);
             return true;
         }
     }
@@ -399,6 +384,6 @@ pub(super) fn start_prompt_run(
         );
     }
 
-    let _ = try_dispatch_queued_prompt(app, child_stdin, next_id);
+    let _ = try_dispatch_queued_prompt(app, tx);
     true
 }

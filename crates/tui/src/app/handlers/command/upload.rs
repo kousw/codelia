@@ -1,7 +1,7 @@
 //! Clipboard file transfer is driven by one acknowledged RPC at a time.
 //! Keep the submission in the queue so cancellation and retry own the same snapshot.
-use super::{prompt, RuntimeStdin};
-use crate::app::runtime::{send_request, RpcResponse};
+use super::prompt;
+use crate::app::runtime::{send_request, RpcResponse, RuntimeTx};
 use crate::app::state::LogKind;
 use crate::app::util::attachments::StagedAttachment;
 use crate::app::{AppState, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
@@ -133,12 +133,13 @@ fn pause(app: &mut AppState, seq: u64, message: &str) {
     }
 }
 
-fn cancel(writer: &mut RuntimeStdin, next_id: &mut impl FnMut() -> String, upload: Option<&str>) {
+fn cancel(tx: &mut dyn RuntimeTx, upload: Option<&str>) {
     if let Some(id) = upload {
         let params = AttachmentUploadIdParams {
             upload_id: id.to_owned(),
         };
-        let _ = send_request::<methods::AttachmentUploadCancel>(writer, &next_id(), &params);
+        let id = tx.next_id();
+        let _ = send_request::<methods::AttachmentUploadCancel>(tx, &id, &params);
     }
 }
 
@@ -150,20 +151,20 @@ enum UploadRequest {
 
 fn request(
     app: &mut AppState,
-    writer: &mut RuntimeStdin,
+    tx: &mut dyn RuntimeTx,
     pending: PendingUpload,
     request: UploadRequest,
 ) {
     let id = pending.request.clone();
     let sent = match &request {
         UploadRequest::Begin(params) => {
-            send_request::<methods::AttachmentUploadBegin>(writer, &id, params)
+            send_request::<methods::AttachmentUploadBegin>(tx, &id, params)
         }
         UploadRequest::Chunk(params) => {
-            send_request::<methods::AttachmentUploadChunk>(writer, &id, params)
+            send_request::<methods::AttachmentUploadChunk>(tx, &id, params)
         }
         UploadRequest::Finish(params) => {
-            send_request::<methods::AttachmentUploadFinish>(writer, &id, params)
+            send_request::<methods::AttachmentUploadFinish>(tx, &id, params)
         }
     };
     if let Err(error) = sent {
@@ -179,15 +180,11 @@ fn eligible(app: &AppState, item: &PendingPromptRun) -> bool {
 }
 
 // None delegates to ordinary run.start dispatch. Some(false) waits for a gate.
-pub fn drive(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-) -> Option<bool> {
+pub fn drive(app: &mut AppState, tx: &mut dyn RuntimeTx) -> Option<bool> {
     if let Some(p) = &app.rpc_pending.upload {
         if p.sent.elapsed() >= Duration::from_secs(30) {
             let p = app.rpc_pending.upload.take().unwrap();
-            cancel(writer, next_id, p.upload.as_deref());
+            cancel(tx, p.upload.as_deref());
             pause(app, p.seq, "attachment upload timed out");
             return Some(true);
         }
@@ -233,7 +230,7 @@ pub fn drive(
         if let Some(run_id) = item.files.steer_target.clone() {
             let mut item = app.pending_prompt_queue.remove(pos).unwrap();
             item.files.steer_target = None;
-            prompt::send_ready_steer(app, writer, next_id, &run_id, item);
+            prompt::send_ready_steer(app, tx, &run_id, item);
             return Some(true);
         }
         return None;
@@ -281,13 +278,13 @@ pub fn drive(
     let pending = PendingUpload {
         seq,
         local: local.to_string(),
-        request: next_id(),
+        request: tx.next_id(),
         sent: Instant::now(),
         upload: None,
         expected: Expected::Begin,
         chunk_bytes: limits.max_chunk_bytes.min(256 * 1024),
     };
-    request(app, writer, pending, UploadRequest::Begin(params));
+    request(app, tx, pending, UploadRequest::Begin(params));
     Some(true)
 }
 
@@ -314,12 +311,7 @@ fn decode_ack(app: &mut AppState, expected: &Expected, result: Value) -> Option<
     })
 }
 
-pub fn handle_response(
-    app: &mut AppState,
-    response: &RpcResponse,
-    writer: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-) -> bool {
+pub fn handle_response(app: &mut AppState, response: &RpcResponse, tx: &mut dyn RuntimeTx) -> bool {
     if !app
         .rpc_pending
         .upload
@@ -347,11 +339,11 @@ pub fn handle_response(
         .iter()
         .position(|item| item.seq == p.seq && eligible(app, item))
     else {
-        cancel(writer, next_id, p.upload.as_deref());
+        cancel(tx, p.upload.as_deref());
         return true;
     };
     if let Some(error) = &response.error {
-        cancel(writer, next_id, p.upload.as_deref());
+        cancel(tx, p.upload.as_deref());
         pause(
             app,
             p.seq,
@@ -391,7 +383,7 @@ pub fn handle_response(
             }
     });
     let (Some(start), Some(id)) = (ack, p.upload.clone()) else {
-        cancel(writer, next_id, p.upload.as_deref());
+        cancel(tx, p.upload.as_deref());
         pause(app, p.seq, "invalid upload acknowledgement");
         return true;
     };
@@ -408,16 +400,15 @@ pub fn handle_response(
         })
     };
     p.sent = Instant::now();
-    p.request = next_id();
-    request(app, writer, p, next);
+    p.request = tx.next_id();
+    request(app, tx, p, next);
     true
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader, BufWriter};
-    use std::process::{Command, Stdio};
+    use crate::app::runtime::MockRuntimeTx;
 
     #[test]
     fn file_steer_finishes_upload_before_text_steer_and_fallback_reuses_reference() {
@@ -434,20 +425,7 @@ mod tests {
         let file =
             StagedAttachment::from_bytes("data.bin".into(), vec![0xff, 0, 5], "file").unwrap();
         app.pending_staged_attachments.insert("f".into(), file);
-        let mut child = Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut writer = BufWriter::new(child.stdin.take().unwrap());
-        let mut output = BufReader::new(child.stdout.take().unwrap()).lines();
-        let mut seq = 0;
-        let mut next_id = || {
-            seq += 1;
-            seq.to_string()
-        };
-        let mut next_rpc =
-            || serde_json::from_str::<Value>(&output.next().unwrap().unwrap()).unwrap();
+        let mut tx = MockRuntimeTx::default();
         let snapshot = |index: u64, input: Value| PendingPromptRun {
             seq: index,
             queue_id: format!("q{index}"),
@@ -471,7 +449,7 @@ mod tests {
         second.files.steer_target = Some("r1".into());
         app.pending_prompt_queue.extend([first, second]);
         app.clear_composer();
-        assert_eq!(drive(&mut app, &mut writer, &mut next_id), Some(true));
+        assert_eq!(drive(&mut app, &mut tx), Some(true));
         let mut methods = vec![];
         for (expected_method, result, expected_bytes) in [
             (
@@ -495,7 +473,7 @@ mod tests {
                 None,
             ),
         ] {
-            let rpc = next_rpc();
+            let rpc = tx.sent.last().unwrap();
             assert_eq!(rpc["method"], expected_method);
             if let Some(bytes) = expected_bytes {
                 assert_eq!(
@@ -505,22 +483,17 @@ mod tests {
                     bytes
                 );
             }
-            assert_eq!(drive(&mut app, &mut writer, &mut next_id), Some(false));
             let response = RpcResponse {
                 id: rpc["id"].as_str().unwrap().into(),
                 result: Some(result),
                 error: None,
             };
-            assert!(handle_response(
-                &mut app,
-                &response,
-                &mut writer,
-                &mut next_id
-            ));
+            assert_eq!(drive(&mut app, &mut tx), Some(false));
+            assert!(handle_response(&mut app, &response, &mut tx));
         }
         for _ in 0..2 {
-            assert_eq!(drive(&mut app, &mut writer, &mut next_id), Some(true));
-            let rpc = next_rpc();
+            assert_eq!(drive(&mut app, &mut tx), Some(true));
+            let rpc = tx.sent.last().unwrap();
             assert_eq!(rpc["method"], "run.steer");
             methods.push(rpc["params"]["input"].clone());
         }
@@ -534,15 +507,10 @@ mod tests {
         app.pending_prompt_queue.push_front(fallback);
         app.runtime_info.active_run_id = None;
         app.update_run_status("completed".into());
-        assert!(prompt::try_dispatch_queued_prompt(
-            &mut app,
-            &mut writer,
-            &mut next_id
-        ));
-        let rpc = next_rpc();
+        assert!(prompt::try_dispatch_queued_prompt(&mut app, &mut tx));
+        let rpc = tx.sent.last().unwrap();
         assert_eq!(rpc["method"], "run.start");
         assert_eq!(rpc["params"]["input"], methods[0]);
-        drop(writer);
-        assert!(child.wait().unwrap().success());
+        assert_eq!(tx.sent.len(), 7);
     }
 }

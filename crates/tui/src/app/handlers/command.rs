@@ -7,14 +7,13 @@ mod session;
 mod slash;
 pub(crate) mod upload;
 
+use crate::app::runtime::RuntimeTx;
 use crate::app::state::{
     complete_skill_mention as complete_skill_mention_input,
     complete_slash_command as complete_slash_command_input, is_known_command,
     unknown_command_message, InputState, LogKind,
 };
 use crate::app::{AppState, SkillsListItemState};
-use std::io::BufWriter;
-use std::process::ChildStdin;
 
 use bang::{build_shell_result_prefix, handle_bang_command};
 use queue::handle_queue_command;
@@ -47,8 +46,6 @@ const QUEUE_CANCEL_USAGE_MESSAGE: &str = "usage: /queue cancel [id|index]";
 const QUEUE_CLEAR_USAGE_MESSAGE: &str = "usage: /queue clear";
 const TASKS_USAGE_MESSAGE: &str = "usage: /tasks [list|show <task_id>|cancel <task_id>]";
 
-type RuntimeStdin = BufWriter<ChildStdin>;
-
 pub(crate) fn complete_slash_command(input: &mut InputState) -> bool {
     complete_slash_command_input(input)
 }
@@ -60,11 +57,7 @@ pub(crate) fn complete_skill_mention(
     complete_skill_mention_input(input, skills)
 }
 
-pub(crate) fn handle_enter(
-    app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-) -> bool {
+pub(crate) fn handle_enter(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool {
     if app.has_pending_clipboard_import() {
         app.push_line(
             LogKind::Status,
@@ -94,87 +87,65 @@ pub(crate) fn handle_enter(
     }
     let mut clear_input = true;
     if app.bang_input_mode {
-        clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
+        clear_input = handle_bang_command(app, tx, &raw_input);
     } else if matches!(command, "/auto-approve" | "/auto-review") {
-        auto_review::handle(app, child_stdin, next_id, trimmed[command.len()..].trim());
+        auto_review::handle(app, tx, trimmed[command.len()..].trim());
     } else if command == "/update" {
         crate::app::self_update::open(app, trimmed[command.len()..].trim());
     } else if command == "/permissions" {
-        clear_input = super::shell_rules::command(
-            app,
-            child_stdin,
-            next_id,
-            &raw_input.trim_start()[command.len()..],
-        );
+        clear_input =
+            super::shell_rules::command(app, tx, &raw_input.trim_start()[command.len()..]);
     } else if command == "/image" {
         super::image_preview::handle_command(app, trimmed["/image".len()..].trim());
     } else if command == "/image-model" {
-        image::handle(
-            app,
-            child_stdin,
-            next_id,
-            trimmed["/image-model".len()..].trim(),
-            false,
-        );
+        image::handle(app, tx, trimmed["/image-model".len()..].trim(), false);
     } else if command == "/image-artifact" {
-        image::handle(
-            app,
-            child_stdin,
-            next_id,
-            trimmed["/image-artifact".len()..].trim(),
-            true,
-        );
+        image::handle(app, tx, trimmed["/image-artifact".len()..].trim(), true);
     } else if command == "/session" {
-        session::handle(
-            app,
-            child_stdin,
-            next_id,
-            trimmed["/session".len()..].trim(),
-        );
+        session::handle(app, tx, trimmed["/session".len()..].trim());
     } else if command == "/compact" {
-        handle_compact_command(app, child_stdin, next_id, &trimmed, &mut parts);
+        handle_compact_command(app, tx, &trimmed, &mut parts);
     } else if command == "/model" {
-        handle_model_command(app, child_stdin, next_id, &mut parts);
+        handle_model_command(app, tx, &mut parts);
     } else if command == "/model-session" {
-        handle_model_session_command(app, child_stdin, next_id, &mut parts);
+        handle_model_session_command(app, tx, &mut parts);
     } else if command == "/fast" {
-        handle_fast_command(app, child_stdin, next_id, &mut parts);
+        handle_fast_command(app, tx, &mut parts);
     } else if command == "/context" {
-        handle_context_command(app, child_stdin, next_id, &mut parts);
+        handle_context_command(app, tx, &mut parts);
     } else if command == "/skills" {
-        handle_skills_command(app, child_stdin, next_id, &mut parts);
+        handle_skills_command(app, tx, &mut parts);
     } else if command == "/theme" {
-        handle_theme_command(app, child_stdin, next_id, &mut parts);
+        handle_theme_command(app, tx, &mut parts);
     } else if command == "/mcp" {
-        handle_mcp_command(app, child_stdin, next_id, &mut parts);
+        handle_mcp_command(app, tx, &mut parts);
     } else if command == "/logout" {
-        handle_logout_command(app, child_stdin, next_id, &trimmed, &mut parts);
+        handle_logout_command(app, tx, &trimmed, &mut parts);
     } else if command == "/lane" {
-        handle_lane_command(app, child_stdin, next_id, &mut parts);
+        handle_lane_command(app, tx, &mut parts);
     } else if command == "/errors" {
         handle_errors_command(app, &mut parts);
     } else if command == "/queue" {
-        handle_queue_command(app, child_stdin, next_id, &mut parts);
+        handle_queue_command(app, tx, &mut parts);
     } else if command == "/goal" {
-        clear_input =
-            crate::app::goal::command(app, child_stdin, next_id, trimmed["/goal".len()..].trim());
+        clear_input = crate::app::goal::command(app, tx, trimmed["/goal".len()..].trim());
     } else if command == "/steer" {
         let steer_arg = trimmed
             .strip_prefix("/steer")
             .map(str::trim_start)
             .unwrap_or("");
-        clear_input = prompt::start_explicit_steer_run(app, child_stdin, next_id, steer_arg);
+        clear_input = prompt::start_explicit_steer_run(app, tx, steer_arg);
     } else if command == "/tasks" {
-        handle_tasks_command(app, child_stdin, next_id, &mut parts);
+        handle_tasks_command(app, tx, &mut parts);
     } else if command == "/help" {
         handle_help_command(app, &mut parts);
     } else if trimmed.starts_with("!") {
-        clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
+        clear_input = handle_bang_command(app, tx, &raw_input);
     } else if !is_known_command(command) && command.starts_with('/') {
         app.push_line(LogKind::Error, unknown_command_message(command));
         clear_input = false;
     } else {
-        clear_input = start_prompt_run(app, child_stdin, next_id, &raw_input);
+        clear_input = start_prompt_run(app, tx, &raw_input);
     }
 
     if clear_input {
@@ -187,21 +158,16 @@ pub(crate) fn can_dispatch_prompt_now(app: &AppState) -> bool {
     prompt::can_dispatch_prompt_now(app)
 }
 
-pub(crate) fn try_dispatch_queued_prompt(
-    app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-) -> bool {
-    prompt::try_dispatch_queued_prompt(app, child_stdin, next_id)
+pub(crate) fn try_dispatch_queued_prompt(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool {
+    prompt::try_dispatch_queued_prompt(app, tx)
 }
 
 pub(crate) fn start_prompt_run(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     raw_input: &str,
 ) -> bool {
-    prompt::start_prompt_run(app, child_stdin, next_id, raw_input)
+    prompt::start_prompt_run(app, tx, raw_input)
 }
 
 pub(crate) fn insert_pending_prompt_ordered(
@@ -219,14 +185,12 @@ mod tests {
         try_dispatch_queued_prompt, MODEL_PROVIDERS, QUEUE_EMPTY_MESSAGE,
     };
     use crate::app::handlers::runtime_response::handle_run_start_response;
-    use crate::app::runtime::RpcResponse;
+    use crate::app::runtime::{MockRuntimeTx, RpcResponse};
     use crate::app::util::attachments::make_attachment_token;
     use crate::app::{
         AppState, PendingPromptRun, PendingShellResult, PROMPT_DISPATCH_MAX_ATTEMPTS,
     };
     use serde_json::json;
-    use std::io::{BufWriter, Write};
-    use std::process::Stdio;
     use std::time::Instant;
 
     fn queued_prompt(id: &str, attempts: u32, payload: serde_json::Value) -> PendingPromptRun {
@@ -248,42 +212,18 @@ mod tests {
 
     #[test]
     fn auto_approve_and_its_previous_name_request_the_same_settings() {
-        with_runtime_writer(|writer| {
-            for command in ["/auto-approve", "/auto-review"] {
-                let mut app = AppState::default();
-                app.runtime_info.supports_auto_review_configure = true;
-                app.input.set_from(&format!("{command} status"));
-                handle_enter(&mut app, writer, &mut || "settings".into());
-                assert_eq!(app.rpc_pending.auto_review_id.as_deref(), Some("settings"));
-            }
-        });
+        for command in ["/auto-approve", "/auto-review"] {
+            let mut tx = MockRuntimeTx::default();
+            let mut app = AppState::default();
+            app.runtime_info.supports_auto_review_configure = true;
+            app.input.set_from(&format!("{command} status"));
+            handle_enter(&mut app, &mut tx);
+            assert_eq!(app.rpc_pending.auto_review_id.as_deref(), Some("1"));
+        }
     }
 
-    fn with_runtime_writer<T>(f: impl FnOnce(&mut BufWriter<std::process::ChildStdin>) -> T) -> T {
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = std::process::Command::new("cmd");
-            command.args(["/C", "more"]);
-            command
-        };
-        #[cfg(not(windows))]
-        let mut command = std::process::Command::new("cat");
-
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn runtime writer helper");
-
-        let child_stdin = child.stdin.take().expect("child stdin");
-        let mut runtime_writer = BufWriter::new(child_stdin);
-        let out = f(&mut runtime_writer);
-
-        let _ = runtime_writer.flush();
-        let _ = child.kill();
-        let _ = child.wait();
-        out
+    fn with_runtime_tx(f: impl FnOnce(&mut MockRuntimeTx)) {
+        f(&mut MockRuntimeTx::with_id_prefix("id-"));
     }
 
     #[test]
@@ -292,31 +232,20 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn session_command_is_capability_gated_and_preserves_explicit_false() {
-        let mut child = std::process::Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("capture session requests");
-        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut tx = MockRuntimeTx::default();
         let mut app = AppState::default();
         app.runtime_info.session_id = Some("current-session".to_string());
-        let mut next_id = || "session-update".to_string();
         app.input.set_from("/session pin");
-        handle_enter(&mut app, &mut writer, &mut next_id);
+        handle_enter(&mut app, &mut tx);
         assert!(app.rpc_pending.session_update_id.is_none());
         app.runtime_info.supports_session_lifecycle = true;
         app.input.set_from("/session unpin");
-        handle_enter(&mut app, &mut writer, &mut next_id);
-        assert_eq!(
-            app.rpc_pending.session_update_id.as_deref(),
-            Some("session-update")
-        );
-        drop(writer);
-        let output = child.wait_with_output().expect("session request output");
-        let request: serde_json::Value =
-            serde_json::from_slice(&output.stdout).expect("one request");
+        handle_enter(&mut app, &mut tx);
+        assert_eq!(app.rpc_pending.session_update_id.as_deref(), Some("1"));
+        let [request] = tx.sent.as_slice() else {
+            panic!("expected one session request");
+        };
         assert_eq!(request["method"], "session.update");
         assert_eq!(request["params"]["session_id"], "current-session");
         assert_eq!(request["params"]["pinned"], false);
@@ -324,36 +253,23 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn fast_command_preserves_boolean_wire_values_and_requires_ultrafast_capability() {
-        let mut child = std::process::Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("capture fast requests");
-        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut tx = MockRuntimeTx::default();
         let mut app = AppState::default();
         app.runtime_info.current_provider = Some("openai".to_string());
         app.runtime_info.current_model = Some("gpt-6.1-sol".to_string());
-        let mut next_id = || "fast-test".to_string();
         app.input.set_from("/fast ultrafast");
-        assert!(handle_enter(&mut app, &mut writer, &mut next_id));
+        assert!(handle_enter(&mut app, &mut tx));
         assert!(app.rpc_pending.model_set_id.is_none());
         app.runtime_info.supports_model_ultrafast = true;
         app.input.set_from("/fast ultrafast");
-        assert!(handle_enter(&mut app, &mut writer, &mut next_id));
+        assert!(handle_enter(&mut app, &mut tx));
         app.runtime_info.current_fast = Some(crate::app::ModelFastMode::Ultrafast);
         app.input.set_from("/fast");
-        assert!(handle_enter(&mut app, &mut writer, &mut next_id));
+        assert!(handle_enter(&mut app, &mut tx));
         app.input.set_from("/fast on");
-        assert!(handle_enter(&mut app, &mut writer, &mut next_id));
-        drop(writer);
-        let output = child.wait_with_output().expect("fast output");
-        let requests: Vec<serde_json::Value> = String::from_utf8(output.stdout)
-            .expect("utf8")
-            .lines()
-            .map(|line| serde_json::from_str(line).expect("json"))
-            .collect();
+        assert!(handle_enter(&mut app, &mut tx));
+        let requests = &tx.sent;
         assert_eq!(requests.len(), 3);
         assert_eq!(requests[0]["params"]["fast"], "ultrafast");
         assert_eq!(requests[1]["params"]["fast"], false);
@@ -361,36 +277,19 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn logout_command_transmits_only_the_requested_provider_and_rejects_extra_arguments() {
-        let mut child = std::process::Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("capture logout requests");
-        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut tx = MockRuntimeTx::default();
         let mut app = AppState::default();
-        let mut seq = 0;
-        let mut next_id = || {
-            seq += 1;
-            format!("logout-{seq}")
-        };
         // An older runtime must receive no named logout request.
         app.input.set_from("/logout home");
-        assert!(handle_enter(&mut app, &mut writer, &mut next_id));
+        assert!(handle_enter(&mut app, &mut tx));
         assert!(app.rpc_pending.logout_id.is_none());
         app.runtime_info.supports_scoped_logout = true;
         for command in ["/logout home", "/logout", "/logout home openai"] {
             app.input.set_from(command);
-            assert!(handle_enter(&mut app, &mut writer, &mut next_id));
+            assert!(handle_enter(&mut app, &mut tx));
         }
-        drop(writer);
-        let output = child.wait_with_output().expect("logout output");
-        let requests: Vec<serde_json::Value> = String::from_utf8(output.stdout)
-            .expect("utf8")
-            .lines()
-            .map(|line| serde_json::from_str(line).expect("json"))
-            .collect();
+        let requests = &tx.sent;
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0]["method"], "auth.logout");
         assert_eq!(
@@ -444,18 +343,13 @@ mod tests {
 
     #[test]
     fn bang_command_uses_shell_start_when_shell_tasks_are_available() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.supports_shell_exec = true;
             app.runtime_info.supports_shell_tasks = true;
-            let mut seq = 0_u64;
-            let mut next_id = || {
-                seq += 1;
-                format!("id-{seq}")
-            };
 
             app.input.set_from("!echo hi");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(app.rpc_pending.shell_start_id.as_deref(), Some("id-1"));
             assert!(app.rpc_pending.shell_exec_id.is_none());
         });
@@ -463,24 +357,19 @@ mod tests {
 
     #[test]
     fn tasks_command_starts_task_list_request() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.supports_tasks = true;
-            let mut seq = 0_u64;
-            let mut next_id = || {
-                seq += 1;
-                format!("id-{seq}")
-            };
 
             app.input.set_from("/tasks");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(app.rpc_pending.task_list_id.as_deref(), Some("id-1"));
         });
     }
 
     #[test]
     fn enqueue_while_run_active_snapshots_payload_and_clears_shell_results_once() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.supports_shell_exec = true;
             app.update_run_status("running".to_string());
@@ -514,12 +403,7 @@ mod tests {
             let token = make_attachment_token(&app.composer_nonce, &attachment_id);
             app.input.set_from(&format!("hello {token}"));
 
-            let mut seq = 0_u64;
-            let mut next_id = || {
-                seq += 1;
-                format!("id-{seq}")
-            };
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(app.pending_prompt_queue.len(), 1);
             assert!(app.pending_shell_results.is_empty());
             assert!(app.input.current().is_empty());
@@ -539,7 +423,7 @@ mod tests {
                 .any(|part| part.get("type").and_then(|v| v.as_str()) == Some("image_url")));
 
             app.update_run_status("completed".to_string());
-            assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert!(try_dispatch_queued_prompt(&mut app, tx));
             assert_eq!(app.pending_prompt_queue.len(), 0);
             assert!(app.dispatching_prompt.is_some());
             assert!(app.rpc_pending.run_start_id.is_some());
@@ -548,26 +432,20 @@ mod tests {
 
     #[test]
     fn queue_commands_cancel_and_clear() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.update_run_status("running".to_string());
 
-            let mut seq = 0_u64;
-            let mut next_id = || {
-                seq += 1;
-                format!("id-{seq}")
-            };
-
             app.input.set_from("first");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             app.input.set_from("second");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             app.input.set_from("third");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(app.pending_prompt_queue.len(), 3);
 
             app.input.set_from("/queue cancel q2");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(app.pending_prompt_queue.len(), 2);
             assert_eq!(
                 app.pending_prompt_queue
@@ -578,7 +456,7 @@ mod tests {
             );
 
             app.input.set_from("/queue cancel");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(app.pending_prompt_queue.len(), 1);
             assert_eq!(
                 app.pending_prompt_queue
@@ -588,11 +466,11 @@ mod tests {
             );
 
             app.input.set_from("/queue clear");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert!(app.pending_prompt_queue.is_empty());
 
             app.input.set_from("/queue");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert!(app
                 .log
                 .iter()
@@ -602,7 +480,7 @@ mod tests {
 
     #[test]
     fn failed_queue_item_keeps_image_payload_until_explicit_retry() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             let payload = json!({"type": "parts", "parts": [
                 {"type": "text", "text": "keep this"},
@@ -629,12 +507,11 @@ mod tests {
             assert_eq!(app.pending_prompt_queue.len(), 2);
             assert_eq!(app.pending_prompt_queue[0].input_payload, payload);
             assert!(!can_dispatch_prompt_now(&app));
-            let mut next_id = || "retry-request".to_string();
-            assert!(!try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert!(!try_dispatch_queued_prompt(&mut app, tx));
 
             app.input.set_from("/queue retry");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
-            assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
+            assert!(try_dispatch_queued_prompt(&mut app, tx));
             assert_eq!(
                 app.dispatching_prompt.as_ref().unwrap().input_payload,
                 payload
@@ -645,7 +522,7 @@ mod tests {
 
     #[test]
     fn cancelling_paused_queue_head_allows_next_prompt_to_dispatch() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.pending_prompt_queue.push_back(queued_prompt(
                 "q1",
@@ -657,17 +534,16 @@ mod tests {
                 0,
                 json!({"type": "text", "text": "next"}),
             ));
-            let mut next_id = || "next-request".to_string();
             app.input.set_from("/queue cancel");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
-            assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
+            assert!(try_dispatch_queued_prompt(&mut app, tx));
             assert_eq!(app.dispatching_prompt.as_ref().unwrap().queue_id, "q2");
         });
     }
 
     #[test]
     fn unknown_run_start_outcome_pauses_without_automatic_retry() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             for response in [
                 RpcResponse {
                     id: "error".to_string(),
@@ -689,35 +565,20 @@ mod tests {
                 handle_run_start_response(&mut app, response);
                 assert_eq!(app.pending_prompt_queue.len(), 1);
                 assert!(!can_dispatch_prompt_now(&app));
-                let mut next_id = || "not-sent".to_string();
-                assert!(!try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+                assert!(!try_dispatch_queued_prompt(&mut app, tx));
             }
         });
     }
 
     #[test]
-    #[cfg(unix)]
     fn disconnected_runtime_keeps_the_unsent_prompt_paused() {
-        // A pipe to an exited child is not a reliable fixture: a sibling test can fork
-        // while the read end is still open, so the write may succeed. Shutting down
-        // the write side of a socket makes every write fail with EPIPE regardless of
-        // how many processes hold the descriptor.
-        let (runtime_end, _peer) = std::os::unix::net::UnixStream::pair().expect("socket pair");
-        runtime_end
-            .shutdown(std::net::Shutdown::Write)
-            .expect("shut down write side");
-        let stdin = std::process::ChildStdin::from(std::os::fd::OwnedFd::from(runtime_end));
-        let mut writer = BufWriter::new(stdin);
+        let mut tx = MockRuntimeTx::default();
+        tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
         let mut app = AppState::default();
         let payload = json!({"type": "text", "text": "keep this"});
         app.pending_prompt_queue
             .push_back(queued_prompt("q1", 0, payload.clone()));
-        let mut next_id = || "request".to_string();
-        assert!(try_dispatch_queued_prompt(
-            &mut app,
-            &mut writer,
-            &mut next_id
-        ));
+        assert!(try_dispatch_queued_prompt(&mut app, &mut tx));
         assert_eq!(app.pending_prompt_queue[0].input_payload, payload);
         assert!(!can_dispatch_prompt_now(&app));
         assert!(app
@@ -764,24 +625,18 @@ mod tests {
 
     #[test]
     fn queued_dispatch_is_fifo() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.update_run_status("running".to_string());
 
-            let mut seq = 0_u64;
-            let mut next_id = || {
-                seq += 1;
-                format!("id-{seq}")
-            };
-
             app.input.set_from("first");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             app.input.set_from("second");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(app.pending_prompt_queue.len(), 2);
 
             app.update_run_status("completed".to_string());
-            assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert!(try_dispatch_queued_prompt(&mut app, tx));
             assert_eq!(
                 app.dispatching_prompt
                     .as_ref()
@@ -798,7 +653,7 @@ mod tests {
             app.dispatching_prompt = None;
             app.rpc_pending.run_start_id = None;
             app.update_run_status("completed".to_string());
-            assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert!(try_dispatch_queued_prompt(&mut app, tx));
             assert_eq!(
                 app.dispatching_prompt
                     .as_ref()
@@ -810,16 +665,11 @@ mod tests {
 
     #[test]
     fn idle_submit_still_dispatches_immediately_via_queue_path() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
-            let mut seq = 0_u64;
-            let mut next_id = || {
-                seq += 1;
-                format!("id-{seq}")
-            };
 
             app.input.set_from("hello");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert!(app.pending_prompt_queue.is_empty());
             assert!(app.dispatching_prompt.is_some());
             assert!(app.rpc_pending.run_start_id.is_some());
@@ -828,19 +678,13 @@ mod tests {
 
     #[test]
     fn steer_command_requires_runtime_support_and_dispatches_in_flight_steer() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.update_run_status("running".to_string());
             app.runtime_info.active_run_id = Some("run-1".to_string());
 
-            let mut seq = 0_u64;
-            let mut next_id = || {
-                seq += 1;
-                format!("id-{seq}")
-            };
-
             app.input.set_from("/steer focus tests");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert!(app.in_flight_steers.is_empty());
             assert!(app.pending_prompt_queue.is_empty());
             assert!(app
@@ -850,7 +694,7 @@ mod tests {
 
             app.runtime_info.supports_run_steer = true;
             app.input.set_from("/steer focus tests");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(app.in_flight_steers.len(), 1);
             assert_eq!(app.in_flight_steers[0].run_id, "run-1");
             assert_eq!(app.in_flight_steers[0].submission.user_text, "focus tests");
@@ -862,35 +706,28 @@ mod tests {
     fn queue_picker_promotes_selected_id_and_keeps_the_draft() {
         use crate::event_loop::input::{handle_non_main_key, handle_paste};
         use crossterm::event::{KeyCode, KeyModifiers};
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.supports_run_steer = true;
             app.update_run_status("running".into());
             app.runtime_info.active_run_id = Some("run-1".into());
-            let mut next_id = || "rpc".to_string();
             for text in ["first", "paused", "second", "/queue pick"] {
                 app.input.set_from(text);
-                handle_enter(&mut app, writer, &mut next_id);
+                handle_enter(&mut app, tx);
             }
             app.pending_prompt_queue[1].dispatch_attempts =
                 crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
             app.input.set_from("unfinished draft");
             assert!(!handle_paste(&mut app, "paste"));
             assert_eq!(
-                handle_non_main_key(
-                    &mut app,
-                    KeyCode::Enter,
-                    KeyModifiers::SHIFT,
-                    writer,
-                    &mut next_id
-                ),
+                handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, tx),
                 Some(false)
             );
             assert!(app.in_flight_steers.is_empty());
             assert!(app.queue_steer_picker.is_some());
             let mut press = |app: &mut AppState, key| {
                 assert_eq!(
-                    handle_non_main_key(app, key, KeyModifiers::NONE, writer, &mut next_id),
+                    handle_non_main_key(app, key, KeyModifiers::NONE, tx),
                     Some(true)
                 );
             };
@@ -910,24 +747,23 @@ mod tests {
     fn queue_picker_cancel_and_run_replacement_do_not_dispatch() {
         use super::{handle_queue_steer_picker_key, open_queue_steer_picker};
         use crossterm::event::KeyCode;
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.supports_run_steer = true;
             app.update_run_status("running".into());
             app.runtime_info.active_run_id = Some("run-1".into());
-            let mut next_id = || "rpc".to_string();
             app.input.set_from("queued");
-            handle_enter(&mut app, writer, &mut next_id);
+            handle_enter(&mut app, tx);
             app.input.set_from("draft");
             open_queue_steer_picker(&mut app);
             assert_eq!(
-                handle_queue_steer_picker_key(&mut app, KeyCode::Esc, writer, &mut next_id),
+                handle_queue_steer_picker_key(&mut app, KeyCode::Esc, tx),
                 Some(true)
             );
             open_queue_steer_picker(&mut app);
             app.runtime_info.active_run_id = Some("run-2".into());
             assert_eq!(
-                handle_queue_steer_picker_key(&mut app, KeyCode::Enter, writer, &mut next_id),
+                handle_queue_steer_picker_key(&mut app, KeyCode::Enter, tx),
                 Some(true)
             );
             assert!(app.queue_steer_picker.is_none());
@@ -939,37 +775,31 @@ mod tests {
 
     #[test]
     fn active_run_steer_mode_routes_enter_and_queue_steer_promotes_queued_item() {
-        with_runtime_writer(|writer| {
+        with_runtime_tx(|tx| {
             let mut app = AppState::default();
             app.runtime_info.supports_run_steer = true;
             app.update_run_status("running".to_string());
             app.runtime_info.active_run_id = Some("run-1".to_string());
 
-            let mut seq = 0_u64;
-            let mut next_id = || {
-                seq += 1;
-                format!("id-{seq}")
-            };
-
             app.input.set_from("queued first");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(app.pending_prompt_queue.len(), 1);
             assert!(app.in_flight_steers.is_empty());
 
             app.input.set_from("/queue mode steer");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(
                 app.active_run_submit_mode,
                 crate::app::ActiveRunSubmitMode::Steer
             );
 
             app.input.set_from("direct steer");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert_eq!(app.in_flight_steers.len(), 1);
             assert_eq!(app.in_flight_steers[0].submission.user_text, "direct steer");
 
             app.input.set_from("/queue steer 1");
-            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(handle_enter(&mut app, tx));
             assert!(app.pending_prompt_queue.is_empty());
             assert_eq!(app.in_flight_steers.len(), 2);
             assert_eq!(app.in_flight_steers[1].submission.user_text, "queued first");

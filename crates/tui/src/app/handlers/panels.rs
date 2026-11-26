@@ -1,15 +1,11 @@
 use crate::app::runtime::{
     send_model_list, send_model_set, send_pick_response, send_session_history, send_session_list,
-    send_session_open, send_theme_set,
+    send_session_open, send_theme_set, RuntimeTx,
 };
 use crate::app::state::parse_theme_name;
 use crate::app::state::LogKind;
 use crate::app::{AppState, ModelListMode, ModelListSubmitAction, ModelSetScope};
 use crossterm::event::KeyCode;
-use std::io::BufWriter;
-use std::process::ChildStdin;
-
-type RuntimeStdin = BufWriter<ChildStdin>;
 
 const REASONING_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 const SESSION_HISTORY_MAX_EVENTS: usize = 500;
@@ -29,8 +25,7 @@ fn open_reasoning_picker(
     provider: Option<&str>,
     model: String,
     scope: ModelSetScope,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) {
     let levels = app
         .runtime_info
@@ -44,10 +39,10 @@ fn open_reasoning_picker(
                 .collect::<Vec<_>>()
         });
     if levels.is_empty() {
-        let id = next_id();
+        let id = tx.next_id();
         app.rpc_pending.model_set_id = Some(id.clone());
         if let Err(error) = send_model_set(
-            child_stdin,
+            tx,
             &id,
             provider,
             &model,
@@ -91,15 +86,10 @@ fn append_skill_mention(app: &mut AppState, skill_name: &str) {
 
 /// Binds the runtime to `session_id` so a model change before the first
 /// message is saved to that session.
-pub(crate) fn request_session_open(
-    app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    session_id: &str,
-) {
-    let id = next_id();
+pub(crate) fn request_session_open(app: &mut AppState, tx: &mut dyn RuntimeTx, session_id: &str) {
+    let id = tx.next_id();
     app.rpc_pending.session_open_id = Some(id.clone());
-    if let Err(error) = send_session_open(child_stdin, &id, session_id) {
+    if let Err(error) = send_session_open(tx, &id, session_id) {
         app.rpc_pending.session_open_id = None;
         app.push_error_report("send error", error.to_string());
     }
@@ -107,33 +97,23 @@ pub(crate) fn request_session_open(
 
 pub(crate) fn request_session_history(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     session_id: &str,
 ) {
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.session_history_id = Some(id.clone());
-    if let Err(error) = send_session_history(
-        child_stdin,
-        &id,
-        session_id,
-        None,
-        Some(SESSION_HISTORY_MAX_EVENTS),
-    ) {
+    if let Err(error) =
+        send_session_history(tx, &id, session_id, None, Some(SESSION_HISTORY_MAX_EVENTS))
+    {
         app.push_error_report("send error", error.to_string());
     }
 }
 
-pub(crate) fn request_session_list(
-    app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-    show_all: bool,
-) {
-    let id = next_id();
+pub(crate) fn request_session_list(app: &mut AppState, tx: &mut dyn RuntimeTx, show_all: bool) {
+    let id = tx.next_id();
     app.rpc_pending.session_list_id = Some(id.clone());
     app.rpc_pending.session_list_show_all = show_all;
-    if let Err(error) = send_session_list(child_stdin, &id, Some(50), show_all) {
+    if let Err(error) = send_session_list(tx, &id, Some(50), show_all) {
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -279,8 +259,7 @@ pub(crate) fn handle_skills_list_panel_key(app: &mut AppState, key: KeyCode) -> 
 pub(crate) fn handle_theme_list_panel_key(
     app: &mut AppState,
     key: KeyCode,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     let panel = app.theme_list_panel.as_mut()?;
     let mut needs_redraw = false;
@@ -320,9 +299,9 @@ pub(crate) fn handle_theme_list_panel_key(
                 } else if app.rpc_pending.theme_set_id.is_some() {
                     app.push_line(LogKind::Status, "Theme update request already running");
                 } else {
-                    let id = next_id();
+                    let id = tx.next_id();
                     app.rpc_pending.theme_set_id = Some(id.clone());
-                    if let Err(error) = send_theme_set(child_stdin, &id, theme.as_str()) {
+                    if let Err(error) = send_theme_set(tx, &id, theme.as_str()) {
                         app.rpc_pending.theme_set_id = None;
                         app.push_error_report("send error", error.to_string());
                     }
@@ -338,8 +317,7 @@ pub(crate) fn handle_theme_list_panel_key(
 pub(crate) fn handle_model_list_panel_key(
     app: &mut AppState,
     key: KeyCode,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     let panel = app.model_list_panel.as_mut()?;
     let mut needs_redraw = false;
@@ -352,7 +330,7 @@ pub(crate) fn handle_model_list_panel_key(
             app.model_list_panel = None;
             if let Some(request_id) = pending_pick_id {
                 let ids: Vec<String> = Vec::new();
-                if let Err(error) = send_pick_response(child_stdin, &request_id, &ids) {
+                if let Err(error) = send_pick_response(tx, &request_id, &ids) {
                     app.push_error_report("pick response error", error.to_string());
                 }
             }
@@ -378,14 +356,7 @@ pub(crate) fn handle_model_list_panel_key(
                 match submit_action {
                     ModelListSubmitAction::ModelSet { scope } => {
                         let provider = app.runtime_info.current_provider.clone();
-                        open_reasoning_picker(
-                            app,
-                            provider.as_deref(),
-                            model,
-                            scope,
-                            child_stdin,
-                            next_id,
-                        );
+                        open_reasoning_picker(app, provider.as_deref(), model, scope, tx);
                     }
                     ModelListSubmitAction::UiPick {
                         request_id,
@@ -393,7 +364,7 @@ pub(crate) fn handle_model_list_panel_key(
                     } => {
                         if let Some(item_id) = item_ids.get(selected) {
                             let ids = vec![item_id.clone()];
-                            if let Err(error) = send_pick_response(child_stdin, &request_id, &ids) {
+                            if let Err(error) = send_pick_response(tx, &request_id, &ids) {
                                 app.push_error_report("pick response error", error.to_string());
                             }
                         }
@@ -433,8 +404,7 @@ pub(crate) fn handle_model_list_panel_key(
 pub(crate) fn handle_session_list_panel_key(
     app: &mut AppState,
     key: KeyCode,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     let panel = app.session_list_panel.as_mut()?;
     let mut needs_redraw = false;
@@ -464,8 +434,8 @@ pub(crate) fn handle_session_list_panel_key(
                 let short_id: String = session_id.chars().take(8).collect();
                 app.push_line(LogKind::Status, format!("Resuming session {short_id}"));
                 app.push_line(LogKind::Space, "");
-                request_session_open(app, child_stdin, next_id, &session_id);
-                request_session_history(app, child_stdin, next_id, &session_id);
+                request_session_open(app, tx, &session_id);
+                request_session_history(app, tx, &session_id);
             }
             needs_redraw = true;
         }
@@ -490,7 +460,7 @@ pub(crate) fn handle_session_list_panel_key(
         }
         KeyCode::Char('a') | KeyCode::Char('A') => {
             let show_all = !panel.show_all;
-            request_session_list(app, child_stdin, next_id, show_all);
+            request_session_list(app, tx, show_all);
             needs_redraw = true;
         }
         _ => {}
@@ -501,8 +471,7 @@ pub(crate) fn handle_session_list_panel_key(
 pub(crate) fn handle_lane_list_panel_key(
     app: &mut AppState,
     key: KeyCode,
-    _child_stdin: &mut RuntimeStdin,
-    _next_id: &mut impl FnMut() -> String,
+    _tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     let panel = app.lane_list_panel.as_mut()?;
     let mut needs_redraw = false;
@@ -579,8 +548,7 @@ pub(crate) fn handle_lane_list_panel_key(
 pub(crate) fn handle_provider_picker_key(
     app: &mut AppState,
     key: KeyCode,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     let picker = app.provider_picker.as_mut()?;
     let mut needs_redraw = false;
@@ -609,14 +577,12 @@ pub(crate) fn handle_provider_picker_key(
             app.model_list_panel = None;
             app.reasoning_picker = None;
             if let Some(provider) = provider {
-                let id = next_id();
+                let id = tx.next_id();
                 app.rpc_pending.model_list_id = Some(id.clone());
                 app.rpc_pending.model_list_mode = Some(mode);
                 app.rpc_pending.model_list_scope = Some(scope);
                 let include_details = matches!(mode, ModelListMode::List);
-                if let Err(error) =
-                    send_model_list(child_stdin, &id, Some(&provider), include_details)
-                {
+                if let Err(error) = send_model_list(tx, &id, Some(&provider), include_details) {
                     app.push_error_report("send error", error.to_string());
                 }
             }
@@ -630,8 +596,7 @@ pub(crate) fn handle_provider_picker_key(
 pub(crate) fn handle_model_picker_key(
     app: &mut AppState,
     key: KeyCode,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     let picker = app.model_picker.as_mut()?;
     let mut needs_redraw = false;
@@ -655,14 +620,7 @@ pub(crate) fn handle_model_picker_key(
         KeyCode::Enter => {
             if let Some(model) = picker.models.get(picker.selected).cloned() {
                 let provider = app.runtime_info.current_provider.clone();
-                open_reasoning_picker(
-                    app,
-                    provider.as_deref(),
-                    model,
-                    ModelSetScope::Config,
-                    child_stdin,
-                    next_id,
-                );
+                open_reasoning_picker(app, provider.as_deref(), model, ModelSetScope::Config, tx);
             }
             app.model_picker = None;
             app.model_list_panel = None;
@@ -676,8 +634,7 @@ pub(crate) fn handle_model_picker_key(
 pub(crate) fn handle_reasoning_picker_key(
     app: &mut AppState,
     key: KeyCode,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     let picker = app.reasoning_picker.as_mut()?;
     let mut needs_redraw = false;
@@ -705,10 +662,10 @@ pub(crate) fn handle_reasoning_picker_key(
             let reasoning = picker.levels.get(picker.selected).cloned();
             app.reasoning_picker = None;
             if let Some(reasoning) = reasoning {
-                let id = next_id();
+                let id = tx.next_id();
                 app.rpc_pending.model_set_id = Some(id.clone());
                 if let Err(error) = send_model_set(
-                    child_stdin,
+                    tx,
                     &id,
                     provider.as_deref(),
                     &model,

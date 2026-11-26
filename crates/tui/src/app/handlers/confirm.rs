@@ -1,8 +1,6 @@
-use crate::app::runtime::{send_confirm_response, UiConfirmRequest};
+use crate::app::runtime::{send_confirm_response, RuntimeTx, UiConfirmRequest};
 use crate::app::{AppState, ConfirmMode, ConfirmPhase};
 use crossterm::event::{KeyCode, KeyModifiers};
-use std::io::BufWriter;
-use std::process::ChildStdin;
 
 pub fn handle_confirm_request(app: &mut AppState, request: UiConfirmRequest) {
     app.scroll_from_bottom = 0;
@@ -224,7 +222,7 @@ pub fn handle_confirm_key(
     app: &mut AppState,
     key: KeyCode,
     modifiers: KeyModifiers,
-    child_stdin: &mut BufWriter<ChildStdin>,
+    tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     let (confirm_id, mode, selected, allow_remember, allow_reason, command_view) = {
         let confirm = app.confirm_dialog.as_ref()?;
@@ -254,7 +252,7 @@ pub fn handle_confirm_key(
         app.scroll_from_bottom = 0;
         app.request_scrollback_sync();
         if let Err(error) = send_confirm_response(
-            child_stdin,
+            tx,
             &confirm_id,
             response.ok,
             response.remember,

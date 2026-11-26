@@ -1,7 +1,6 @@
 use super::formatters::{push_bang_stream_preview, push_rpc_error};
-use super::RuntimeStdin;
 use crate::app::handlers::theme::apply_theme_from_name;
-use crate::app::runtime::{send_shell_wait, RpcResponse};
+use crate::app::runtime::{send_shell_wait, RpcResponse, RuntimeTx};
 use crate::app::state::LogKind;
 use crate::app::{
     AppState, PendingShellResult, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
@@ -146,8 +145,7 @@ pub(super) fn handle_shell_exec_response(app: &mut AppState, response: RpcRespon
 pub(super) fn handle_shell_start_response(
     app: &mut AppState,
     response: RpcResponse,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
 ) {
     if let Some(error) = response.error {
         app.active_shell_wait_task_id = None;
@@ -168,10 +166,10 @@ pub(super) fn handle_shell_start_response(
         }
     };
     let task_id = task.task_id.as_str();
-    let id = next_id();
+    let id = tx.next_id();
     app.rpc_pending.shell_wait_id = Some(id.clone());
     app.active_shell_wait_task_id = Some(task_id.to_string());
-    if let Err(error) = send_shell_wait(child_stdin, &id, task_id) {
+    if let Err(error) = send_shell_wait(tx, &id, task_id) {
         app.rpc_pending.shell_wait_id = None;
         app.active_shell_wait_task_id = None;
         app.push_error_report("send error", error.to_string());
@@ -540,66 +538,30 @@ mod tests {
             .any(|line| line.plain_text().contains("Logged out of home")));
     }
     use super::{handle_logout_response, handle_shell_start_response, handle_shell_wait_response};
-    use crate::app::runtime::RpcResponse;
+    use crate::app::runtime::{MockRuntimeTx, RpcResponse};
     use crate::app::AppState;
     use serde_json::json;
-    use std::io::{BufWriter, Write};
-    use std::process::Stdio;
-
-    fn with_runtime_writer<T>(f: impl FnOnce(&mut BufWriter<std::process::ChildStdin>) -> T) -> T {
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = std::process::Command::new("cmd");
-            command.args(["/C", "more"]);
-            command
-        };
-        #[cfg(not(windows))]
-        let mut command = std::process::Command::new("cat");
-
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn runtime writer helper");
-
-        let child_stdin = child.stdin.take().expect("child stdin");
-        let mut runtime_writer = BufWriter::new(child_stdin);
-        let out = f(&mut runtime_writer);
-
-        let _ = runtime_writer.flush();
-        let _ = child.kill();
-        let _ = child.wait();
-        out
-    }
 
     #[test]
     fn shell_start_response_schedules_shell_wait_and_marks_active_task() {
-        with_runtime_writer(|writer| {
-            let mut app = AppState::default();
-            let mut seq = 0_u64;
-            let mut next_id = || {
-                seq += 1;
-                format!("id-{seq}")
-            };
+        let mut tx = MockRuntimeTx::with_id_prefix("id-");
+        let mut app = AppState::default();
 
-            handle_shell_start_response(
-                &mut app,
-                RpcResponse {
-                    id: "shell-start-1".to_string(),
-                    result: Some(shell_task(json!({
-                        "task_id": "task-123",
-                        "command_preview": "echo hi"
-                    }))),
-                    error: None,
-                },
-                writer,
-                &mut next_id,
-            );
+        handle_shell_start_response(
+            &mut app,
+            RpcResponse {
+                id: "shell-start-1".to_string(),
+                result: Some(shell_task(json!({
+                    "task_id": "task-123",
+                    "command_preview": "echo hi"
+                }))),
+                error: None,
+            },
+            &mut tx,
+        );
 
-            assert_eq!(app.active_shell_wait_task_id.as_deref(), Some("task-123"));
-            assert_eq!(app.rpc_pending.shell_wait_id.as_deref(), Some("id-1"));
-        });
+        assert_eq!(app.active_shell_wait_task_id.as_deref(), Some("task-123"));
+        assert_eq!(app.rpc_pending.shell_wait_id.as_deref(), Some("id-1"));
     }
 
     #[test]

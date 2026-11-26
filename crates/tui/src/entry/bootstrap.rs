@@ -1,13 +1,11 @@
 use crate::app::handlers::panels::{
     request_session_history, request_session_list, request_session_open,
 };
-use crate::app::runtime::send_model_list;
+use crate::app::runtime::{send_model_list, RuntimeTx};
 use crate::app::state::LogKind;
 use crate::app::{AppState, ModelListMode};
 use crate::entry::cli::{resolve_version_label, ResumeMode};
-use std::io::BufWriter;
 use std::path::Path;
-use std::process::ChildStdin;
 
 const MAX_UPDATE_NOTICE_BYTES: u64 = 8 * 1024;
 const MAX_UPDATE_NOTICES: usize = 4;
@@ -71,8 +69,6 @@ const LOGO_LINES: [&str; 7] = [
     "│       Your Coding Companion         │",
     "└─────────────────────────────────────┘",
 ];
-
-type RuntimeStdin = BufWriter<ChildStdin>;
 
 pub(crate) fn build_initial_app(
     debug_print: bool,
@@ -142,23 +138,18 @@ pub(crate) fn build_initial_app(
     app
 }
 
-pub(crate) fn request_initial_model_list(
-    app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
-) {
-    let id = next_id();
+pub(crate) fn request_initial_model_list(app: &mut AppState, tx: &mut dyn RuntimeTx) {
+    let id = tx.next_id();
     app.rpc_pending.model_list_id = Some(id.clone());
     app.rpc_pending.model_list_mode = Some(ModelListMode::Silent);
-    if let Err(error) = send_model_list(child_stdin, &id, None, false) {
+    if let Err(error) = send_model_list(tx, &id, None, false) {
         app.push_error_report("send error", error.to_string());
     }
 }
 
 pub(crate) fn apply_resume_startup(
     app: &mut AppState,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    tx: &mut dyn RuntimeTx,
     resume_mode: ResumeMode,
 ) {
     match resume_mode {
@@ -168,8 +159,8 @@ pub(crate) fn apply_resume_startup(
             app.push_line(LogKind::Status, format!("Resume session {short_id}"));
             app.push_line(LogKind::Space, "");
             if let Some(session_id) = app.runtime_info.session_id.clone() {
-                request_session_open(app, child_stdin, next_id, &session_id);
-                request_session_history(app, child_stdin, next_id, &session_id);
+                request_session_open(app, tx, &session_id);
+                request_session_history(app, tx, &session_id);
             }
         }
         ResumeMode::Picker => {
@@ -178,7 +169,7 @@ pub(crate) fn apply_resume_startup(
                 "Resume picker: Current workspace only. Press A to show all sessions.",
             );
             app.push_line(LogKind::Space, "");
-            request_session_list(app, child_stdin, next_id, false);
+            request_session_list(app, tx, false);
         }
         ResumeMode::None => {}
     }
