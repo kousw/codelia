@@ -90,9 +90,6 @@ struct RenderState {
     // Synchronization phase for side effects.
     sync_phase: SyncPhase,
 
-    // Confirm display phase to avoid overlap races.
-    confirm_phase: ConfirmPhase,
-
     // Cursor rendering intent.
     cursor_phase: CursorPhase,
 }
@@ -101,12 +98,6 @@ enum SyncPhase {
     Idle,
     NeedsInsert,
     InsertedNeedsRedraw,
-}
-
-enum ConfirmPhase {
-    None,
-    Pending,
-    Active,
 }
 
 enum CursorPhase {
@@ -123,8 +114,6 @@ Must hold at end of every tick:
 - `inserted_until <= visible_start <= visible_end <= wrapped_total`
 - `committed` advances only after successful insertion chunks. `inserted_until` is derived from wrapped row source positions; it may decrease on width or historical-log changes without replaying content.
 - Wrapping preserves a break at a partially committed source position, so a wider row cannot combine already-inserted text with its uninserted suffix. Offsets count source graphemes, excluding synthetic indentation and padding.
-- `confirm_phase` transition:
-  - `Pending -> Active` only after one completed draw and one scrollback sync decision.
 
 Use `debug_assert!` for these invariants in debug builds.
 
@@ -170,17 +159,13 @@ Use `debug_assert!` for these invariants in debug builds.
 
 ## 7. Confirm Lifecycle
 
-Use explicit phase transitions:
-
-- Runtime confirm request received: `confirm_phase = Pending`
-- First post-request frame:
-  - preflight lines visible
-  - scrollback sync applied if needed
-- Next stage transition: `confirm_phase = Active`
-
-While `Pending`, consume key input for main composer as blocked.
-
-This removes accidental modal overlap with just-inserted history lines.
+`RuntimeDialogs::top()` gives confirm priority over prompt and pick. A new confirm
+request replaces the confirm slot with `ConfirmSlot::Pending`. While pending,
+it blocks dialog and composer keys and leaves the confirm panel hidden so the
+first post-request frame can draw preflight lines and sync scrollback as needed.
+After that frame, the run loop promotes the slot to `ConfirmSlot::Active` with
+an empty reason editor and redraws before reading the next key. Closing the
+confirm reveals any surviving lower-priority dialog with its input intact.
 
 ---
 
@@ -299,7 +284,7 @@ Each step asserts:
 - `inserted_until`
 - `visible_start/visible_end`
 - `sync_phase`
-- `confirm_phase`
+- `ConfirmSlot` lifecycle
 - `cursor_phase`
 
 ### 11.3 Integration smoke

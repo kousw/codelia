@@ -4,14 +4,11 @@ use crate::app::AppState;
 use super::constants::{
     DEBUG_PANEL_HEIGHT, INPUT_PADDING_X, INPUT_PADDING_Y, MAX_INPUT_HEIGHT, PANEL_GAP,
 };
-use super::input::{
-    active_input_for_layout, compute_input_layout, masked_prompt_input, rendered_main_input,
-};
+use super::input::{dialog_editor, layout_editor};
 use super::panels::{build_panel_view, render_composer_panel};
 
 pub(super) fn layout_heights(app: &AppState) -> (u16, u16, u16) {
-    let modal_active = app.confirm_dialog.is_some() || app.prompt_dialog.is_some();
-    if modal_active || app.queue_picker_focused() {
+    if dialog_editor(app).is_some() || app.queue_picker_focused() {
         return (0, 0, 0);
     }
     let run_height = 2_u16;
@@ -47,10 +44,7 @@ pub(super) fn composer_panel_layout(
         });
     }
     let input_width = width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
-    let masked_prompt = masked_prompt_input(app);
-    let rendered_main = rendered_main_input(app);
-    let active_input = active_input_for_layout(app, &masked_prompt, &rendered_main);
-    let input_layout = compute_input_layout(input_width.max(1), active_input, app.bang_input_mode);
+    let input_layout = layout_editor(app, input_width.max(1));
     let max_input_height = remaining_height
         .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))
         .clamp(1, MAX_INPUT_HEIGHT);

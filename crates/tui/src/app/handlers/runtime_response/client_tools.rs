@@ -379,7 +379,7 @@ fn handle_ask_user_choice(
     request: ClientToolRequest,
     tx: &mut dyn RuntimeTx,
 ) -> bool {
-    if app.pick_dialog.is_some() {
+    if app.runtime_dialogs.pick.is_some() {
         if let Err(error) = send_client_tool_error(tx, &request.id, "pick dialog is busy") {
             app.push_error_report("client tool response error", error.to_string());
         }
@@ -397,7 +397,7 @@ fn handle_ask_user_choice(
     app.rpc_pending
         .client_tool_choice_ids
         .insert(request.id.clone());
-    app.pick_dialog = Some(PickDialogState {
+    app.runtime_dialogs.pick = Some(PickDialogState {
         id: request.id,
         title: dialog.title,
         message: dialog.message,
@@ -574,11 +574,12 @@ pub(super) fn handle_client_tool_cancel(
     }
 
     let matches_active_dialog = app
-        .pick_dialog
+        .runtime_dialogs
+        .pick
         .as_ref()
         .is_some_and(|dialog| dialog.id == cancellation.request_id);
     if matches_active_dialog {
-        app.pick_dialog = None;
+        app.runtime_dialogs.pick = None;
         let message = match cancellation.reason.as_str() {
             "timeout" => "Choice request timed out.",
             _ => "Choice request cancelled.",
@@ -641,7 +642,7 @@ mod tests {
                 tx,
             );
 
-            let pick = app.pick_dialog.expect("pick dialog");
+            let pick = app.runtime_dialogs.pick.expect("pick dialog");
             assert_eq!(pick.message.as_deref(), Some("Pick a direction."));
             let ids = pick
                 .items
@@ -673,7 +674,7 @@ mod tests {
                 tx,
             );
 
-            assert!(app.pick_dialog.is_none());
+            assert!(app.runtime_dialogs.pick.is_none());
             assert!(!app
                 .rpc_pending
                 .client_tool_choice_ids

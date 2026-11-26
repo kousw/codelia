@@ -1,7 +1,7 @@
 use crate::app::state::input::attachments::render_input_with_attachment_labels;
 use crate::app::state::InputState;
 use crate::app::util::text::{char_width, detect_continuation_prefix};
-use crate::app::AppState;
+use crate::app::{AppState, ConfirmSlot, RuntimeDialogRef};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
@@ -176,40 +176,29 @@ pub(super) fn render_input(
     f.set_cursor_position((area.x + layout.cursor_x, area.y + cursor_visible_y as u16));
 }
 
-pub(super) fn masked_prompt_input(app: &AppState) -> Option<InputState> {
-    app.prompt_dialog
-        .as_ref()
-        .filter(|panel| panel.secret)
-        .map(|_| app.prompt_input.masked_clone('*'))
-}
-
-pub(super) fn rendered_main_input(app: &AppState) -> Option<InputState> {
-    if app.confirm_dialog.is_some() || app.prompt_dialog.is_some() {
-        return None;
+pub(super) fn dialog_editor(app: &AppState) -> Option<(&InputState, bool)> {
+    match app.runtime_dialogs.visible_top()? {
+        RuntimeDialogRef::Confirm(ConfirmSlot::Active { input, .. }) => Some((input, false)),
+        RuntimeDialogRef::Prompt(prompt) => Some((&prompt.input, prompt.state.secret)),
+        _ => None,
     }
-    Some(render_input_with_attachment_labels(
-        &app.input,
-        &app.composer_nonce,
-        &app.pending_image_attachments,
-        &app.pending_staged_attachments,
-    ))
 }
 
-pub(super) fn active_input_for_layout<'a>(
-    app: &'a AppState,
-    masked_prompt: &'a Option<InputState>,
-    rendered_main: &'a Option<InputState>,
-) -> &'a InputState {
-    if app.confirm_dialog.is_some() {
-        &app.confirm_input
-    } else if let Some(masked) = masked_prompt.as_ref() {
-        masked
-    } else if app.prompt_dialog.is_some() {
-        &app.prompt_input
-    } else if let Some(rendered) = rendered_main.as_ref() {
-        rendered
-    } else {
-        &app.input
+pub(super) fn layout_editor(app: &AppState, width: usize) -> InputLayout {
+    match dialog_editor(app) {
+        Some((input, false)) => compute_input_layout(width, input, app.bang_input_mode),
+        Some((input, true)) => {
+            compute_input_layout(width, &input.masked_clone('*'), app.bang_input_mode)
+        }
+        None => {
+            let rendered = render_input_with_attachment_labels(
+                &app.input,
+                &app.composer_nonce,
+                &app.pending_image_attachments,
+                &app.pending_staged_attachments,
+            );
+            compute_input_layout(width, &rendered, app.bang_input_mode)
+        }
     }
 }
 

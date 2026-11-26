@@ -6,7 +6,7 @@ mod render;
 mod suggestions;
 mod types;
 
-use crate::app::AppState;
+use crate::app::{AppState, ConfirmSlot, RuntimeDialogRef};
 
 use dialogs::{build_confirm_panel_view, build_pick_panel_view, build_prompt_panel_view};
 use lists::{
@@ -29,30 +29,27 @@ pub(super) fn render_composer_panel(
     max_lines: u16,
     width: usize,
 ) -> Vec<ratatui::text::Line<'static>> {
-    if app.confirm_dialog.is_none() && app.prompt_dialog.is_none() {
-        if let Some(pick) = app.pick_dialog.as_ref() {
-            if pick.approval {
-                return dialogs::render_approval_pick(pick, view, max_lines, width);
-            }
-            if let Some(details) = dialogs::render_shell_rule_details(pick, max_lines, width) {
-                return details;
-            }
+    if let Some(RuntimeDialogRef::Pick(pick)) = app.runtime_dialogs.visible_top() {
+        if pick.approval {
+            return dialogs::render_approval_pick(pick, view, max_lines, width);
+        }
+        if let Some(details) = dialogs::render_shell_rule_details(pick, max_lines, width) {
+            return details;
         }
     }
     build_panel_render(view, max_lines, width)
 }
 
 pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
-    if let Some(panel) = &app.confirm_dialog {
-        return Some(build_confirm_panel_view(panel));
-    }
-
-    if let Some(panel) = &app.prompt_dialog {
-        return Some(build_prompt_panel_view(panel));
-    }
-
-    if let Some(panel) = &app.pick_dialog {
-        return Some(build_pick_panel_view(panel));
+    if let Some(dialog) = app.runtime_dialogs.visible_top() {
+        return match dialog {
+            RuntimeDialogRef::Confirm(ConfirmSlot::Pending(_)) => None,
+            RuntimeDialogRef::Confirm(ConfirmSlot::Active { state, .. }) => {
+                Some(build_confirm_panel_view(state))
+            }
+            RuntimeDialogRef::Prompt(prompt) => Some(build_prompt_panel_view(&prompt.state)),
+            RuntimeDialogRef::Pick(pick) => Some(build_pick_panel_view(pick)),
+        };
     }
 
     if let Some(panel) = &app.session_list_panel {

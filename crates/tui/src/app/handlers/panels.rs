@@ -533,17 +533,19 @@ pub(crate) fn handle_lane_list_panel_key(
         KeyCode::Enter => {
             if panel.selected >= panel.lanes.len() {
                 app.new_lane_task_id = None;
-                app.prompt_dialog = Some(crate::app::PromptDialogState {
-                    id: "lane:new-task".to_string(),
-                    title: "New lane".to_string(),
-                    message: "Task id".to_string(),
-                    multiline: false,
-                    secret: false,
+                app.runtime_dialogs.prompt = Some(crate::app::PromptSlot {
+                    state: crate::app::PromptDialogState {
+                        id: "lane:new-task".to_string(),
+                        title: "New lane".to_string(),
+                        message: "Task id".to_string(),
+                        multiline: false,
+                        secret: false,
+                    },
+                    input: Default::default(),
                 });
-                app.prompt_input.clear();
                 needs_redraw = true;
             } else if let Some(lane) = panel.lanes.get(panel.selected).cloned() {
-                app.pick_dialog = Some(crate::app::PickDialogState {
+                app.runtime_dialogs.pick = Some(crate::app::PickDialogState {
                     id: format!("lane:action:{}", lane.lane_id),
                     title: format!("Lane {}", lane.lane_id),
                     message: None,

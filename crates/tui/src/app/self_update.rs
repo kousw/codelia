@@ -236,7 +236,7 @@ pub(crate) fn poll(app: &mut AppState) -> bool {
             app.push_line(LogKind::Status, note);
         }
     } else if !app.has_interaction_panel() {
-        app.pick_dialog = Some(build_picker(&status));
+        app.runtime_dialogs.pick = Some(build_picker(&status));
     } else {
         app.push_line(
             LogKind::Status,

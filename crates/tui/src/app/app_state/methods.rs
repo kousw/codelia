@@ -1,9 +1,7 @@
 use super::{
     AppState, ErrorDetailMode, PendingRpcSlot, ERROR_DETAIL_MAX_LINES, ERROR_SUMMARY_MAX_CHARS,
 };
-use crate::app::state::{
-    ConfirmPhase, LogKind, LogLine, LogTone, RenderState, StatusLineMode, SyncPhase,
-};
+use crate::app::state::{LogKind, LogLine, LogTone, RenderState, StatusLineMode, SyncPhase};
 use crate::app::util::PerfMemorySample;
 use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation;
@@ -110,10 +108,7 @@ impl AppState {
     }
 
     fn has_other_interaction_panel(&self) -> bool {
-        self.confirm_dialog.is_some()
-            || self.pending_confirm_dialog.is_some()
-            || self.prompt_dialog.is_some()
-            || self.pick_dialog.is_some()
+        self.runtime_dialogs.is_any_open()
             || self.model_picker.is_some()
             || self.provider_picker.is_some()
             || self.reasoning_picker.is_some()
@@ -431,13 +426,6 @@ impl AppState {
         self.scroll_from_bottom = 0;
         self.mark_log_changed();
         self.render_state = RenderState::default();
-        self.render_state.confirm_phase = if self.confirm_dialog.is_some() {
-            ConfirmPhase::Active
-        } else if self.pending_confirm_dialog.is_some() {
-            ConfirmPhase::Pending
-        } else {
-            ConfirmPhase::None
-        };
     }
 
     pub fn clear_composer(&mut self) {
@@ -517,21 +505,6 @@ impl AppState {
             self.render_state.visible_start,
             self.render_state.visible_end,
             self.render_state.wrapped_total
-        );
-        debug_assert!(
-            self.render_state.confirm_phase == ConfirmPhase::None
-                && self.confirm_dialog.is_none()
-                && self.pending_confirm_dialog.is_none()
-                || self.render_state.confirm_phase == ConfirmPhase::Pending
-                    && self.confirm_dialog.is_none()
-                    && self.pending_confirm_dialog.is_some()
-                || self.render_state.confirm_phase == ConfirmPhase::Active
-                    && self.confirm_dialog.is_some()
-                    && self.pending_confirm_dialog.is_none(),
-            "confirm invariant failed: phase={:?} confirm={} pending={}",
-            self.render_state.confirm_phase,
-            self.confirm_dialog.is_some(),
-            self.pending_confirm_dialog.is_some()
         );
     }
 }

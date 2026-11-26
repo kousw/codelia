@@ -5,12 +5,18 @@ use super::components::{
     tool_component_key, PendingComponentStart, UNKNOWN_RUN_SCOPE,
 };
 use super::steer::{applied_steer_position, fallback_unconsumed_steers};
+use crate::app::handlers::confirm::activate_pending_confirm_dialog;
 use crate::app::runtime::parser::test_support::{
     parse_runtime_output, parse_runtime_output_with_history,
 };
 use crate::app::runtime::{AgentMsg, MockRuntimeTx, RunControlMsg, RuntimeMsg, RuntimeTx};
 use crate::app::state::{LogKind, LogLine};
-use crate::app::{AppState, LogComponentSpan, PendingPromptRun, PendingRpc, PendingRpcSlot};
+use crate::app::{
+    AppState, ConfirmSlot, LogComponentSpan, PendingPromptRun, PendingRpc, PendingRpcSlot,
+    RuntimeDialogRef,
+};
+use crate::event_loop::input::{handle_non_main_key, handle_paste};
+use crossterm::event::{KeyCode, KeyModifiers};
 use serde_json::json;
 use std::time::Instant;
 
@@ -606,7 +612,10 @@ fn client_tool_timeout_clears_matching_choice_dialog_and_pending_id() {
         );
         assert!(apply_runtime_msg(&mut app, request, tx));
         assert_eq!(
-            app.pick_dialog.as_ref().map(|dialog| dialog.id.as_str()),
+            app.runtime_dialogs
+                .pick
+                .as_ref()
+                .map(|dialog| dialog.id.as_str()),
             Some("ui_choice_1")
         );
         assert!(app
@@ -619,7 +628,7 @@ fn client_tool_timeout_clears_matching_choice_dialog_and_pending_id() {
         );
         assert!(apply_runtime_msg(&mut app, cancellation, tx));
 
-        assert!(app.pick_dialog.is_none());
+        assert!(app.runtime_dialogs.pick.is_none());
         assert!(!app
             .rpc_pending
             .client_tool_choice_ids
@@ -630,6 +639,170 @@ fn client_tool_timeout_clears_matching_choice_dialog_and_pending_id() {
             .iter()
             .any(|line| line.plain_text() == "Choice request timed out."));
     });
+}
+
+fn receive_confirm(app: &mut AppState, tx: &mut MockRuntimeTx, id: &str) {
+    let request = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "ui.confirm.request",
+            "id": id,
+            "params": {"title": "Confirm action", "message": "Proceed?", "allow_reason": true}
+        })
+        .to_string(),
+    );
+    assert!(apply_runtime_msg(app, request, tx));
+    assert!(matches!(
+        app.runtime_dialogs.top(),
+        Some(RuntimeDialogRef::Confirm(ConfirmSlot::Pending(state))) if state.id == id
+    ));
+}
+
+fn dialog_key(app: &mut AppState, tx: &mut MockRuntimeTx, key: KeyCode) -> Option<bool> {
+    handle_non_main_key(app, key, KeyModifiers::NONE, tx)
+}
+
+#[test]
+fn confirm_preempts_client_choice_and_reveals_the_same_selection_on_close() {
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    let choice = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "choice",
+            "method": "client.tool.call",
+            "params": {
+                "run_id": "run-1",
+                "name": "tui_ask_user_choice",
+                "arguments": {
+                    "title": "Choose next",
+                    "choices": [
+                        {"id": "first", "label": "First"},
+                        {"id": "second", "label": "Second"}
+                    ]
+                },
+                "raw_arguments": "{}"
+            }
+        })
+        .to_string(),
+    );
+    assert!(apply_runtime_msg(&mut app, choice, &mut tx));
+    assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Down), Some(true));
+
+    receive_confirm(&mut app, &mut tx, "confirm");
+    assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(false));
+    assert!(tx.sent.is_empty());
+    assert!(activate_pending_confirm_dialog(&mut app));
+    assert!(matches!(
+        app.runtime_dialogs.top(),
+        Some(RuntimeDialogRef::Confirm(ConfirmSlot::Active { .. }))
+    ));
+    assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Up), Some(true));
+    assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(true));
+    assert_eq!(tx.sent.len(), 1);
+    assert_eq!(tx.sent[0]["id"], "confirm");
+    assert_eq!(tx.sent[0]["result"]["ok"], true);
+    assert!(matches!(
+        app.runtime_dialogs.top(),
+        Some(RuntimeDialogRef::Pick(pick)) if pick.id == "choice" && pick.selected == 1
+    ));
+
+    assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(true));
+    assert_eq!(tx.sent.len(), 2);
+    assert_eq!(tx.sent[1]["id"], "choice");
+    assert_eq!(
+        tx.sent[1]["result"]["result"]["value"]["selected_id"],
+        "second"
+    );
+    assert!(!app.runtime_dialogs.is_any_open());
+}
+
+#[test]
+fn confirm_preempts_prompt_and_preserves_its_buffer_and_cursor() {
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    let prompt = parse_runtime_output(
+        r#"{"jsonrpc":"2.0","id":"prompt","method":"ui.prompt.request","params":{"title":"Input","message":"Enter value","default_value":"abc"}}"#,
+    );
+    assert!(apply_runtime_msg(&mut app, prompt, &mut tx));
+    assert_eq!(
+        dialog_key(&mut app, &mut tx, KeyCode::Char('d')),
+        Some(true)
+    );
+    assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Left), Some(true));
+
+    receive_confirm(&mut app, &mut tx, "confirm");
+    assert_eq!(
+        dialog_key(&mut app, &mut tx, KeyCode::Char('x')),
+        Some(false)
+    );
+    assert!(!handle_paste(&mut app, "blocked while pending"));
+    assert!(activate_pending_confirm_dialog(&mut app));
+    assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Tab), Some(true));
+    assert!(!handle_paste(&mut app, "blocked while active"));
+    assert_eq!(
+        dialog_key(&mut app, &mut tx, KeyCode::Char('n')),
+        Some(true)
+    );
+    assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(true));
+    assert_eq!(tx.sent[0]["result"]["reason"], "n");
+
+    let Some(RuntimeDialogRef::Prompt(prompt)) = app.runtime_dialogs.top() else {
+        panic!("prompt should regain focus");
+    };
+    assert_eq!(prompt.state.id, "prompt");
+    assert_eq!(prompt.input.current(), "abcd");
+    assert_eq!(prompt.input.cursor, 3);
+    assert!(handle_paste(&mut app, "!"));
+    assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(true));
+    assert_eq!(tx.sent.len(), 2);
+    assert_eq!(tx.sent[1]["id"], "prompt");
+    assert_eq!(tx.sent[1]["result"]["value"], "abc!d");
+    assert!(app.input.current().is_empty());
+}
+
+#[test]
+fn replacement_confirm_waits_for_activation_and_starts_with_empty_reason() {
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    assert!(!activate_pending_confirm_dialog(&mut app));
+    receive_confirm(&mut app, &mut tx, "superseded-pending");
+    receive_confirm(&mut app, &mut tx, "superseded-active");
+    assert!(activate_pending_confirm_dialog(&mut app));
+    assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Tab), Some(true));
+    assert_eq!(
+        dialog_key(&mut app, &mut tx, KeyCode::Char('x')),
+        Some(true)
+    );
+    assert!(!activate_pending_confirm_dialog(&mut app));
+    assert_eq!(
+        app.runtime_dialogs.active_confirm().unwrap().1.current(),
+        "x"
+    );
+
+    receive_confirm(&mut app, &mut tx, "replacement");
+    assert_eq!(
+        dialog_key(&mut app, &mut tx, KeyCode::Char('y')),
+        Some(false)
+    );
+    assert!(tx.sent.is_empty());
+    assert!(app.input.current().is_empty());
+    assert!(activate_pending_confirm_dialog(&mut app));
+    assert!(app
+        .runtime_dialogs
+        .active_confirm()
+        .unwrap()
+        .1
+        .current()
+        .is_empty());
+    assert_eq!(
+        dialog_key(&mut app, &mut tx, KeyCode::Char('y')),
+        Some(true)
+    );
+    assert_eq!(tx.sent.len(), 1);
+    assert_eq!(tx.sent[0]["id"], "replacement");
+    assert_eq!(tx.sent[0]["result"]["ok"], true);
+    assert!(!app.runtime_dialogs.is_any_open());
 }
 
 #[test]
@@ -647,7 +820,10 @@ fn stale_client_tool_cancel_leaves_active_choice_untouched() {
         assert!(apply_runtime_msg(&mut app, stale_cancellation, tx));
 
         assert_eq!(
-            app.pick_dialog.as_ref().map(|dialog| dialog.id.as_str()),
+            app.runtime_dialogs
+                .pick
+                .as_ref()
+                .map(|dialog| dialog.id.as_str()),
             Some("ui_choice_active")
         );
         assert!(app
@@ -1690,7 +1866,7 @@ fn malformed_secret_prompt_is_declined_without_opening_the_input_dialog() {
         r#"{"jsonrpc":"2.0","id":"ui-1","method":"ui.prompt.request","params":{"title":"Secret","message":"Enter password","secret":null}}"#,
     );
     apply_runtime_msg(&mut app, parsed, &mut tx);
-    assert!(app.prompt_dialog.is_none());
+    assert!(app.runtime_dialogs.prompt.is_none());
     let [reply] = tx.sent.as_slice() else {
         panic!("expected one prompt reply");
     };
@@ -1781,8 +1957,8 @@ fn malformed_server_request_logs_diagnostic_and_replies_once() {
         assert_eq!(line.kind(), LogKind::Error);
         assert!(line.plain_text().contains(method));
     }
-    assert!(app.confirm_dialog.is_none());
-    assert!(app.pick_dialog.is_none());
+    assert!(app.runtime_dialogs.confirm.is_none());
+    assert!(app.runtime_dialogs.pick.is_none());
     assert_eq!(tx.sent.len(), 2);
     let decline = &tx.sent[0];
     assert_eq!(decline["id"], "ui-1");
@@ -1897,4 +2073,177 @@ fn filtered_debug_lines_and_batch_cap_preserve_redraw_and_tick_boundary() {
         .log
         .iter()
         .any(|line| line.plain_text().contains("deferred visible")));
+}
+
+#[test]
+fn pending_confirm_draw_preserves_underlying_prompt_until_activated_then_restores() {
+    use crate::app::handlers::confirm::activate_pending_confirm_dialog;
+    use crate::app::view::draw_ui;
+    use crate::event_loop::input::handle_non_main_key;
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    let render_text = |terminal: &mut Terminal<TestBackend>, app: &mut AppState| -> String {
+        terminal.draw(|frame| draw_ui(frame, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    app.input.set_from("composer-draft-marker");
+
+    let prompt_msg = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "prompt-1",
+            "method": "ui.prompt.request",
+            "params": {
+                "title": "API Key Prompt",
+                "message": "Enter token",
+                "default_value": "typed-token"
+            }
+        })
+        .to_string(),
+    );
+    apply_runtime_msg(&mut app, prompt_msg, &mut tx);
+
+    let confirm_msg = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "confirm-1",
+            "method": "ui.confirm.request",
+            "params": {
+                "title": "Allow Shell",
+                "message": "Run rm -rf?"
+            }
+        })
+        .to_string(),
+    );
+    apply_runtime_msg(&mut app, confirm_msg, &mut tx);
+
+    // Frame 1 (Pending): keeps rendering the underlying prompt and editor, NOT composer or confirm.
+    let frame1 = render_text(&mut terminal, &mut app);
+    assert!(frame1.contains("API Key Prompt"), "{frame1}");
+    assert!(frame1.contains("typed-token"), "{frame1}");
+    assert!(!frame1.contains("composer-draft-marker"), "{frame1}");
+    assert!(!frame1.contains("Allow Shell"), "{frame1}");
+
+    // Frame 2 (Active): renders confirm dialog.
+    assert!(activate_pending_confirm_dialog(&mut app));
+    let frame2 = render_text(&mut terminal, &mut app);
+    assert!(frame2.contains("Allow Shell"), "{frame2}");
+    assert!(!frame2.contains("API Key Prompt"), "{frame2}");
+
+    // Resolving confirm restores the prompt and its buffer on Frame 3.
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE, &mut tx),
+        Some(true)
+    );
+    let frame3 = render_text(&mut terminal, &mut app);
+    assert!(frame3.contains("API Key Prompt"), "{frame3}");
+    assert!(frame3.contains("typed-token"), "{frame3}");
+    assert!(!frame3.contains("Allow Shell"), "{frame3}");
+}
+
+#[test]
+fn pending_or_active_confirm_over_update_picker_clears_drawn_update_choice() {
+    use crate::app::handlers::confirm::activate_pending_confirm_dialog;
+    use crate::app::view::draw_ui;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    app.runtime_dialogs.pick = Some(crate::app::self_update::startup_picker());
+
+    terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+    assert!(app.render_state.drawn_update_choice.is_some());
+
+    let confirm_msg = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "confirm-upd",
+            "method": "ui.confirm.request",
+            "params": { "title": "Confirm", "message": "Proceed?" }
+        })
+        .to_string(),
+    );
+    apply_runtime_msg(&mut app, confirm_msg, &mut tx);
+    terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+    assert!(app.render_state.drawn_update_choice.is_none());
+
+    assert!(activate_pending_confirm_dialog(&mut app));
+    terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+    assert!(app.render_state.drawn_update_choice.is_none());
+}
+
+#[test]
+fn delayed_lane_list_response_preserves_live_runtime_prompt_and_pick_behind_confirm() {
+    use crate::app::handlers::confirm::activate_pending_confirm_dialog;
+    use crate::event_loop::input::handle_non_main_key;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+
+    for raw in [
+        json!({
+            "jsonrpc": "2.0",
+            "id": "pick-live",
+            "method": "ui.pick.request",
+            "params": { "title": "Pick", "items": [{"id": "opt-a", "label": "Option A"}] }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "prompt-live",
+            "method": "ui.prompt.request",
+            "params": { "title": "Prompt", "message": "Value", "default_value": "keep-me" }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "confirm-live",
+            "method": "ui.confirm.request",
+            "params": { "title": "Confirm", "message": "Proceed?" }
+        }),
+    ] {
+        let msg = parse_runtime_output(&raw.to_string());
+        apply_runtime_msg(&mut app, msg, &mut tx);
+    }
+
+    // Async /lane response arrives while runtime dialogs are open.
+    super::lane::apply_lane_list_result(&mut app, &json!({"lanes": []}));
+    assert!(app.lane_list_panel.is_some());
+    assert!(app.runtime_dialogs.prompt.is_some());
+    assert!(app.runtime_dialogs.pick.is_some());
+
+    // Confirm -> Prompt -> Pick all still resolve with their original IDs and input.
+    assert!(activate_pending_confirm_dialog(&mut app));
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE, &mut tx),
+        Some(true)
+    );
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        Some(true)
+    );
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        Some(true)
+    );
+
+    assert_eq!(tx.sent.len(), 3);
+    assert_eq!(tx.sent[0]["id"], "confirm-live");
+    assert_eq!(tx.sent[1]["id"], "prompt-live");
+    assert_eq!(tx.sent[1]["result"]["value"], "keep-me");
+    assert_eq!(tx.sent[2]["id"], "pick-live");
+    assert_eq!(tx.sent[2]["result"]["ids"], json!(["opt-a"]));
 }

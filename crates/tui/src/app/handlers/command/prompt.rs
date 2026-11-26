@@ -234,10 +234,7 @@ pub(super) fn can_dispatch_prompt_now(app: &AppState) -> bool {
         return false;
     }
     !app.image_preview.is_open()
-        && app.confirm_dialog.is_none()
-        && app.pending_confirm_dialog.is_none()
-        && app.prompt_dialog.is_none()
-        && app.pick_dialog.is_none()
+        && !app.runtime_dialogs.is_any_open()
         && app.provider_picker.is_none()
         && app.model_picker.is_none()
         && app.reasoning_picker.is_none()

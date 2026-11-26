@@ -8,7 +8,7 @@ mod text;
 
 use crate::app::log_wrap::{cached_wrap_log_lines, selected_cell_ranges_for_row};
 use crate::app::theme::ui_colors;
-use crate::app::{AppState, SelectionProjectionId, SyncPhase, TranscriptHitMap};
+use crate::app::{AppState, RuntimeDialogRef, SelectionProjectionId, SyncPhase, TranscriptHitMap};
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Text};
@@ -54,16 +54,12 @@ fn drawn_update_choice(
     app: &AppState,
     panel: Rect,
 ) -> Option<(String, usize)> {
-    if app.confirm_dialog.is_some()
-        || app.prompt_dialog.is_some()
-        || app.pending_confirm_dialog.is_some()
-    {
+    let Some(RuntimeDialogRef::Pick(picker)) = app.runtime_dialogs.top() else {
+        return None;
+    };
+    if !picker.local_update_picker {
         return None;
     }
-    let picker = app
-        .pick_dialog
-        .as_ref()
-        .filter(|pick| pick.local_update_picker)?;
     let item = picker.items.get(picker.selected)?;
     // Verify the full ASCII option label and its selection marker in the cells
     // actually drawn, after wrapping and clipping. Composer text does not count.
@@ -89,7 +85,7 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
     if app.selection_input_blocked() {
         app.clear_text_selection();
     }
-    if app.confirm_dialog.is_some() || app.prompt_dialog.is_some() {
+    if input::dialog_editor(app).is_some() {
         app.scroll_from_bottom = 0;
     }
 

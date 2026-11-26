@@ -1,12 +1,11 @@
 use crate::app::runtime::{send_confirm_response, RuntimeTx, UiConfirmRequest};
-use crate::app::{AppState, ConfirmMode, ConfirmPhase};
+use crate::app::state::InputState;
+use crate::app::{AppState, ConfirmDialogState, ConfirmMode, ConfirmSlot};
 use crossterm::event::{KeyCode, KeyModifiers};
 
 pub fn handle_confirm_request(app: &mut AppState, request: UiConfirmRequest) {
     app.scroll_from_bottom = 0;
-    app.confirm_input.clear();
-    app.confirm_dialog = None;
-    app.pending_confirm_dialog = Some(crate::app::ConfirmDialogState {
+    app.runtime_dialogs.confirm = Some(ConfirmSlot::Pending(ConfirmDialogState {
         id: request.id,
         title: request.title,
         message: request.message,
@@ -18,21 +17,11 @@ pub fn handle_confirm_request(app: &mut AppState, request: UiConfirmRequest) {
         command_view: false,
         selected: 0,
         mode: ConfirmMode::Select,
-    });
-    app.render_state.confirm_phase = ConfirmPhase::Pending;
+    }));
 }
 
 pub fn activate_pending_confirm_dialog(app: &mut AppState) -> bool {
-    if app.render_state.confirm_phase != ConfirmPhase::Pending || app.confirm_dialog.is_some() {
-        return false;
-    }
-    let Some(pending_confirm) = app.pending_confirm_dialog.take() else {
-        app.render_state.confirm_phase = ConfirmPhase::None;
-        return false;
-    };
-    app.confirm_dialog = Some(pending_confirm);
-    app.render_state.confirm_phase = ConfirmPhase::Active;
-    true
+    app.runtime_dialogs.activate_pending_confirm()
 }
 
 struct ConfirmResponse {
@@ -161,7 +150,7 @@ fn handle_confirm_select_key(
 }
 
 fn handle_confirm_reason_key(
-    app: &mut AppState,
+    input: &mut InputState,
     key: KeyCode,
     modifiers: KeyModifiers,
     selected: usize,
@@ -179,7 +168,7 @@ fn handle_confirm_reason_key(
             update.mode = ConfirmMode::Select;
         }
         KeyCode::Enter => {
-            let text = app.confirm_input.current();
+            let text = input.current();
             update.response = Some(ConfirmResponse {
                 ok: false,
                 remember: false,
@@ -187,27 +176,27 @@ fn handle_confirm_reason_key(
             });
         }
         KeyCode::Backspace => {
-            app.confirm_input.backspace();
+            input.backspace();
         }
         KeyCode::Delete => {
-            app.confirm_input.delete();
+            input.delete();
         }
         KeyCode::Left => {
-            app.confirm_input.move_left();
+            input.move_left();
         }
         KeyCode::Right => {
-            app.confirm_input.move_right();
+            input.move_right();
         }
         KeyCode::Home => {
-            app.confirm_input.move_home();
+            input.move_home();
         }
         KeyCode::End => {
-            app.confirm_input.move_end();
+            input.move_end();
         }
         KeyCode::Char(ch) => {
             if !modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT)
             {
-                app.confirm_input.insert_char(ch);
+                input.insert_char(ch);
             }
         }
         _ => {
@@ -224,30 +213,21 @@ pub fn handle_confirm_key(
     modifiers: KeyModifiers,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let (confirm_id, mode, selected, allow_remember, allow_reason, command_view) = {
-        let confirm = app.confirm_dialog.as_ref()?;
-        (
-            confirm.id.clone(),
-            confirm.mode,
+    let (confirm, input) = app.runtime_dialogs.active_confirm_mut()?;
+    let update = match confirm.mode {
+        ConfirmMode::Select => handle_confirm_select_key(
+            key,
             confirm.selected,
             confirm.allow_remember,
             confirm.allow_reason,
             confirm.command_view,
-        )
-    };
-
-    let update = match mode {
-        ConfirmMode::Select => {
-            handle_confirm_select_key(key, selected, allow_remember, allow_reason, command_view)
-        }
-        ConfirmMode::Reason => handle_confirm_reason_key(app, key, modifiers, selected),
+        ),
+        ConfirmMode::Reason => handle_confirm_reason_key(input, key, modifiers, confirm.selected),
     };
 
     if let Some(response) = update.response {
-        app.confirm_dialog = None;
-        app.pending_confirm_dialog = None;
-        app.render_state.confirm_phase = ConfirmPhase::None;
-        app.confirm_input.clear();
+        let confirm_id = confirm.id.clone();
+        app.runtime_dialogs.confirm = None;
         // After confirm closes, force a bottom-aligned scrollback sync.
         app.scroll_from_bottom = 0;
         app.request_scrollback_sync();
@@ -263,17 +243,15 @@ pub fn handle_confirm_key(
         return Some(true);
     }
 
-    if let Some(confirm) = app.confirm_dialog.as_mut() {
-        let max_index = confirm_option_count(confirm.allow_remember).saturating_sub(1);
-        confirm.selected = update.selected.min(max_index);
-        confirm.mode = if confirm.allow_reason {
-            update.mode
-        } else {
-            ConfirmMode::Select
-        };
-        if let Some(command_view) = update.command_view {
-            confirm.command_view = command_view;
-        }
+    let max_index = confirm_option_count(confirm.allow_remember).saturating_sub(1);
+    confirm.selected = update.selected.min(max_index);
+    confirm.mode = if confirm.allow_reason {
+        update.mode
+    } else {
+        ConfirmMode::Select
+    };
+    if let Some(command_view) = update.command_view {
+        confirm.command_view = command_view;
     }
     Some(update.consume)
 }

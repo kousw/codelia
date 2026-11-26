@@ -23,8 +23,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - `RenderState` invariants must hold:
   - `inserted_until <= visible_start <= visible_end <= wrapped_total`
   - `committed` tracks logical log index + source grapheme offset. `inserted_until` is its projection into the current wrapped cache and may decrease on rewrap; never preserve a raw row index across width/log changes.
-- Confirm lifecycle is explicit:
-  - `confirm_phase`: `Pending -> Active` after one draw/sync decision pass.
+- `ConfirmSlot` transitions from `Pending` to `Active` after one draw and scrollback sync decision.
 - `view/*` must not depend on `handlers/*`.
   - Shared pure logic belongs in `state/*` or `util/*`.
 - Owned transcript selection is alternate-mode only. Keep per-draw

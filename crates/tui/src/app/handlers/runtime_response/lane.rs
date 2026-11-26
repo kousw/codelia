@@ -160,8 +160,15 @@ pub(crate) fn apply_lane_list_result(app: &mut AppState, result: &Value) {
     app.context_panel = None;
     app.skills_list_panel = None;
     app.theme_list_panel = None;
-    app.prompt_dialog = None;
-    app.pick_dialog = None;
+    if app
+        .runtime_dialogs
+        .prompt
+        .as_ref()
+        .is_some_and(|prompt| matches!(prompt.state.id.as_str(), "lane:new-task" | "lane:new-seed"))
+    {
+        app.runtime_dialogs.prompt = None;
+        app.new_lane_task_id = None;
+    }
     app.lane_list_panel = Some(LaneListPanelState {
         title: "Lanes".to_string(),
         header: "lane_id | task_id | state | mux".to_string(),

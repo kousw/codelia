@@ -9,13 +9,6 @@ pub enum SyncPhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfirmPhase {
-    None,
-    Pending,
-    Active,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorPhase {
     VisibleAtComposer,
     VisibleAtImagePreview,
@@ -36,7 +29,6 @@ pub struct RenderState {
     pub inserted_until: usize,
     pub committed: LogPosition,
     pub sync_phase: SyncPhase,
-    pub confirm_phase: ConfirmPhase,
     pub cursor_phase: CursorPhase,
     pub(crate) drawn_update_choice: Option<(String, usize)>,
 }
@@ -50,7 +42,6 @@ impl Default for RenderState {
             inserted_until: 0,
             committed: LogPosition::default(),
             sync_phase: SyncPhase::Idle,
-            confirm_phase: ConfirmPhase::None,
             cursor_phase: CursorPhase::VisibleAtComposer,
             drawn_update_choice: None,
         }

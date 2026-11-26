@@ -1,13 +1,13 @@
 use crate::app::state::InputState;
 use crate::app::state::LogLine;
 use crate::app::state::{
-    ConfirmDialogState, ContextPanelState, LaneListPanelState, ModelListPanelState,
-    ModelPickerState, PendingImageAttachment, PerfDebugStats, PickDialogState, PromptDialogState,
-    ProviderPickerState, ReasoningPickerState, RenderState, SessionListPanelState,
-    SkillsListItemState, SkillsListPanelState, StatusLineMode, TextSelectionPhase,
-    ThemeListPanelState, TranscriptHitMap, WrappedLogCache,
+    ContextPanelState, LaneListPanelState, ModelListPanelState, ModelPickerState,
+    PendingImageAttachment, PerfDebugStats, ProviderPickerState, ReasoningPickerState, RenderState,
+    SessionListPanelState, SkillsListItemState, SkillsListPanelState, StatusLineMode,
+    TextSelectionPhase, ThemeListPanelState, TranscriptHitMap, WrappedLogCache,
 };
 use crate::app::util::attachments::{ClipboardImport, StagedAttachment};
+use crate::app::RuntimeDialogs;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -292,12 +292,7 @@ pub struct AppState {
     pub context_panel: Option<ContextPanelState>,
     pub skills_list_panel: Option<SkillsListPanelState>,
     pub theme_list_panel: Option<ThemeListPanelState>,
-    pub confirm_dialog: Option<ConfirmDialogState>,
-    pub pending_confirm_dialog: Option<ConfirmDialogState>,
-    pub confirm_input: InputState,
-    pub prompt_dialog: Option<PromptDialogState>,
-    pub prompt_input: InputState,
-    pub pick_dialog: Option<PickDialogState>,
+    pub runtime_dialogs: RuntimeDialogs,
     pub(crate) startup_confirmations: crate::app::startup_confirmations::StartupConfirmations,
     pub(crate) update_control_launcher: Option<crate::app::self_update::LauncherPaths>,
     pub(crate) pending_update_control: Option<crate::app::self_update::PendingUpdateControl>,
@@ -388,12 +383,7 @@ impl Default for AppState {
             context_panel: None,
             skills_list_panel: None,
             theme_list_panel: None,
-            confirm_dialog: None,
-            pending_confirm_dialog: None,
-            confirm_input: InputState::default(),
-            prompt_dialog: None,
-            prompt_input: InputState::default(),
-            pick_dialog: None,
+            runtime_dialogs: RuntimeDialogs::default(),
             startup_confirmations: Default::default(),
             update_control_launcher: None,
             pending_update_control: None,

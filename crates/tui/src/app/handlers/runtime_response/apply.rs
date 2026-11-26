@@ -8,9 +8,9 @@ use crate::app::runtime::{
     AgentMsg, ClientToolMsg, ClientToolRejection, RunControlMsg, RunErrorPresentation, RuntimeMsg,
     RuntimeTx, ServerUiMsg, UiPickRequest, UiPromptRequest,
 };
-use crate::app::state::{LogKind, LogLine, LogTone};
+use crate::app::state::{InputState, LogKind, LogLine, LogTone};
 use crate::app::{
-    AppState, PendingRpcSlot, PickDialogItem, PickDialogState, PromptDialogState,
+    AppState, PendingRpcSlot, PickDialogItem, PickDialogState, PromptDialogState, PromptSlot,
     PROMPT_DISPATCH_RETRY_BACKOFF,
 };
 use std::time::Instant;
@@ -53,11 +53,12 @@ fn apply_ui_request(app: &mut AppState, request: ServerUiMsg) {
         ServerUiMsg::Pick(request) => handle_pick_request(app, request),
         ServerUiMsg::PickCancelled { id } => {
             if app
-                .pick_dialog
+                .runtime_dialogs
+                .pick
                 .as_ref()
                 .is_some_and(|dialog| dialog.id == id)
             {
-                app.pick_dialog = None;
+                app.runtime_dialogs.pick = None;
             }
         }
     }
@@ -314,27 +315,30 @@ fn append_lines(app: &mut AppState, mut lines: Vec<LogLine>, trailing_space: boo
 }
 
 fn handle_prompt_request(app: &mut AppState, request: UiPromptRequest) {
-    app.prompt_input.clear();
+    let mut input = InputState::default();
     if let Some(default_value) = request.default_value.as_deref() {
-        app.prompt_input.set_from(default_value);
+        input.set_from(default_value);
     }
-    app.prompt_dialog = Some(PromptDialogState {
-        id: request.id,
-        title: request.title,
-        message: request.message,
-        multiline: request.multiline,
-        secret: request.secret,
+    app.runtime_dialogs.prompt = Some(PromptSlot {
+        state: PromptDialogState {
+            id: request.id,
+            title: request.title,
+            message: request.message,
+            multiline: request.multiline,
+            secret: request.secret,
+        },
+        input,
     });
 }
 
 fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
     if let Some(panel) = build_onboarding_model_list_panel(&request) {
-        app.pick_dialog = None;
+        app.runtime_dialogs.pick = None;
         app.model_list_panel = Some(panel);
         return;
     }
     let chosen = vec![false; request.items.len()];
-    app.pick_dialog = Some(PickDialogState {
+    app.runtime_dialogs.pick = Some(PickDialogState {
         id: request.id,
         title: request.title,
         message: request.message,

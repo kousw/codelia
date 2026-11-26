@@ -1,8 +1,10 @@
 use super::{
-    AppState, ConfirmDialogState, ErrorDetailMode, PendingRpc, PendingRpcSlot, SkillsListItemState,
+    AppState, ErrorDetailMode, PendingRpc, PendingRpcSlot, SkillsListItemState,
     SkillsListPanelState,
 };
-use crate::app::state::{ConfirmMode, ConfirmPhase, CursorPhase, SkillsScopeFilter, SyncPhase};
+use crate::app::state::{
+    ConfirmDialogState, ConfirmMode, ConfirmSlot, CursorPhase, SkillsScopeFilter, SyncPhase,
+};
 use crate::app::state::{LogKind, LogLine};
 
 fn sample_panel() -> SkillsListPanelState {
@@ -70,26 +72,20 @@ fn sample_confirm_dialog() -> ConfirmDialogState {
 }
 
 #[test]
-fn render_state_invariants_hold_for_confirm_request_activation_and_close() {
+fn clear_log_preserves_pending_and_active_confirm() {
     let mut app = AppState::default();
-    app.render_state.wrapped_total = 12;
-    app.render_state.visible_start = 6;
-    app.render_state.visible_end = 12;
-    app.assert_render_invariants();
+    app.runtime_dialogs.confirm = Some(ConfirmSlot::Pending(sample_confirm_dialog()));
+    app.clear_log();
+    assert!(app.runtime_dialogs.is_confirm_pending());
 
-    app.pending_confirm_dialog = Some(sample_confirm_dialog());
-    app.render_state.confirm_phase = ConfirmPhase::Pending;
-    app.assert_render_invariants();
+    assert!(app.runtime_dialogs.activate_pending_confirm());
+    let (_, input) = app.runtime_dialogs.active_confirm_mut().unwrap();
+    input.set_from("reason");
 
-    app.confirm_dialog = app.pending_confirm_dialog.take();
-    app.render_state.confirm_phase = ConfirmPhase::Active;
-    app.assert_render_invariants();
-
-    app.confirm_dialog = None;
-    app.render_state.confirm_phase = ConfirmPhase::None;
-    app.request_scrollback_sync();
-    assert_eq!(app.render_state.sync_phase, SyncPhase::NeedsInsert);
-    app.assert_render_invariants();
+    app.clear_log();
+    let (state, input) = app.runtime_dialogs.active_confirm().unwrap();
+    assert_eq!(state.id, "confirm_1");
+    assert_eq!(input.current(), "reason");
 }
 
 #[test]
@@ -122,16 +118,15 @@ fn render_state_scenario_tracks_sync_confirm_and_cursor_phases() {
     app.assert_render_invariants();
 
     // confirm pending -> active
-    app.pending_confirm_dialog = Some(sample_confirm_dialog());
-    app.render_state.confirm_phase = ConfirmPhase::Pending;
+    app.runtime_dialogs.confirm = Some(ConfirmSlot::Pending(sample_confirm_dialog()));
+    assert!(app.runtime_dialogs.is_confirm_pending());
     app.assert_render_invariants();
-    app.confirm_dialog = app.pending_confirm_dialog.take();
-    app.render_state.confirm_phase = ConfirmPhase::Active;
+    assert!(app.runtime_dialogs.activate_pending_confirm());
+    assert!(app.runtime_dialogs.active_confirm().is_some());
     app.assert_render_invariants();
 
     // confirm close -> next input cycle
-    app.confirm_dialog = None;
-    app.render_state.confirm_phase = ConfirmPhase::None;
+    app.runtime_dialogs.confirm = None;
     app.request_scrollback_sync();
     assert_eq!(app.render_state.sync_phase, SyncPhase::NeedsInsert);
     app.assert_render_invariants();

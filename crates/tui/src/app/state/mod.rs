@@ -10,8 +10,8 @@ pub(crate) use crate::app::util::image::PendingImageAttachment;
 pub(crate) use input::InputState;
 pub(crate) use log::{LogColor, LogKind, LogLine, LogSpan, LogTone};
 pub(crate) use render::{
-    ConfirmPhase, CursorPhase, PerfDebugStats, RenderState, SelectableFragment, SyncPhase,
-    WrappedLogCache, WrappedLogRow,
+    CursorPhase, PerfDebugStats, RenderState, SelectableFragment, SyncPhase, WrappedLogCache,
+    WrappedLogRow,
 };
 pub(crate) use selection::{
     SelectionHitTest, SelectionProjectionId, SelectionRange, TextSelectionPhase, TranscriptHitMap,
@@ -19,10 +19,10 @@ pub(crate) use selection::{
 pub(crate) use ui::{
     active_skill_mention_token, command_suggestion_rows, complete_skill_mention,
     complete_slash_command, is_known_command, parse_theme_name, skill_suggestion_rows,
-    theme_options, unknown_command_message, ConfirmDialogState, ConfirmMode, ContextPanelState,
-    LaneListItem, LaneListPanelState, ModelListMode, ModelListPanelState, ModelListSubmitAction,
-    ModelListViewMode, ModelPickerState, ModelSetScope, PickDialogItem, PickDialogState,
-    PromptDialogState, ProviderPickerState, ReasoningPickerState, SessionListPanelState,
-    ShellRulePicker, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, StatusLineMode,
-    ThemeListPanelState, ThemeName,
+    theme_options, unknown_command_message, ConfirmDialogState, ConfirmMode, ConfirmSlot,
+    ContextPanelState, LaneListItem, LaneListPanelState, ModelListMode, ModelListPanelState,
+    ModelListSubmitAction, ModelListViewMode, ModelPickerState, ModelSetScope, PickDialogItem,
+    PickDialogState, PromptDialogState, PromptSlot, ProviderPickerState, ReasoningPickerState,
+    RuntimeDialogRef, RuntimeDialogs, SessionListPanelState, ShellRulePicker, SkillsListItemState,
+    SkillsListPanelState, SkillsScopeFilter, StatusLineMode, ThemeListPanelState, ThemeName,
 };

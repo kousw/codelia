@@ -11,8 +11,8 @@ pub(crate) use composer::{
     complete_slash_command, is_known_command, skill_suggestion_rows, unknown_command_message,
 };
 pub use dialogs::{
-    ConfirmDialogState, ConfirmMode, PickDialogItem, PickDialogState, PromptDialogState,
-    ShellRulePicker,
+    ConfirmDialogState, ConfirmMode, ConfirmSlot, PickDialogItem, PickDialogState,
+    PromptDialogState, PromptSlot, RuntimeDialogRef, RuntimeDialogs, ShellRulePicker,
 };
 pub use model::{
     ModelListMode, ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
