@@ -778,6 +778,13 @@ mod layer_boundary_guard {
                     record(*line, path, "app/util may only reference crate::app::util");
                 }
             }
+            if relative == Path::new("app/effect.rs") && path_starts_with(path, &["crate"]) {
+                record(
+                    *line,
+                    path,
+                    "app/effect.rs must stay pure leaf data without crate:: imports",
+                );
+            }
             if relative.starts_with("app/state") {
                 for forbidden in [
                     &["crate", "app", "view"][..],
@@ -936,6 +943,13 @@ mod tests {
 }
 use crate::app::frame::draw_frame;
 "#,
+    );
+    assert_eq!(v.len(), 1, "{v:?}");
+
+    // app/effect.rs must not depend on handlers or other crate modules
+    let v = layer_boundary_guard::check_file(
+        Path::new("app/effect.rs"),
+        "use crate::app::handlers::command;\n",
     );
     assert_eq!(v.len(), 1, "{v:?}");
 }

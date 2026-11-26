@@ -3,12 +3,12 @@
 `src/event_loop/` owns the TUI tick-loop behavior extracted from `main.rs`.
 
 ## Scope
+- `update.rs`: TEA `Msg`, `UpdateResult`, and dispatch. Honor `skip_post_input_tick` for consumed preview keys, non-press events and the first Ctrl+C cancellation.
 - `runtime.rs`: thin re-export boundary to app-layer runtime response handlers.
 - `input.rs`: key/paste/mouse input handling and dialog/panel key routing.
-- `mod.rs`: shared loop-local aliases (`RuntimeStdin`, `RuntimeReceiver`).
 
 ## Dependency Direction
-- `event_loop/input.rs` handles application input and depends on `app/*`. F2 updates mouse-capture state here. `entry/run_loop.rs` applies that change to the terminal.
+- `event_loop/input.rs` handles application input and depends on `app/*`. Return mouse capture, clipboard and update-control effects for `entry/run_loop.rs` to execute.
 - `event_loop/runtime.rs` should remain a thin wiring boundary only.
 - `event_loop/*` must not depend on view internals beyond public draw/render APIs already used by `main.rs`.
 - Runtime response handling implementation lives under `app/handlers/runtime_response/*`.
@@ -18,7 +18,7 @@
 
 ## Notes
 - Keep `main.rs` as composition/orchestration root; move additional tick-loop branches here first.
-- Prefer pure helpers for formatting/parsing when possible; isolate side effects to runtime send calls and `AppState` mutation.
+- Keep RPC sends synchronous through `RuntimeTx`. The preview worker stays encapsulated in its feature module.
 - Route terminal paste through `AppState::paste_target` with the startup gate.
   An uncovered prompt accepts text paste even during startup. Alt+V in that
   prompt shows the composer-only file and image paste notice.

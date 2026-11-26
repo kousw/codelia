@@ -16,7 +16,7 @@
 
 ## Rules
 
-- Keep this layer side-effect free.
+- Keep this layer side-effect free. Terminal and worker effect data lives in `app/effect.rs`; entry executes it.
 - Live stream tracking closes through canonical events, retry/reset or terminal
   run status. The published delta protocol has no separate End event/state.
 - Put cross-feature pure logic here when shared by `handlers` and `view`.

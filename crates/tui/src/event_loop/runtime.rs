@@ -1,5 +1,5 @@
 pub(crate) use crate::app::handlers::runtime_response::{
-    can_auto_start_initial_message, process_runtime_messages,
+    apply_runtime_msg, can_auto_start_initial_message, drain_runtime_messages, RuntimeReceiver,
 };
 
 #[cfg(test)]

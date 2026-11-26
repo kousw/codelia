@@ -1,42 +1,26 @@
 # TUI TEA Architecture & Migration Spec
 
-Status: `Proposed` (2026-11-27, revised after Opus design review)
+Status: `Implemented`
 
-This document defines the target architecture for refactoring `crates/tui` toward a pragmatic **TEA (The Elm Architecture)** in phased, mostly behavior-preserving commits (with one intentional paste-consistency fix noted in §4.2).
+This document defines the pragmatic **TEA (The Elm Architecture)** implemented in `crates/tui`.
 It builds on [`tui-architecture.md`](./tui-architecture.md), [`tui-render-state-machine.md`](./tui-render-state-machine.md), [`tui-owned-text-selection.md`](./tui-owned-text-selection.md), [`tui-image-preview.md`](./tui-image-preview.md), and [`ui-protocol.md`](./ui-protocol.md).
 
 ---
 
-## 1. Context and Goals
+## 1. Migration Status
 
-`crates/tui` (~40.1k lines: ~24.5k production, ~15.5k test) already maintains clean coarse boundaries (`view` does not import `handlers`; `state` does not import `view`/`handlers`/`render`; wire decoding goes through `codelia-protocol`). However, organic feature growth has concentrated complexity in five places:
+All phases are implemented.
 
-1. **Modal/panel priority duplication**: 14 independent `Option<...>` fields on `AppState` (`confirm_dialog`, `pending_confirm_dialog`, `prompt_dialog`, `pick_dialog`, 6 list panels, 3 model/provider/reasoning pickers, `queue_steer_picker`), with priority and paste blocking hand-coded separately in `view/ui/panels/mod.rs`, `event_loop/input.rs`, `entry/run_loop.rs`, and `app_state/methods.rs` (including a display-vs-key ordering mismatch between `context_panel` and `skills`/`theme`). `PickDialogState` also multiplexes four distinct roles via flags (`approval`, `shell_rule_picker`, `local_update_picker`, generic/client-tool pick).
-2. **Manual `RpcPendingState`**: ~35 individual `Option<String>` request-id fields plus a ~100-line `if` chain in `take_match_for_response()`, with per-request metadata stored in separate side fields.
-3. **`ParsedOutput` 34-field property bag**: `runtime/parser` packs every decoded notification/request into one flat 34-field struct that `handlers/runtime_response/parsed_output.rs` (819 production lines + 1,793 test lines) re-dispatches procedurally.
-4. **Coupled I/O in handlers & test harness friction**: Handlers write directly to `BufWriter<ChildStdin>`, call `TuiTerminal` APIs, or spawn local subprocesses/threads. Six test files (`#[cfg(unix)]`) must spawn `Command::new("cat")` to capture RPC writes (`upload.rs` has Unix-only tests; `shell_rules` is tested indirectly via `event_loop/input.rs`; `self_update.rs` and `entry/run_loop.rs` have no unit tests).
-5. **Five small cyclic/reverse dependencies**:
-   - `app_state/mod.rs` ⇄ `handlers/command/upload.rs`
-   - `event_loop/input.rs` ⇄ `entry/terminal.rs`
-   - `runtime/client.rs`, `app/self_update.rs`, `app/startup_confirmations.rs` ⇄ `entry/launch_context.rs`
-   - `app/util/*` ⇄ `app/state/*` & `app/image_preview/*` (`util/clipboard/mod.rs`, `util/attachments/staging.rs`, `util/attachments/mod.rs`, `util/user_message.rs`, `state/log/mod.rs`)
-   - `app/render/frame.rs` → `app/view::draw_ui`
+| Phase | Implemented contract |
+| :--- | :--- |
+| 0 | Object-safe `RuntimeTx` and in-memory `MockRuntimeTx` with send-failure injection. |
+| 1 | One-way production module dependencies, guarded by the import-hygiene test in `src/main_tests.rs`. |
+| 2 | `PendingRpcs` with typed metadata, singletons and concurrent steers (§4.1). |
+| 3 | Typed `RuntimeMsg` and per-line application (§4.3). |
+| 4a–4c | Independent runtime dialog slots, one local panel, queue focus, shared paste routing and dedicated pick roles (§4.2). |
+| 5 | `Msg`, `update`, scoped non-RPC effects and a generic terminal runner (§3 and §4.4). |
 
-### Goals
-
-- Converge `crates/tui` onto a pragmatic, zero-extra-dependency TEA structure:
-  - **Synchronous mockable RPC transport (`&mut dyn RuntimeTx`)** passed into state transitions so handler-specific send-failure rollbacks remain exact while eliminating `Command::new("cat")` test workarounds.
-  - **`Model` + `Msg` + `update(app, msg, tx) -> UpdateResult { effects, needs_redraw, exit }` + `view(frame, app)`**, restricting `Effect` to terminal, clipboard, and local background worker side effects.
-- Enforce overlay priority, RPC slot semantics, and runtime-message typing in Rust's type system.
-- Eliminate the five measured reverse/cyclic dependencies and guard them with an import-hygiene test.
-
-### Non-Goals
-
-- **No external TEA/TUI framework crates** (e.g., `tui-realm`). Ratatui 0.30 + standard Rust enums/traits stay the only UI foundation.
-- **No change to Inline vs Alternate terminal buffer policy**. Inline native scrollback (`Terminal::insert_before`), `committed` source anchoring, bounded 2-pass `draw_frame`, and headless xterm CI verification remain unchanged.
-- **No directory relocation of `app/` feature-sliced modules** (`goal.rs`, `image_preview/`, `self_update.rs`, `startup_confirmations.rs`) in this track; their placement will be decided separately after the TEA boundary stabilizes.
-- **No wire protocol changes** (`codelia-protocol` and `@codelia/runtime` remain unchanged).
-- **No wholesale `AppState` field-churn commit**: grouping `AppState` fields into sub-structs is optional and limited to cohesive lifecycle groups (`Transcript`, `Components`) where `clear_log` / reset invariants benefit directly.
+`AppState` remains the model. Ratatui owns rendering and inline native scrollback. The migration adds no external TEA framework and leaves the wire protocol unchanged. The overlay work also fixed paste routing behind covered composers (§4.2).
 
 ---
 
@@ -55,21 +39,22 @@ Every phase MUST preserve the following invariants:
 
 ---
 
-## 3. Target Pragmatic TEA Architecture
+## 3. Pragmatic TEA Architecture
 
 ### 3.1 Core Loop & `RuntimeTx` Boundary
 
 ```rust
 /// Minimal object-safe runtime RPC writer + ID allocator.
-/// Production wraps `(&mut BufWriter<ChildStdin>, &mut u64)`;
-/// unit tests use an in-memory `MockRuntimeTx` (with optional write-error injection).
+/// StdioRuntimeTx owns the ID counter and borrows the buffered child stdin.
+/// MockRuntimeTx records writes in memory and supports write-error injection.
 pub(crate) trait RuntimeTx {
     fn next_id(&mut self) -> String;
     fn send_line(&mut self, line: &str) -> std::io::Result<()>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExitAction {
+    #[default]
     None,
     /// Render the final frame (e.g., "runtime exited: ...") before breaking out of the loop.
     DrawThenExit,
@@ -81,39 +66,41 @@ pub(crate) struct UpdateResult {
     pub(crate) effects: Vec<Effect>,
     pub(crate) needs_redraw: bool,
     pub(crate) exit: ExitAction,
+    pub(crate) skip_post_input_tick: bool,
 }
 
-pub(crate) fn update(app: &mut AppState, msg: Msg, tx: &mut dyn RuntimeTx) -> UpdateResult { ... }
+pub(crate) fn update(app: &mut AppState, msg: Msg<'_>, tx: &mut dyn RuntimeTx) -> UpdateResult { ... }
 ```
 
-**Why RPC sending stays synchronous via `&mut dyn RuntimeTx` (not `Effect::SendRpc`)**:
-- Today's send-failure rollback is handler-specific and uses context not present in `PendingRpc` (e.g., `goal.continue` intentionally leaves `run_start_id` set and resets `check_at = now`; `upload` registers pending state only after send succeeds and calls `pause(seq)` on failure; `steer` / `queued dispatch` re-enqueue at max attempts; `image` clears all 3 image slots; `try_dispatch_queued_prompt` branches synchronously on `sent`).
-- Passing `tx: &mut dyn RuntimeTx` directly into `update()` preserves 100% of those rollback paths with zero extra indirection while making every handler cleanly unit-testable with `MockRuntimeTx`.
-- `Effect` is therefore scoped cleanly to **non-RPC shell side effects** (terminal control, clipboard writes, and local background worker launches).
+RPC sends stay synchronous through `&mut dyn RuntimeTx` so each handler can apply its own rollback. On a send failure, `goal.continue` keeps the `RunStart` slot and checks status immediately. Upload pauses the submission and installs a pending entry only after the write succeeds. Queue, steer and image handlers likewise own their recovery. `Effect` carries terminal control, clipboard writes and local worker launches.
 
-### 3.2 Tick Execution Order & Two-Phase Tick Messages
+### 3.2 Messages and Tick Order
 
-To preserve exact `entry/run_loop.rs` semantics—including the `continue` branches on `KeyEventKind != Press`, `image_preview` key handling, and `Ctrl+C` that intentionally skip post-input ticks (while `Event::Paste`, even when blocked, still falls through to `PostInputTick`)—the loop separates pre-draw and post-input ticks:
+`event_loop/update.rs` defines the message boundary.
 
-1. **Per-line runtime drain (up to `MAX_RUNTIME_LINES_PER_TICK = 300`)**:
-   - Because `parse_runtime_output_with_history()` depends on live `session_history_id.is_some()` and `active_run_id` **per line** (`runtime_response/mod.rs:61-69`), the shell MUST NOT batch-parse all queued lines before updating `AppState`.
-   - Contract: either pass `Msg::RuntimeLine(String)` into `update()`, or parse **one line** using current `AppState` and immediately call `update(app, Msg::Runtime(msg), tx)` before reading the next line.
-2. **Local worker polls**:
-   - Preempt `image_preview` if `app.overlays.has_active_overlay()`.
-   - Poll `image_preview`, `self_update`, `startup_confirmations`, `clipboard_import` → feed completed `Msg::Local(...)` into `update()`.
-3. **`Msg::PreDrawTick`**:
-   - Skills catalog auto-fetch (`maybe_request_skills_catalog`), initial message auto-start, queued prompt dispatch (`!startup_pending`), and `child.try_wait()` exit check (`ExitAction::DrawThenExit`).
-4. **Render frame (if `needs_redraw`)**:
-   - Capture `size_before` if `UpdatePicker` is active and `!app.overlays.runtime_dialogs.is_any_open()`.
-   - Run bounded `draw_frame()` inside synchronized update.
-   - If `app.overlays.runtime_dialogs.activate_pending_confirm()` promotes `Pending -> Active`, set `needs_redraw = true` and `continue` (before polling input).
-   - If `exit == ExitAction::DrawThenExit`, break.
-5. **Terminal event poll (`50 ms`)**:
-   - Handle `Event::Key` (with 2-second double-`Ctrl+C` → `ExitAction::ExitNow`), `Event::Paste`, `Event::Mouse`, `Event::Resize` → `Msg::Terminal(...)` → `update()` → execute `Effect`s.
-6. **`Msg::PostInputTick { now, child_pid }`**:
-   - Runs only when step 5 did not early-`continue`: `goal::tick`, spinner advance, selection-notice expiry, and 1-second RSS memory sampling (`--debug-perf`).
+```rust
+pub(crate) enum Msg<'a> {
+    Runtime(RuntimeMsg),
+    Local(LocalMsg),
+    PreDrawTick {
+        startup_pending: bool,
+        pending_initial_message: &'a mut Option<String>,
+    },
+    Terminal(TerminalInput),
+    PostInputTick { now: Instant, startup_pending: bool },
+}
+```
 
-### 3.3 Honest Contract for `draw_ui(frame, &mut AppState)`
+`TerminalInput` carries the event, clock value, startup snapshot, alternate-mode selection gate, dirty-frame flag, and drawn-choice size check. `LocalMsg` carries preview and startup poll hooks, update and clipboard completions, child exit status, and sampled memory.
+
+1. **Drain up to 300 runtime lines.** Parse each line against the live `SessionHistory` slot and active run ID. Apply `Msg::Runtime` before reading the next line. Hitting the cap requests redraw and yields to the rest of the tick.
+2. **Apply local updates.** Preempt the image preview when `app.has_interaction_panel()`, then poll it inside its feature module. Apply update-control completion, poll startup confirmations, then apply clipboard import completions.
+3. **Apply `PreDrawTick`.** Request the skills catalog when eligible. With startup complete, try the initial message, then queued dispatch. The shell checks `child.try_wait()` afterward. An observed exit generates `LocalMsg::RuntimeExited`, which logs the status and returns `DrawThenExit`.
+4. **Synchronize terminal mouse capture, then draw when requested.** The shell calls `draw_frame` inside synchronized update. Capture the terminal size before the frame only for an uncovered update picker. Keep it only if the selected option was drawn and the terminal size stayed stable. If a pending confirm promotes after the frame, redraw and continue before polling input. Honor `DrawThenExit` after this confirm check.
+5. **Poll input for 50 ms.** Pass the event through `Msg::Terminal`. Only press events reach the key handlers. Non-press events, image preview keys and a handled first Ctrl+C set `skip_post_input_tick`. A second Ctrl+C within two seconds logs `Force quitting...` and returns `ExitNow`, without drawing again. Enter invalidates an update choice if its recorded size differs from the live size. Resize clears drawn choice and text selection. Paste reaches the next step even if blocked.
+6. **Apply `PostInputTick`.** Tick goals when startup permits, update the spinner, and expire the selection notice. With `--debug-perf`, the shell samples TUI and child memory at intervals of at least one second and feeds the result through `Msg::Local`.
+
+### 3.3 Mutation contract for `draw_ui(frame, &mut AppState)`
 
 `draw_ui` stays `pub fn draw_ui(f: &mut Frame<'_>, app: &mut AppState)` rather than splitting `(&AppState, &mut RenderCache)` (which conflicts with Rust's borrow checker because `flush_stream_output()` mutates `log` and scroll clamping mutates `scroll_from_bottom`).
 
@@ -124,7 +111,7 @@ Instead, we enforce a clear explicit rule on what `draw_ui` may mutate:
   - viewport scroll stabilization / clamping (`scroll_from_bottom`) and acknowledging `log_changed`
   - invalidating `text_selection` when `selection_input_blocked()` or layout invalidates projection
   - recording `image_preview.desired_size`
-- `scroll_from_bottom = 0` while `confirm` / `prompt` is open: either block mouse-wheel scroll in `update()` when `confirm` or `prompt` is open (documented equivalent behavior) or keep the reset explicitly in `draw_ui`'s allowed viewport adjustment list.
+- The view resets `scroll_from_bottom` while a confirm or prompt is visible as part of viewport adjustment.
 
 ---
 
@@ -135,20 +122,16 @@ Instead, we enforce a clear explicit rule on what `draw_ui` may mutate:
 #### Concurrency & Precedence Rules
 
 1. **Singleton slots (`PendingRpcSlot`) — Last-Write-Wins**:
-   - Every outgoing RPC except `RunSteer` occupies a named `PendingRpcSlot` (including `ImageArtifact`, which is single-slot: `command/image.rs` checks `has_slot(PendingRpcSlot::ImageArtifact)` and rejects concurrent requests).
-   - `PendingRpcs::insert_singleton(id, rpc)` **evicts any prior request ID occupying the same `PendingRpcSlot`** (returning the evicted `(old_id, old_rpc)` if any), matching today's field-overwrite behavior so stale responses fall through as unmatched and are ignored.
+   - Each `PendingRpc` variant except `RunSteer` occupies a named `PendingRpcSlot` (including `ImageArtifact`, which is single-slot: `command/image.rs` checks `has_slot(PendingRpcSlot::ImageArtifact)` and rejects concurrent requests).
+   - `PendingRpcs::insert(id, rpc)` **evicts any prior request ID occupying the same `PendingRpcSlot`** (returning the evicted `(old_id, old_rpc)` if any), so evicted responses fall through as unmatched.
    - `PendingRpcs::remove_slot(slot)` removes the active entry for a slot (used by `clear_log()` for `ImageArtifact` and by `image.rs` error cleanup across all 3 image slots).
 2. **Multi-in-flight (`RunSteer`)**:
-   - `PendingRpcs::insert_multi(id, PendingRpc::RunSteer { client_steer_id })` allows multiple concurrent in-flight steer RPCs keyed by `request_id`.
+   - `PendingRpcs::insert(id, PendingRpc::RunSteer { client_steer_id })` allows multiple concurrent in-flight steer RPCs keyed by `request_id`.
 3. **Separate trackers & response routing precedence**:
-   - Keep `goal` request tracking (`goal.rs:113-124`, plus `goal.continue` which shares `run_start_id`) and server-initiated `client_tool_choice_ids: HashSet<String>` outside `PendingRpcs::by_id`.
-   - Exact response routing order in `handlers/runtime_response/mod.rs` MUST stay:
-     1. `goal::handle_response` (continuation `run_start_id` + `goal.requests`)
-     2. `upload::handle_response` (or matched via `PendingRpc::Upload` before generic table if moved into `PendingRpcs`)
-     3. `app.rpc_pending.take(&response.id)` (`O(1)` `HashMap::remove`)
-     4. Unmatched fallback (`runtime_response/mod.rs:406-416`)
+   - Keep `goal` request tracking (in `app.goal`, with `goal.continue` sharing the `RunStart` slot) and server-initiated `client_tool_choice_ids: HashSet<String>` outside `PendingRpcs::by_id`.
+   - `handlers/runtime_response/mod.rs` gives `goal::handle_response` first chance to consume the response. Then `app.rpc_pending.take(&response.id)` dispatches by typed variant, including `PendingRpc::Upload` to `upload::handle_response`. The unmatched response path handles the remainder.
 4. **Explicit auto-start blocker table**:
-   - `PendingRpcSlot::blocks_auto_start(self) -> bool` is an explicit exhaustive `match` (locked by unit test), intentionally returning `false` for `Initialize`, `RunStart`, `RunCancel`, and `Upload` (and `RunSteer` has no slot / is excluded), matching `has_auto_start_blockers()` (`app_state/mod.rs:352-380`).
+   - `PendingRpcSlot::blocks_auto_start(self) -> bool` is an explicit exhaustive `match` (locked by unit test), intentionally returning `false` for `Initialize`, `RunStart`, `RunCancel`, and `Upload` (and `RunSteer` has no slot / is excluded), matching `PendingRpcs::has_auto_start_blockers()` in `app/app_state/pending_rpcs.rs`.
    - `PendingRpcs::has_shell_rule_run(&self) -> bool` explicitly checks for `PendingRpc::ShellRules(ShellRuleRpc::Run { .. })` (preserving `can_dispatch_prompt_now()`).
 
 ```rust
@@ -219,6 +202,11 @@ impl PendingRpcs {
     pub fn slot_entry(&self, slot: PendingRpcSlot) -> Option<(&str, &PendingRpc)>;
     pub fn has_auto_start_blockers(&self) -> bool;
     pub fn has_shell_rule_run(&self) -> bool;
+    pub fn upload(&self) -> Option<&PendingUpload>;
+    pub fn take_upload(&mut self) -> Option<PendingUpload>;
+    pub fn set_upload(&mut self, upload: PendingUpload);
+    pub fn has_run_steers(&self) -> bool;
+    pub fn clear_run_steers(&mut self);
 }
 ```
 
@@ -226,7 +214,7 @@ impl PendingRpcs {
 
 ### 4.2 `OverlayState` (3-Layer Model: `RuntimeDialogs` + `LocalPanel` + `QueueFocus`)
 
-To preserve concurrent runtime UI requests (**P0-1**), `QueueSteer` coexistence (**P1-7**), onboarding `PickRequest` reply obligations (**P1-7**), and `UpdatePicker` drawn-cell safety (**P1-9**), overlays are structured in **three explicit priority tiers** (with `ImagePreview` preempted whenever any tier is active):
+The three overlay tiers preserve concurrent runtime requests, queue focus, onboarding pick replies and update-picker draw validation. Any active tier preempts image preview.
 
 ```rust
 /// Tier 1 (Highest priority): Server-driven modals with reply obligations.
@@ -282,7 +270,6 @@ pub struct RuntimeDialogs {
 }
 
 /// Tier 2: User-initiated / local-only panels (mutually exclusive with each other).
-/// Resolves today's view-vs-key ordering mismatch between `context_panel` and `skills`/`theme`.
 pub enum LocalPanel {
     SessionList(SessionListPanelState),
     LaneList(LaneListPanelState),
@@ -313,21 +300,20 @@ pub struct OverlayState {
 
 #### Key Behavioral Contracts for `OverlayState`
 
-1. **`render_state.confirm_phase` removal**: `ConfirmPhase` (`None | Pending | Active`) is replaced directly by `runtime_dialogs.confirm: Option<ConfirmSlot>`. Both `clear_log()` (`methods.rs:432-437`) and `assert_render_invariants()` (`methods.rs:518-532`) simplify accordingly.
+1. **`render_state.confirm_phase` removal**: `ConfirmPhase` (`None | Pending | Active`) is replaced directly by `runtime_dialogs.confirm: Option<ConfirmSlot>`. Both `AppState::clear_log()` and `AppState::assert_render_invariants()` in `app/app_state/methods.rs` simplify accordingly.
 2. **Runtime dialog priority**. Input uses `RuntimeDialogs::top()` with `confirm > prompt > pick`. Rendering uses `visible_top()`, which skips a pending confirm until activation.
 3. **`UpdatePicker` drawn-cell check**: Both `view/ui/mod.rs::drawn_update_choice` and `entry/run_loop.rs`'s `size_before` guard MUST check:
    `!app.overlays.runtime_dialogs.is_any_open() && matches!(app.overlays.local_panel, Some(LocalPanel::UpdatePicker(_)))`.
 4. **Client-tool & runtime pick arbitration**. `tui_ask_user_choice` returns `"pick dialog is busy"` when a runtime pick or a local `UpdatePicker` or `ShellRulePicker` is open. `tui_open_selector` and `tui_preview_artifact` likewise reject with `"pick dialog is busy"` while `UpdatePicker` or `ShellRulePicker` is open so local pickers are not silently clobbered. An incoming `ui.pick.request` replies `"choice superseded"` to a displaced client-tool choice and removes its tracked request ID; if another server-owned runtime pick (`Standard`, `Approval`, or `OnboardingModelList`) is already open, the existing pick stays open and the incoming `ui.pick.request` is declined with `ids: []`. `ui.pick.cancelled` only cancels server-owned picks (never `ClientToolChoice`, which belongs to `client.tool.cancel`).
 5. **Client-tool panel replacement**. `tui_open_selector` and `tui_preview_artifact` set `local_panel` to `LocalPanel::Context` (unless blocked by an open `UpdatePicker` or `ShellRulePicker`). Runtime dialogs and queue focus retain their own state.
-6. **Intentional UX consistency fix — `PasteTarget` tightening**:
-   - Today `blocks_composer_paste` (`event_loop/input.rs:385-397`) omitted `session_list_panel`, `context_panel`, `model_list_panel`, `provider_picker`, and `model_picker`, allowing paste into an invisible composer behind those panels.
-   - Under `OverlayState::paste_target(image_preview_open, startup_pending)`:
+6. **Unified `PasteTarget` routing**:
+   - `OverlayState::paste_target(image_preview_open, startup_pending)` resolves the owner in priority order.
      - `image_preview_open` → `PasteTarget::Blocked` (highest priority)
-     - `runtime_dialogs.top()` is `Prompt` → `PasteTarget::RuntimePrompt` (even when `startup_pending == true`, preserving `run_loop.rs:221`; `Alt+V` preserves its status message per `input.rs:399-409`)
+     - `runtime_dialogs.top()` is `Prompt` → `PasteTarget::RuntimePrompt` even during startup. `Alt+V` shows the composer-only notice.
      - any other `runtime_dialogs` open → `PasteTarget::Blocked`
      - `startup_pending` or `local_panel.is_some()` or `queue_focus_active` → `PasteTarget::Blocked`
      - otherwise → `PasteTarget::Composer`
-   - **Explicitly recorded as a minor UX bug fix** (not silent behavior drift), covered by per-panel unit tests.
+   - Per-panel tests cover paste blocking behind the overlay.
 
 7. **Model list submission and cancellation**. `LocalPanel::ModelList` carries the scope for `model.set`. `RuntimePickDialog::OnboardingModelList` carries the request ID for `ui.pick.request`. Both share the display rows and selected item index in `ModelListPanelState`. `ui.pick.cancelled` dismisses a matching pick through `RuntimePickDialog::id()`.
 8. **Startup update picker**. Startup opens `LocalPanel::UpdatePicker` with `startup: true`. Any open runtime dialog clears the startup picker from the local tier. The pending startup confirmation opens it again once the runtime dialogs close and the other startup gates allow it.
@@ -427,60 +413,58 @@ pub enum AgentMsg {
 
 ---
 
-### 4.4 Scoped `Effect` Enum (Non-RPC Shell Side Effects Only)
+### 4.4 Scoped `Effect`
 
 ```rust
 pub(crate) enum Effect {
     SetMouseCapture(bool),
-    WriteClipboard { text: String, success_notice: String },
+    WriteClipboard { text: String },
     StartClipboardImport,
     StartUpdateControl(UpdateControlAction),
-    /// Note: `image_preview.close()` is pure state mutation and stays inside `update()`.
-    /// Worker thread spawn for `image_preview` stays encapsulated in `ImagePreview`
-    /// unless explicitly migrated in a later follow-up.
+}
+
+pub(crate) enum UpdateControlAction {
+    Status,
+    Save(UpdateMode),
+}
+
+pub(crate) enum UpdateMode {
+    Notify,
+    Auto,
+    Off,
 }
 ```
 
-- `ExitAction` (`None | DrawThenExit | ExitNow`) lives on `UpdateResult`, never duplicated inside `Effect`.
-- `ImagePreview`'s background decoder thread remains encapsulated in `app/image_preview/` for this track (only its key/preemption hooks go through `update()`), while `ClipboardImport` and `PendingUpdateControl` subprocess/thread launches can be triggered via `Effect` so `self_update` and clipboard transitions are 100% pure in tests.
-- To unit-test `entry/run_loop.rs` (tick order, `ConfirmSlot::Pending -> Active` 1-frame delay, double `Ctrl+C`), generalize the loop runner over `B: ratatui::backend::Backend` (using `TestBackend` in unit tests).
+`app/effect.rs` owns these shared types. Initial mouse-capture setup happens once during terminal initialization in `main.rs`; interactive toggles (`F2`) emit `Effect::SetMouseCapture`, which the shell applies right before the next draw. It returns clipboard write results as `LocalMsg::ClipboardWritten`, which sets the notice and its expiry. The clipboard import effect starts the worker. `LocalMsg::ClipboardImportStarted` inserts the composer marker on success or logs status on failure. The update-control effect starts the local launcher helper. Its status/save result is applied separately through `LocalMsg::UpdateControl`. The image preview decoder remains encapsulated in `app/image_preview/`.
+
+`entry/run_loop.rs` retains the production `run_tui_loop` entry point. The inner runner is generic over `B: Backend`. Its `LoopIo<B>` adapter supplies terminal events, child status and PID, the clock, effect execution, and synchronized drawing. Tests pair a scripted adapter with Ratatui `TestBackend` and `MockRuntimeTx`.
 
 ---
 
-## 5. Dependency Direction & Breaking the 5 Cycles
-
-Target one-way dependency stack:
+## 5. Dependency Direction
 
 ```text
-L1  main.rs / entry/* (CLI, LaunchContext parsing, bootstrap, run_loop, EffectRunner)
-        ↓
-L2  app/frame.rs (draw_ui + apply_terminal_effects orchestrator)
-    event_loop/input.rs + app/handlers/* + handlers/runtime_response/*
-        ↓
-L3  app/app_state + app/runtime (client/parser) + app/view + app/render/inline
-        ↓
-L4  app/state (pure data, no I/O) + app/shared_ui (theme/markdown/log_wrap/transcript)
-        ↓
-L5  app/util (zero upward imports into state/app/entry) + codelia-protocol (external crate)
+main.rs → entry (startup, terminal, runtime child, run loop, effects)
+              → event_loop (update, input) → app/handlers
+              → app/frame → app/view and app/render/inline
+
+app/handlers, app/view, app/render → app state and shared presentation
+app/handlers → app/runtime (RPC client and parser)
+app state and app/runtime → app/state, app/util, codelia-protocol as needed
 ```
 
-Exact resolutions for the 5 measured cyclic/reverse edges (1 commit per cycle in Phase 1):
-
-| # | Current Cycle / Reverse Edge | Exact Fix |
-| :--- | :--- | :--- |
-| 1 | `app_state/mod.rs:70,187,334 -> handlers/command/upload.rs` | Extract `SubmissionFiles`, `PendingUpload`, `UploadLimits` into `app/state/upload.rs` with clean `pub(crate)` constructors/accessors (keeping `snapshot(&AppState)` / RPC upload logic in `handlers/command/upload.rs`). |
-| 2 | `event_loop/input.rs:13 -> entry/terminal.rs` | On `F2`, return an explicit mouse-capture toggle request (later `Effect::SetMouseCapture(bool)`) handled by `entry/run_loop.rs`, removing `entry::terminal` from `event_loop/input.rs`. |
-| 3 | `runtime/client.rs`, `self_update.rs`, `startup_confirmations.rs -> entry/launch_context.rs` | **Keep `LaunchContext` (which reads `env::args` via `OnceLock`) in `entry/`**—never move process-arg I/O into `app/state/`. Pass `Option<&RuntimeLaunch>` into `spawn_runtime()`, and construct `LauncherPaths` / `StartupConfirmations` in `entry/bootstrap.rs` from extracted primitive fields. |
-| 4 | `util ⇄ state / image_preview`: `util/clipboard/mod.rs:301,497` & `util/attachments/staging.rs:219` → `image_preview::validate_dimensions`; `util/user_message.rs:1` → `state::{LogKind, LogLine}`; `util/attachments/mod.rs:8` → `state::InputState`; `state/log/mod.rs:1` → `util::text` | (a) Move `validate_dimensions` to `app/util/image.rs`; (b) move `util/user_message.rs` to `app/state/log/user_message.rs`; (c) move `InputState`-dependent token helpers from `util/attachments/mod.rs` into `app/state/input/attachments.rs`. Result: `app/util/*` has **zero** imports of `state`, `app_state`, `image_preview`, `handlers`, or `entry`. |
-| 5 | `app/render/frame.rs:2 -> app/view::draw_ui` | Move `app/render/frame.rs` (and `frame_tests.rs`) to `app/frame.rs` (update imports in `run_loop.rs`, `image_preview/tests.rs`, `scrollback_ansi_tests.rs`). `app/render/` then owns only `inline.rs` + scrollback tests and never imports `app/view`. |
-
-After all 5 commits land, add a Rust unit test scanning `crates/tui/src/**/*.rs` (non-test sections) to forbid regressions across `app_state -> handlers`, `util -> state/app/entry`, `render -> view`, `runtime -> entry`, `app -> entry`, and `view -> handlers`.
+The import-hygiene test in `src/main_tests.rs` enforces production boundaries.
+`event_loop` and `app` are independent of `entry`, with launch settings passed in as data.
+`app` is independent of `event_loop`. `state` and `app_state` are independent of
+handlers, view and render. `util` only uses other `util` modules within the app.
+`app/frame.rs` composes drawing and inline scrollback while `view` and `render`
+stay independent. Shared theme, Markdown and wrapping live directly under `app/`.
 
 ---
 
 ## 6. Verification Strategy
 
-Every phase runs and must pass:
+Verify changes to these contracts with:
 
 1. `cargo fmt --manifest-path crates/tui/Cargo.toml -- --check`
 2. `cargo test --manifest-path crates/tui/Cargo.toml`
@@ -494,6 +478,6 @@ Every phase runs and must pass:
    node --test scripts/check-tui-scrollback.test.mjs
    ```
    *(Requires `@xterm/headless` installed in `node_modules` / CI environment.)*
-6. **Production PTY image preview check** (mandatory in Phase 4a–4c when overlay preemption changes):
+6. **Production PTY image preview check** (when preview input or overlay preemption changes):
    `python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui`
 7. `bun run check:protocol && bun run typecheck` (confirm workspace protocol/TS contracts remain untouched).

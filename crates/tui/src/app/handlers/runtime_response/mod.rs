@@ -50,10 +50,22 @@ pub(crate) fn can_auto_start_initial_message(app: &AppState) -> bool {
     handlers::can_dispatch_prompt_now(app)
 }
 
+#[cfg(test)]
 pub(crate) fn process_runtime_messages(
     app: &mut AppState,
     rx: &RuntimeReceiver,
     tx: &mut dyn RuntimeTx,
+) -> bool {
+    drain_runtime_messages(app, rx, tx, apply_runtime_msg)
+}
+
+pub(crate) use apply::apply_runtime_msg;
+
+pub(crate) fn drain_runtime_messages(
+    app: &mut AppState,
+    rx: &RuntimeReceiver,
+    tx: &mut dyn RuntimeTx,
+    mut apply: impl FnMut(&mut AppState, crate::app::runtime::RuntimeMsg, &mut dyn RuntimeTx) -> bool,
 ) -> bool {
     let mut needs_redraw = false;
     let mut processed = 0usize;
@@ -67,7 +79,7 @@ pub(crate) fn process_runtime_messages(
                     app.rpc_pending.has_slot(PendingRpcSlot::SessionHistory),
                     app.runtime_info.active_run_id.as_deref(),
                 );
-                if apply::apply_runtime_msg(app, msg, tx) {
+                if apply(app, msg, tx) {
                     needs_redraw = true;
                 }
             }

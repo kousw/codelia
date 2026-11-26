@@ -16,7 +16,7 @@ use crate::app::{
 };
 use std::time::Instant;
 
-pub(super) fn apply_runtime_msg(
+pub(crate) fn apply_runtime_msg(
     app: &mut AppState,
     msg: RuntimeMsg,
     tx: &mut dyn RuntimeTx,

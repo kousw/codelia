@@ -288,3 +288,5 @@ pre-write conflict detection and `auth.status` non-secret `storage` / `warnings`
 secrets and Linux/Windows native keyrings remain planned. `bunfig.toml` preloads
 `scripts/test-preload.ts` (`CODELIA_AUTH_STORAGE=file`) and disables real Keychain access in ordinary tests. The live macOS test requires explicit
 `CODELIA_TEST_LIVE_KEYCHAIN=1`.
+
+`crates/tui` uses a pragmatic TEA architecture (`dev-docs/specs/tui-tea-architecture.md`): synchronous `&mut dyn RuntimeTx` for RPC sends with handler-owned rollback, unified `PendingRpcs`, typed `RuntimeMsg`, 3-tier `OverlayState` (`RuntimeDialogs` with `ConfirmSlot::Pending -> Active`, `LocalPanel`, `QueueSteerPicker`) + `PasteTarget`, pure `app/effect.rs` for non-RPC shell side effects (`SetMouseCapture`, `WriteClipboard`, `StartClipboardImport`, `StartUpdateControl`), `event_loop/update.rs` (`Msg`/`UpdateResult`/`ExitAction`), a `Backend`-generic `entry/run_loop.rs` for deterministic `TestBackend` tests, and a production layer-boundary guard in `crates/tui/src/main_tests.rs`.

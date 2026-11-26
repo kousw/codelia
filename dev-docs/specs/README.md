@@ -107,7 +107,8 @@ Provider-specific transport, serialization, and error contracts live together in
 
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [`tui-architecture.md`](./tui-architecture.md) | Mixed | Current TUI architecture and target refactors |
+| [`tui-architecture.md`](./tui-architecture.md) | Implemented | TUI module boundaries and interaction loop |
+| [`tui-tea-architecture.md`](./tui-tea-architecture.md) | Implemented | TEA messages, effects, overlays and RPC contracts |
 | [`tui-operation-reference.md`](./tui-operation-reference.md) | Implemented | Current user-visible TUI behavior |
 | [`tui-image-preview.md`](./tui-image-preview.md) | Implemented | Local file/composer-image preview, bounded worker, query-free halfblocks, opt-in alternate Kitty, and manual native visual gates |
 | [`tui-terminal-mode.md`](./tui-terminal-mode.md) | Mixed | Implemented startup mode selection plus deferred live switching and split-footer work |

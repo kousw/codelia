@@ -5,7 +5,7 @@
 ## Scope
 - `cli.rs`: basic CLI option parsing/help/version label, terminal-mode selection, and env-backed debug toggles.
 - `bootstrap.rs`: startup banner/app bootstrap and resume initialization requests.
-- `run_loop.rs`: interactive tick loop orchestration (runtime polling, input dispatch, redraw cycle).
+- `run_loop.rs`: generic terminal runner. `LoopIo` supplies event polling, child status, clock, effect execution and synchronized drawing. Dispatch typed messages through `event_loop::update`.
 - `terminal.rs`: terminal session setup/teardown (raw mode, keyboard flags, cursor restore). Do not issue OSC color queries during startup; delayed responses can leak into composer input on terminal bridges.
 - `terminal_mode.rs`: pure `auto | inline | alternate` mode model and environment resolver. Keep environment capture separate from pure resolution so Windows/WSL policy remains unit-testable without mutating process-global environment.
 
@@ -17,6 +17,6 @@
 ## Notes
 - Keep `main.rs` focused on composition root and process lifecycle.
 - Keep interactive loop behavior in `run_loop.rs`; split further there before growing `main.rs`.
-- Image preview polling is nonblocking and continues alongside runtime polling. Runtime panels close the preview before input routing; while open it consumes all keys/paste/mouse and pauses queued dispatch. Terminal setup uses only OS cell metrics for opt-in Kitty, never Picker/stdin queries; teardown deletes only the preview's owned reusable image ID.
+- Image preview polling is nonblocking and continues alongside runtime polling. Interaction panels close the preview before input routing; while open it consumes all keys/paste/mouse and pauses queued dispatch. Terminal setup uses only OS cell metrics for opt-in Kitty, never Picker/stdin queries; teardown deletes only the preview's owned reusable image ID.
 - Pass `ResolvedTerminalMode` across terminal/run-loop boundaries; do not reintroduce a shared `use_alt_screen: bool` policy flag.
 - Use `app::frame::draw_frame` for the bounded draw/insert/restore cycle. It restores the viewport before the next input poll and returns a redraw request if a restoring resize created more overflow. Do not perform a second insertion after its final draw. Include its draw duration in frame/draw timing.

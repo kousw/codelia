@@ -1,3 +1,4 @@
+use crate::app::effect::Effect;
 use crate::app::handlers::confirm::handle_confirm_key;
 use crate::app::handlers::{self, panels};
 use crate::app::log_wrap::selected_text_for_range;
@@ -7,7 +8,7 @@ use crate::app::runtime::{
 };
 use crate::app::state::input::attachments::token_span_at;
 use crate::app::state::{InputState, LogKind, SelectionHitTest};
-use crate::app::util::{sanitize_paste, write_clipboard_text};
+use crate::app::util::sanitize_paste;
 use crate::app::{
     AppState, ConfirmSlot, LocalPanel, PasteTarget, PendingRpc, PendingRpcSlot, PromptDialogState,
     PromptSlot, RuntimeDialogRef, RuntimePickDialog, RuntimePickListKind,
@@ -173,8 +174,9 @@ pub(crate) fn handle_main_key(
     key: KeyCode,
     modifiers: KeyModifiers,
     tx: &mut dyn RuntimeTx,
+    effects: &mut Vec<Effect>,
+    now: Instant,
 ) -> bool {
-    let now = Instant::now();
     let is_plain_backslash = matches!(key, KeyCode::Char('\\')) && modifiers.is_empty();
     let is_plain_enter = key == KeyCode::Enter && modifiers.is_empty();
     if !is_plain_backslash && !is_plain_enter {
@@ -191,6 +193,7 @@ pub(crate) fn handle_main_key(
         }
         (KeyCode::F(2), _) => {
             app.mouse_capture_enabled = !app.mouse_capture_enabled;
+            effects.push(Effect::SetMouseCapture(app.mouse_capture_enabled));
             if !app.mouse_capture_enabled {
                 app.clear_text_selection();
             }
@@ -267,7 +270,7 @@ pub(crate) fn handle_main_key(
             }
         }
         (KeyCode::Char('v'), mods) if mods.contains(KeyModifiers::ALT) => {
-            handle_typed_clipboard_paste(app)
+            handle_typed_clipboard_paste(app, effects)
         }
         (KeyCode::Char('!'), mods)
             if mods.is_empty()
@@ -310,7 +313,7 @@ pub(crate) fn handle_main_key(
                 }
             }
             app.pending_shift_enter_backslash = None;
-            handlers::handle_enter(app, tx)
+            handlers::handle_enter(app, tx, effects)
         }
         (KeyCode::Tab, mods) if mods.is_empty() => {
             handlers::complete_slash_command(&mut app.input)
@@ -380,10 +383,10 @@ pub(crate) fn handle_paste(app: &mut AppState, text: &str, startup_pending: bool
     true
 }
 
-fn handle_typed_clipboard_paste(app: &mut AppState) -> bool {
+fn handle_typed_clipboard_paste(app: &mut AppState, effects: &mut Vec<Effect>) -> bool {
     match app.paste_target(false) {
         PasteTarget::Blocked => return false,
-        PasteTarget::Composer if !app.bang_input_mode => app.start_clipboard_import(),
+        PasteTarget::Composer if !app.bang_input_mode => effects.push(Effect::StartClipboardImport),
         PasteTarget::RuntimePrompt | PasteTarget::Composer => {
             app.push_line(
                 LogKind::Status,
@@ -399,6 +402,7 @@ fn handle_prompt_key(
     key: KeyCode,
     modifiers: KeyModifiers,
     tx: &mut dyn RuntimeTx,
+    effects: &mut Vec<Effect>,
 ) -> Option<bool> {
     let prompt = app.overlays.runtime_dialogs.prompt.as_mut()?;
     let prompt_id = prompt.state.id.clone();
@@ -408,7 +412,7 @@ fn handle_prompt_key(
     let mut handled = true;
     match (key, modifiers) {
         (KeyCode::Char('v'), mods) if mods.contains(KeyModifiers::ALT) => {
-            handled = handle_typed_clipboard_paste(app);
+            handled = handle_typed_clipboard_paste(app, effects);
         }
         (KeyCode::Esc, _) => {
             app.overlays.runtime_dialogs.prompt = None;
@@ -608,6 +612,8 @@ pub(crate) fn handle_mouse_event(
     mouse: MouseEvent,
     owned_selection_enabled: bool,
     frame_dirty: bool,
+    effects: &mut Vec<Effect>,
+    now: Instant,
 ) -> bool {
     if app.image_preview.is_open() {
         return false;
@@ -699,22 +705,13 @@ pub(crate) fn handle_mouse_event(
             };
             let Some(text) = selected_text_for_range(app, range, hit_map.projection) else {
                 app.text_selection.clear();
-                app.set_selection_notice("Copy failed: empty selection");
+                app.set_selection_notice("Copy failed: empty selection", now);
                 return true;
             };
-            app.set_selection_notice(match write_clipboard_text(&text) {
-                Ok(_) => format!("Copied {} chars", text.chars().count()),
-                Err(error) => format!("Copy failed: {error}"),
-            });
+            effects.push(Effect::WriteClipboard { text });
             true
         }
         _ => false,
-    }
-}
-
-pub(crate) fn apply_redraw(needs_redraw: &mut bool, redraw: bool) {
-    if redraw {
-        *needs_redraw = true;
     }
 }
 
@@ -723,13 +720,16 @@ pub(crate) fn handle_non_main_key(
     key: KeyCode,
     modifiers: KeyModifiers,
     tx: &mut dyn RuntimeTx,
+    effects: &mut Vec<Effect>,
 ) -> Option<bool> {
     match app.overlays.runtime_dialogs.top() {
         Some(RuntimeDialogRef::Confirm(ConfirmSlot::Pending(_))) => return Some(false),
         Some(RuntimeDialogRef::Confirm(ConfirmSlot::Active { .. })) => {
             return handle_confirm_key(app, key, modifiers, tx);
         }
-        Some(RuntimeDialogRef::Prompt(_)) => return handle_prompt_key(app, key, modifiers, tx),
+        Some(RuntimeDialogRef::Prompt(_)) => {
+            return handle_prompt_key(app, key, modifiers, tx, effects)
+        }
         Some(RuntimeDialogRef::Pick(_)) => return handle_pick_key(app, key, tx),
         None => {}
     }
@@ -751,7 +751,7 @@ pub(crate) fn handle_non_main_key(
         Some(LocalPanel::ProviderPicker(_)) => panels::handle_provider_picker_key(app, key, tx),
         Some(LocalPanel::ModelPicker(_)) => panels::handle_model_picker_key(app, key, tx),
         Some(LocalPanel::ReasoningPicker(_)) => panels::handle_reasoning_picker_key(app, key, tx),
-        Some(LocalPanel::UpdatePicker(_)) => panels::handle_update_picker_key(app, key),
+        Some(LocalPanel::UpdatePicker(_)) => panels::handle_update_picker_key(app, key, effects),
         Some(LocalPanel::ShellRulePicker(_)) => panels::handle_shell_rule_picker_key(app, key, tx),
         Some(LocalPanel::LaneActionPicker(_)) => {
             panels::handle_lane_action_picker_key(app, key, tx)
@@ -842,7 +842,7 @@ mod shell_rule_tests {
         ]});
         let submit = |app: &mut AppState, tx: &mut dyn RuntimeTx, input: &str| {
             app.input.set_from(input);
-            assert!(handlers::handle_enter(app, tx));
+            assert!(handlers::handle_enter(app, tx, &mut Vec::new()));
         };
         let respond = |app: &mut AppState, tx: &mut dyn RuntimeTx, id: &str, result: &Value| {
             sender
@@ -894,7 +894,13 @@ mod shell_rule_tests {
             respond(&mut app, &mut tx, id, &list);
             for key in keys {
                 assert_eq!(
-                    handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut tx),
+                    handle_non_main_key(
+                        &mut app,
+                        key,
+                        KeyModifiers::NONE,
+                        &mut tx,
+                        &mut Vec::new()
+                    ),
                     Some(true)
                 );
             }
@@ -911,16 +917,34 @@ mod shell_rule_tests {
         submit(&mut app, &mut tx, "/permissions remove");
         respond(&mut app, &mut tx, "permissions-6", &list);
         assert_eq!(
-            handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+            handle_non_main_key(
+                &mut app,
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+                &mut tx,
+                &mut Vec::new()
+            ),
             Some(true)
         );
         app.runtime_info.session_id = Some("session-2".into());
         assert_eq!(
-            handle_non_main_key(&mut app, KeyCode::Down, KeyModifiers::NONE, &mut tx),
+            handle_non_main_key(
+                &mut app,
+                KeyCode::Down,
+                KeyModifiers::NONE,
+                &mut tx,
+                &mut Vec::new()
+            ),
             Some(true)
         );
         assert_eq!(
-            handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+            handle_non_main_key(
+                &mut app,
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+                &mut tx,
+                &mut Vec::new()
+            ),
             Some(true)
         );
         assert!(log(&app).contains("The session changed."));
@@ -935,7 +959,13 @@ mod shell_rule_tests {
             };
             assert_eq!(picker.items.len(), 1);
             assert_eq!(
-                handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+                handle_non_main_key(
+                    &mut app,
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                    &mut tx,
+                    &mut Vec::new()
+                ),
                 Some(true)
             );
             let Some(LocalPanel::ShellRulePicker(dialog)) = &app.overlays.local_panel else {
@@ -945,12 +975,24 @@ mod shell_rule_tests {
             assert_eq!(dialog.selected, 0);
             if confirm {
                 assert_eq!(
-                    handle_non_main_key(&mut app, KeyCode::Down, KeyModifiers::NONE, &mut tx),
+                    handle_non_main_key(
+                        &mut app,
+                        KeyCode::Down,
+                        KeyModifiers::NONE,
+                        &mut tx,
+                        &mut Vec::new()
+                    ),
                     Some(true)
                 );
             }
             assert_eq!(
-                handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+                handle_non_main_key(
+                    &mut app,
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                    &mut tx,
+                    &mut Vec::new()
+                ),
                 Some(true)
             );
             assert_eq!(
@@ -998,7 +1040,7 @@ mod shell_rule_tests {
         let (sender, rx) = mpsc::channel();
         for confirm in [false, true] {
             app.input.set_from("/permissions trust");
-            assert!(handlers::handle_enter(&mut app, &mut tx));
+            assert!(handlers::handle_enter(&mut app, &mut tx, &mut Vec::new()));
             let id = app
                 .rpc_pending
                 .slot_id(PendingRpcSlot::ShellRules)
@@ -1015,12 +1057,24 @@ mod shell_rule_tests {
             assert_eq!(dialog.selected, 0);
             if confirm {
                 assert_eq!(
-                    handle_non_main_key(&mut app, KeyCode::Down, KeyModifiers::NONE, &mut tx),
+                    handle_non_main_key(
+                        &mut app,
+                        KeyCode::Down,
+                        KeyModifiers::NONE,
+                        &mut tx,
+                        &mut Vec::new()
+                    ),
                     Some(true)
                 );
             }
             assert_eq!(
-                handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+                handle_non_main_key(
+                    &mut app,
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                    &mut tx,
+                    &mut Vec::new()
+                ),
                 Some(true)
             );
             assert_eq!(
@@ -1064,13 +1118,13 @@ mod shell_rule_tests {
                 app.run_status = Some("running".to_owned());
             }
             app.input.set_from(&input);
-            assert!(handlers::handle_enter(&mut app, &mut tx));
+            assert!(handlers::handle_enter(&mut app, &mut tx, &mut Vec::new()));
             assert!(!app.rpc_pending.has_shell_rule_run());
             assert_eq!(app.input.current(), input);
         }
 
         app.run_status = None;
-        assert!(handlers::handle_enter(&mut app, &mut tx));
+        assert!(handlers::handle_enter(&mut app, &mut tx, &mut Vec::new()));
         assert!(app.rpc_pending.has_shell_rule_run());
         assert!(!handlers::can_dispatch_prompt_now(&app));
         assert!(app.input.current().is_empty());
@@ -1143,6 +1197,15 @@ mod update_tests {
     use ratatui::{backend::TestBackend, Terminal};
     use std::io::Write;
 
+    fn run_update_effects(app: &mut AppState, effects: Vec<Effect>) {
+        for effect in effects {
+            let Effect::StartUpdateControl(action) = effect else {
+                panic!("unexpected effect: {effect:?}");
+            };
+            self_update::start(app, action);
+        }
+    }
+
     fn update_picker(app: &AppState) -> &crate::app::state::UpdatePickerState {
         let Some(LocalPanel::UpdatePicker(picker)) = &app.overlays.local_panel else {
             panic!("expected update picker");
@@ -1187,17 +1250,21 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
         };
         let poll = |app: &mut AppState| {
             let deadline = Instant::now() + Duration::from_secs(5);
-            while !self_update::poll(app) {
+            let completion = loop {
+                if let Some(completion) = self_update::poll(app) {
+                    break completion;
+                }
                 assert!(Instant::now() < deadline, "update helper did not complete");
                 std::thread::sleep(Duration::from_millis(5));
-            }
+            };
+            self_update::apply_completion(app, completion);
         };
 
         fn pick_auto_in_short_terminal(app: &mut AppState, tx: &mut dyn RuntimeTx, enlarge: bool) {
             let mut terminal = Terminal::new(TestBackend::new(80, 7)).unwrap();
             let mut key = |app: &mut AppState, code| {
                 assert_eq!(
-                    handle_non_main_key(app, code, KeyModifiers::NONE, tx),
+                    handle_non_main_key(app, code, KeyModifiers::NONE, tx, &mut Vec::new()),
                     Some(true)
                 );
             };
@@ -1236,8 +1303,10 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
         }
 
         for key in [KeyCode::Esc, KeyCode::Enter] {
+            let mut effects = Vec::new();
             app.input.set_from("/update");
-            assert!(handlers::handle_enter(&mut app, &mut tx));
+            assert!(handlers::handle_enter(&mut app, &mut tx, &mut effects));
+            run_update_effects(&mut app, std::mem::take(&mut effects));
             assert!(app.input.current().is_empty());
             poll(&mut app);
             let picker = update_picker(&app);
@@ -1249,9 +1318,10 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
             );
             pick_auto_in_short_terminal(&mut app, &mut tx, key == KeyCode::Enter);
             assert_eq!(
-                handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut tx),
+                handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut tx, &mut effects),
                 Some(true)
             );
+            run_update_effects(&mut app, effects);
             assert!(app.overlays.local_panel.is_none());
             assert_eq!(app.pending_update_control.is_some(), key == KeyCode::Enter);
         }
@@ -1264,6 +1334,7 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
         use crate::app::startup_confirmations::{self, StartupConfirmations};
         assert!(!StartupConfirmations::from_list(&["unknown".to_string()]).is_pending());
         for key in [KeyCode::Esc, KeyCode::Enter] {
+            let mut effects = Vec::new();
             app.startup_confirmations = StartupConfirmations::from_list(&[
                 "unknown".to_string(),
                 "update-mode".to_string(),
@@ -1300,9 +1371,10 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
             assert_eq!(picker.items[picker.selected].id, "notify");
             pick_auto_in_short_terminal(&mut app, &mut tx, key == KeyCode::Enter);
             assert_eq!(
-                handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut tx),
+                handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut tx, &mut effects),
                 Some(true)
             );
+            run_update_effects(&mut app, effects);
             assert!(app.overlays.local_panel.is_none());
             if key == KeyCode::Enter {
                 assert!(!startup_confirmations::poll(&mut app));
@@ -1331,6 +1403,7 @@ mod mouse_tests {
     use crate::app::AppState;
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     use ratatui::layout::Rect;
+    use std::time::Instant;
 
     fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
         mouse_with_modifiers(kind, column, row, KeyModifiers::NONE)
@@ -1395,6 +1468,8 @@ mod mouse_tests {
             mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
         app.transcript_hit_map.as_mut().unwrap().frame_revision = 2;
         assert!(handle_mouse_event(
@@ -1402,6 +1477,8 @@ mod mouse_tests {
             mouse(MouseEventKind::Drag(MouseButton::Left), 6, 3),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
         let range = app.text_selection.normalized_range().unwrap();
         assert_eq!(range.start.wrapped_row, 5);
@@ -1413,9 +1490,23 @@ mod mouse_tests {
     fn dirty_frame_or_inline_mode_does_not_start_selection() {
         let mut app = selectable_app();
         let down = mouse(MouseEventKind::Down(MouseButton::Left), 1, 2);
-        assert!(!handle_mouse_event(&mut app, down, true, true));
+        assert!(!handle_mouse_event(
+            &mut app,
+            down,
+            true,
+            true,
+            &mut Vec::new(),
+            Instant::now()
+        ));
         assert!(!app.text_selection.is_dragging());
-        assert!(!handle_mouse_event(&mut app, down, false, false));
+        assert!(!handle_mouse_event(
+            &mut app,
+            down,
+            false,
+            false,
+            &mut Vec::new(),
+            Instant::now()
+        ));
         assert!(!app.text_selection.is_dragging());
     }
 
@@ -1433,6 +1524,8 @@ mod mouse_tests {
             ),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
         assert!(!app.text_selection.is_dragging());
     }
@@ -1449,6 +1542,8 @@ mod mouse_tests {
             mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
         assert!(!app.text_selection.is_dragging());
     }
@@ -1456,13 +1551,15 @@ mod mouse_tests {
     #[test]
     fn outside_click_clears_idle_notice_and_requests_redraw() {
         let mut app = selectable_app();
-        app.set_selection_notice("Copy failed: empty selection");
+        app.set_selection_notice("Copy failed: empty selection", Instant::now());
 
         assert!(handle_mouse_event(
             &mut app,
             mouse(MouseEventKind::Down(MouseButton::Left), 30, 2),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
         assert!(app.selection_notice.is_none());
         assert!(app.transcript_hit_map.is_some());
@@ -1476,6 +1573,8 @@ mod mouse_tests {
             mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
 
         assert!(handle_mouse_event(
@@ -1488,6 +1587,8 @@ mod mouse_tests {
             ),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
         assert!(!app.text_selection.is_dragging());
     }
@@ -1503,6 +1604,8 @@ mod mouse_tests {
             mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
         assert!(app.text_selection.is_dragging());
     }
@@ -1515,6 +1618,8 @@ mod mouse_tests {
             mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
 
         assert!(handle_mouse_event(
@@ -1522,6 +1627,8 @@ mod mouse_tests {
             mouse(MouseEventKind::Up(MouseButton::Left), 6, 3),
             true,
             true,
+            &mut Vec::new(),
+            Instant::now()
         ));
         assert!(!app.text_selection.is_dragging());
         assert!(app.text_selection.normalized_range().is_none());
@@ -1535,6 +1642,8 @@ mod mouse_tests {
             mouse(MouseEventKind::ScrollUp, 0, 0),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
         assert_eq!(app.scroll_from_bottom, 3);
     }
@@ -1551,6 +1660,8 @@ mod mouse_tests {
             mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
             true,
             false,
+            &mut Vec::new(),
+            Instant::now()
         ));
         assert!(app.text_selection.is_dragging());
 
@@ -1559,7 +1670,9 @@ mod mouse_tests {
             &mut app,
             KeyCode::F(2),
             KeyModifiers::NONE,
-            &mut tx
+            &mut tx,
+            &mut Vec::new(),
+            Instant::now()
         ));
         assert!(!app.mouse_capture_enabled);
         assert!(!app.text_selection.is_dragging());
@@ -1569,7 +1682,9 @@ mod mouse_tests {
             &mut app,
             KeyCode::F(2),
             KeyModifiers::NONE,
-            &mut tx
+            &mut tx,
+            &mut Vec::new(),
+            Instant::now()
         ));
         assert!(app.mouse_capture_enabled);
     }

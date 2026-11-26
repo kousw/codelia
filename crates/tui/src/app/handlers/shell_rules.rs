@@ -664,3 +664,51 @@ pub(crate) fn select(
     app.rpc_pending
         .insert(id, PendingRpc::ShellRules(operation));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::runtime::MockRuntimeTx;
+
+    #[test]
+    fn list_send_failure_keeps_permissions_slot_available_for_retry() {
+        let mut app = AppState::default();
+        app.runtime_info.supports_permissions_rw = true;
+        let mut tx = MockRuntimeTx::default();
+        tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
+        assert!(command(&mut app, &mut tx, "list"));
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ShellRules));
+        assert!(tx.sent.is_empty());
+        assert!(app.log.iter().any(|line| line
+            .plain_text()
+            .contains("Could not request saved shell rules")));
+
+        assert!(command(&mut app, &mut tx, "list"));
+        assert!(app.rpc_pending.has_slot(PendingRpcSlot::ShellRules));
+        assert_eq!(tx.sent[0]["method"], "permissions.list");
+    }
+
+    #[test]
+    fn removal_selection_from_previous_session_sends_no_request() {
+        let mut app = AppState::default();
+        app.runtime_info.session_id = Some("current".into());
+        let mut tx = MockRuntimeTx::default();
+        let state = ShellRulePickerState {
+            kind: ShellRulePicker::Confirm {
+                session_id: Some("previous".into()),
+            },
+            title: "Remove shell rule".into(),
+            message: None,
+            items: Vec::new(),
+            selected: 0,
+            review_offset: None,
+        };
+        select(&mut app, &mut tx, state);
+        assert!(tx.sent.is_empty());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ShellRules));
+        assert_eq!(
+            app.log.last().unwrap().plain_text(),
+            "The session changed. Run /permissions again."
+        );
+    }
+}

@@ -453,8 +453,7 @@ mod tests {
         assert_eq!(tx.sent.len(), 7);
     }
 
-    #[test]
-    fn upload_send_failure_pauses_item_without_leaving_pending_upload() {
+    fn queued_file() -> AppState {
         let mut app = AppState::default();
         app.runtime_info.supports_attachment_upload = true;
         app.runtime_info.attachment_upload_limits = Some(UploadLimits {
@@ -481,6 +480,12 @@ mod tests {
             shell_result_count: 0,
             dispatch_attempts: 0,
         });
+        app
+    }
+
+    #[test]
+    fn upload_send_failure_pauses_item_without_leaving_pending_upload() {
+        let mut app = queued_file();
         let mut tx = MockRuntimeTx::default();
         tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
 
@@ -491,5 +496,63 @@ mod tests {
             PROMPT_DISPATCH_MAX_ATTEMPTS
         );
         assert!(tx.sent.is_empty());
+    }
+
+    #[test]
+    fn elapsed_upload_cancels_remote_state_and_pauses_the_submission() {
+        let mut app = queued_file();
+        let mut tx = MockRuntimeTx::default();
+        let mut pending = PendingUpload::begin(
+            "expired".into(),
+            1,
+            "f".into(),
+            16,
+            Instant::now() - Duration::from_secs(31),
+        );
+        pending.set_upload_id(Some("expired-upload".into()));
+        app.rpc_pending.set_upload(pending);
+        assert_eq!(drive(&mut app, &mut tx), Some(true));
+        assert_eq!(tx.sent[0]["method"], "attachment.upload.cancel");
+        assert_eq!(tx.sent[0]["params"]["upload_id"], "expired-upload");
+        assert!(app.rpc_pending.upload().is_none());
+        assert_eq!(
+            app.pending_prompt_queue[0].dispatch_attempts,
+            PROMPT_DISPATCH_MAX_ATTEMPTS
+        );
+        assert!(!prompt::try_dispatch_queued_prompt(&mut app, &mut tx));
+        assert_eq!(tx.sent.len(), 1);
+    }
+
+    #[test]
+    fn begin_ack_after_session_change_or_queue_cancel_cancels_remote_upload() {
+        for queue_cancelled in [false, true] {
+            let mut app = queued_file();
+            let mut tx = MockRuntimeTx::default();
+            assert_eq!(drive(&mut app, &mut tx), Some(true));
+            let pending = app.rpc_pending.take_upload().unwrap();
+            if queue_cancelled {
+                app.pending_prompt_queue.clear();
+            } else {
+                app.runtime_info.attachment_session_epoch += 1;
+            }
+            let response = RpcResponse {
+                id: pending.request_id().into(),
+                result: Some(json!({"upload_id":"stale-upload","offset":0})),
+                error: None,
+            };
+            handle_response(&mut app, pending, &response, &mut tx);
+            assert!(app.rpc_pending.upload().is_none());
+            assert_eq!(tx.sent.len(), 2);
+            assert_eq!(tx.sent[1]["method"], "attachment.upload.cancel");
+            assert_eq!(tx.sent[1]["params"]["upload_id"], "stale-upload");
+            if !queue_cancelled {
+                assert_eq!(drive(&mut app, &mut tx), Some(true));
+                assert_eq!(
+                    app.pending_prompt_queue[0].dispatch_attempts,
+                    PROMPT_DISPATCH_MAX_ATTEMPTS
+                );
+                assert_eq!(tx.sent.len(), 2);
+            }
+        }
     }
 }

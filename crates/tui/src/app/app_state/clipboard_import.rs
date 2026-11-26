@@ -29,29 +29,28 @@ impl AppState {
         format!("{prefix}{}", self.next_attachment_id)
     }
 
-    pub fn start_clipboard_import(&mut self) {
+    pub(crate) fn start_clipboard_import(&mut self) -> Result<String, String> {
         let marker = self.next_attachment_id(IMPORT_ID_PREFIX);
-        match self
-            .clipboard_import
+        self.clipboard_import
             .start(marker.clone(), self.runtime_info.supports_attachment_upload)
-        {
-            Ok(()) => self
+            .map_err(|error| error.to_string())?;
+        Ok(marker)
+    }
+
+    pub(crate) fn apply_clipboard_import_start(&mut self, result: Result<String, String>) {
+        match result {
+            Ok(marker) => self
                 .input
                 .insert_str(&make_attachment_token(&self.composer_nonce, &marker)),
-            Err(error) => self.push_line(LogKind::Status, error.to_string()),
+            Err(error) => self.push_line(LogKind::Status, error),
         }
     }
 
-    pub fn poll_clipboard_import(&mut self) -> bool {
-        let results = self.clipboard_import.poll();
-        let changed = !results.is_empty();
-        for (marker, result) in results {
-            self.complete_clipboard_import(&marker, result);
-        }
-        changed
-    }
-
-    fn complete_clipboard_import(&mut self, marker: &str, result: Result<ImportedBatch, String>) {
+    pub(crate) fn complete_clipboard_import(
+        &mut self,
+        marker: &str,
+        result: Result<ImportedBatch, String>,
+    ) {
         let Some(range) = token_span(&self.input, &self.composer_nonce, marker) else {
             return;
         };

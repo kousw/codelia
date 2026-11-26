@@ -1,3 +1,4 @@
+use crate::app::effect::Effect;
 mod auto_review;
 mod bang;
 mod image;
@@ -57,7 +58,11 @@ pub(crate) fn complete_skill_mention(
     complete_skill_mention_input(input, skills)
 }
 
-pub(crate) fn handle_enter(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool {
+pub(crate) fn handle_enter(
+    app: &mut AppState,
+    tx: &mut dyn RuntimeTx,
+    effects: &mut Vec<Effect>,
+) -> bool {
     if app.has_pending_clipboard_import() {
         app.push_line(
             LogKind::Status,
@@ -91,7 +96,10 @@ pub(crate) fn handle_enter(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool {
     } else if matches!(command, "/auto-approve" | "/auto-review") {
         auto_review::handle(app, tx, trimmed[command.len()..].trim());
     } else if command == "/update" {
-        crate::app::self_update::open(app, trimmed[command.len()..].trim());
+        effects.extend(crate::app::self_update::open(
+            app,
+            trimmed[command.len()..].trim(),
+        ));
     } else if command == "/permissions" {
         clear_input =
             super::shell_rules::command(app, tx, &raw_input.trim_start()[command.len()..]);
@@ -218,7 +226,7 @@ mod tests {
             let mut app = AppState::default();
             app.runtime_info.supports_auto_review_configure = true;
             app.input.set_from(&format!("{command} status"));
-            handle_enter(&mut app, &mut tx);
+            handle_enter(&mut app, &mut tx, &mut Vec::new());
             assert_eq!(
                 app.rpc_pending.slot_id(PendingRpcSlot::AutoReview),
                 Some("1")
@@ -241,11 +249,11 @@ mod tests {
         let mut app = AppState::default();
         app.runtime_info.session_id = Some("current-session".to_string());
         app.input.set_from("/session pin");
-        handle_enter(&mut app, &mut tx);
+        handle_enter(&mut app, &mut tx, &mut Vec::new());
         assert!(!app.rpc_pending.has_slot(PendingRpcSlot::SessionUpdate));
         app.runtime_info.supports_session_lifecycle = true;
         app.input.set_from("/session unpin");
-        handle_enter(&mut app, &mut tx);
+        handle_enter(&mut app, &mut tx, &mut Vec::new());
         assert_eq!(
             app.rpc_pending.slot_id(PendingRpcSlot::SessionUpdate),
             Some("1")
@@ -266,16 +274,16 @@ mod tests {
         app.runtime_info.current_provider = Some("openai".to_string());
         app.runtime_info.current_model = Some("gpt-6.1-sol".to_string());
         app.input.set_from("/fast ultrafast");
-        assert!(handle_enter(&mut app, &mut tx));
+        assert!(handle_enter(&mut app, &mut tx, &mut Vec::new()));
         assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ModelSet));
         app.runtime_info.supports_model_ultrafast = true;
         app.input.set_from("/fast ultrafast");
-        assert!(handle_enter(&mut app, &mut tx));
+        assert!(handle_enter(&mut app, &mut tx, &mut Vec::new()));
         app.runtime_info.current_fast = Some(crate::app::ModelFastMode::Ultrafast);
         app.input.set_from("/fast");
-        assert!(handle_enter(&mut app, &mut tx));
+        assert!(handle_enter(&mut app, &mut tx, &mut Vec::new()));
         app.input.set_from("/fast on");
-        assert!(handle_enter(&mut app, &mut tx));
+        assert!(handle_enter(&mut app, &mut tx, &mut Vec::new()));
         let requests = &tx.sent;
         assert_eq!(requests.len(), 3);
         assert_eq!(requests[0]["params"]["fast"], "ultrafast");
@@ -289,12 +297,12 @@ mod tests {
         let mut app = AppState::default();
         // An older runtime must receive no named logout request.
         app.input.set_from("/logout home");
-        assert!(handle_enter(&mut app, &mut tx));
+        assert!(handle_enter(&mut app, &mut tx, &mut Vec::new()));
         assert!(!app.rpc_pending.has_slot(PendingRpcSlot::Logout));
         app.runtime_info.supports_scoped_logout = true;
         for command in ["/logout home", "/logout", "/logout home openai"] {
             app.input.set_from(command);
-            assert!(handle_enter(&mut app, &mut tx));
+            assert!(handle_enter(&mut app, &mut tx, &mut Vec::new()));
         }
         let requests = &tx.sent;
         assert_eq!(requests.len(), 2);
@@ -356,7 +364,7 @@ mod tests {
             app.runtime_info.supports_shell_tasks = true;
 
             app.input.set_from("!echo hi");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(
                 app.rpc_pending.slot_id(PendingRpcSlot::ShellStart),
                 Some("id-1")
@@ -372,7 +380,7 @@ mod tests {
             app.runtime_info.supports_tasks = true;
 
             app.input.set_from("/tasks");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(
                 app.rpc_pending.slot_id(PendingRpcSlot::TaskList),
                 Some("id-1")
@@ -416,7 +424,7 @@ mod tests {
             let token = make_attachment_token(&app.composer_nonce, &attachment_id);
             app.input.set_from(&format!("hello {token}"));
 
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(app.pending_prompt_queue.len(), 1);
             assert!(app.pending_shell_results.is_empty());
             assert!(app.input.current().is_empty());
@@ -450,15 +458,15 @@ mod tests {
             app.update_run_status("running".to_string());
 
             app.input.set_from("first");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             app.input.set_from("second");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             app.input.set_from("third");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(app.pending_prompt_queue.len(), 3);
 
             app.input.set_from("/queue cancel q2");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(app.pending_prompt_queue.len(), 2);
             assert_eq!(
                 app.pending_prompt_queue
@@ -469,7 +477,7 @@ mod tests {
             );
 
             app.input.set_from("/queue cancel");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(app.pending_prompt_queue.len(), 1);
             assert_eq!(
                 app.pending_prompt_queue
@@ -479,11 +487,11 @@ mod tests {
             );
 
             app.input.set_from("/queue clear");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert!(app.pending_prompt_queue.is_empty());
 
             app.input.set_from("/queue");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert!(app
                 .log
                 .iter()
@@ -523,7 +531,7 @@ mod tests {
             assert!(!try_dispatch_queued_prompt(&mut app, tx));
 
             app.input.set_from("/queue retry");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert!(try_dispatch_queued_prompt(&mut app, tx));
             assert_eq!(
                 app.dispatching_prompt.as_ref().unwrap().input_payload,
@@ -548,7 +556,7 @@ mod tests {
                 json!({"type": "text", "text": "next"}),
             ));
             app.input.set_from("/queue cancel");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert!(try_dispatch_queued_prompt(&mut app, tx));
             assert_eq!(app.dispatching_prompt.as_ref().unwrap().queue_id, "q2");
         });
@@ -643,9 +651,9 @@ mod tests {
             app.update_run_status("running".to_string());
 
             app.input.set_from("first");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             app.input.set_from("second");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(app.pending_prompt_queue.len(), 2);
 
             app.update_run_status("completed".to_string());
@@ -682,7 +690,7 @@ mod tests {
             let mut app = AppState::default();
 
             app.input.set_from("hello");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert!(app.pending_prompt_queue.is_empty());
             assert!(app.dispatching_prompt.is_some());
             assert!(app.rpc_pending.has_slot(PendingRpcSlot::RunStart));
@@ -697,7 +705,7 @@ mod tests {
             app.runtime_info.active_run_id = Some("run-1".to_string());
 
             app.input.set_from("/steer focus tests");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert!(app.in_flight_steers.is_empty());
             assert!(app.pending_prompt_queue.is_empty());
             assert!(app
@@ -707,7 +715,7 @@ mod tests {
 
             app.runtime_info.supports_run_steer = true;
             app.input.set_from("/steer focus tests");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(app.in_flight_steers.len(), 1);
             assert_eq!(app.in_flight_steers[0].run_id, "run-1");
             assert_eq!(app.in_flight_steers[0].submission.user_text, "focus tests");
@@ -732,21 +740,27 @@ mod tests {
             app.runtime_info.active_run_id = Some("run-1".into());
             for text in ["first", "paused", "second", "/queue pick"] {
                 app.input.set_from(text);
-                handle_enter(&mut app, tx);
+                handle_enter(&mut app, tx, &mut Vec::new());
             }
             app.pending_prompt_queue[1].dispatch_attempts =
                 crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
             app.input.set_from("unfinished draft");
             assert!(!handle_paste(&mut app, "paste", false));
             assert_eq!(
-                handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, tx),
+                handle_non_main_key(
+                    &mut app,
+                    KeyCode::Enter,
+                    KeyModifiers::SHIFT,
+                    tx,
+                    &mut Vec::new()
+                ),
                 Some(false)
             );
             assert!(app.in_flight_steers.is_empty());
             assert!(app.overlays.queue_focus.is_some());
             let mut press = |app: &mut AppState, key| {
                 assert_eq!(
-                    handle_non_main_key(app, key, KeyModifiers::NONE, tx),
+                    handle_non_main_key(app, key, KeyModifiers::NONE, tx, &mut Vec::new()),
                     Some(true)
                 );
             };
@@ -772,7 +786,7 @@ mod tests {
             app.update_run_status("running".into());
             app.runtime_info.active_run_id = Some("run-1".into());
             app.input.set_from("queued");
-            handle_enter(&mut app, tx);
+            handle_enter(&mut app, tx, &mut Vec::new());
             app.input.set_from("draft");
             open_queue_steer_picker(&mut app);
             assert_eq!(
@@ -801,24 +815,24 @@ mod tests {
             app.runtime_info.active_run_id = Some("run-1".to_string());
 
             app.input.set_from("queued first");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(app.pending_prompt_queue.len(), 1);
             assert!(app.in_flight_steers.is_empty());
 
             app.input.set_from("/queue mode steer");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(
                 app.active_run_submit_mode,
                 crate::app::ActiveRunSubmitMode::Steer
             );
 
             app.input.set_from("direct steer");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert_eq!(app.in_flight_steers.len(), 1);
             assert_eq!(app.in_flight_steers[0].submission.user_text, "direct steer");
 
             app.input.set_from("/queue steer 1");
-            assert!(handle_enter(&mut app, tx));
+            assert!(handle_enter(&mut app, tx, &mut Vec::new()));
             assert!(app.pending_prompt_queue.is_empty());
             assert_eq!(app.in_flight_steers.len(), 2);
             assert_eq!(app.in_flight_steers[1].submission.user_text, "queued first");

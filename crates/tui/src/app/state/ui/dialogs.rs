@@ -74,6 +74,7 @@ impl RuntimeDialogs {
         }
     }
 
+    #[cfg(test)]
     pub fn active_confirm(&self) -> Option<(&ConfirmDialogState, &InputState)> {
         match self.confirm.as_ref()? {
             ConfirmSlot::Active { state, input } => Some((state, input)),
@@ -88,6 +89,7 @@ impl RuntimeDialogs {
         }
     }
 
+    #[cfg(test)]
     pub fn is_confirm_pending(&self) -> bool {
         matches!(self.confirm, Some(ConfirmSlot::Pending(_)))
     }

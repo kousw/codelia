@@ -1,3 +1,4 @@
+pub(crate) mod effect;
 pub(crate) mod frame;
 #[cfg(test)]
 mod frame_tests;

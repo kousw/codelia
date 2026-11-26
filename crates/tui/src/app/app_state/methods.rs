@@ -79,9 +79,9 @@ impl AppState {
         selection_changed || notice_changed || expiry_changed
     }
 
-    pub fn set_selection_notice(&mut self, notice: impl Into<String>) {
+    pub fn set_selection_notice(&mut self, notice: impl Into<String>, now: Instant) {
         self.selection_notice = Some(notice.into());
-        self.selection_notice_expires_at = Some(Instant::now() + Duration::from_secs(3));
+        self.selection_notice_expires_at = Some(now + Duration::from_secs(3));
     }
 
     pub fn expire_selection_notice(&mut self, now: Instant) -> bool {
@@ -523,7 +523,7 @@ mod selection_tests {
             }),
             ..AppState::default()
         };
-        app.set_selection_notice("Copy failed: empty selection");
+        app.set_selection_notice("Copy failed: empty selection", std::time::Instant::now());
 
         assert!(app.clear_text_selection());
         assert!(app.selection_notice.is_none());

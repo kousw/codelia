@@ -7,6 +7,7 @@ pub(crate) mod runtime_response;
 pub(crate) mod shell_rules;
 pub(crate) mod theme;
 
+use crate::app::effect::Effect;
 use crate::app::runtime::RuntimeTx;
 use crate::app::state::InputState;
 use crate::app::{AppState, SkillsListItemState};
@@ -22,8 +23,12 @@ pub(crate) fn complete_skill_mention(
     command::complete_skill_mention(input, skills)
 }
 
-pub(crate) fn handle_enter(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool {
-    command::handle_enter(app, tx)
+pub(crate) fn handle_enter(
+    app: &mut AppState,
+    tx: &mut dyn RuntimeTx,
+    effects: &mut Vec<Effect>,
+) -> bool {
+    command::handle_enter(app, tx, effects)
 }
 
 pub(crate) fn can_dispatch_prompt_now(app: &AppState) -> bool {

@@ -1,3 +1,4 @@
+use crate::app::effect::Effect;
 use crate::app::runtime::{
     send_model_list, send_model_set, send_session_history, send_session_list, send_session_open,
     send_theme_set, send_tool_call, RuntimeTx,
@@ -402,7 +403,11 @@ pub(crate) fn navigate_model_list(panel: &mut ModelListPanelState, key: KeyCode)
     true
 }
 
-pub(crate) fn handle_update_picker_key(app: &mut AppState, key: KeyCode) -> Option<bool> {
+pub(crate) fn handle_update_picker_key(
+    app: &mut AppState,
+    key: KeyCode,
+    effects: &mut Vec<Effect>,
+) -> Option<bool> {
     let Some(LocalPanel::UpdatePicker(picker)) = app.overlays.local_panel.as_mut() else {
         return None;
     };
@@ -422,7 +427,11 @@ pub(crate) fn handle_update_picker_key(app: &mut AppState, key: KeyCode) -> Opti
     app.render_state.drawn_update_choice = None;
     if matches!(key, KeyCode::Enter | KeyCode::Esc) {
         if let Some(LocalPanel::UpdatePicker(picker)) = app.overlays.local_panel.take() {
-            crate::app::self_update::finish_picker(app, picker, key == KeyCode::Enter);
+            effects.extend(crate::app::self_update::finish_picker(
+                app,
+                picker,
+                key == KeyCode::Enter,
+            ));
         }
         return Some(true);
     }

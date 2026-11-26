@@ -21,7 +21,7 @@
 
 ## Rules
 
-- Handlers mutate `AppState` and trigger runtime calls through `runtime/*`.
+- Handlers mutate `AppState` and send RPCs synchronously through `RuntimeTx` to preserve send-failure rollback. Return local update-control effects to the loop for execution.
 - Keep parser/formatting/presentation concerns out of handlers.
 - Shared suggestion/completion logic should stay in `state/ui/*` (not duplicated here).
 

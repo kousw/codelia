@@ -660,7 +660,7 @@ fn receive_confirm(app: &mut AppState, tx: &mut MockRuntimeTx, id: &str) {
 }
 
 fn dialog_key(app: &mut AppState, tx: &mut MockRuntimeTx, key: KeyCode) -> Option<bool> {
-    handle_non_main_key(app, key, KeyModifiers::NONE, tx)
+    handle_non_main_key(app, key, KeyModifiers::NONE, tx, &mut Vec::new())
 }
 
 #[test]
@@ -2154,7 +2154,13 @@ fn pending_confirm_draw_preserves_underlying_prompt_until_activated_then_restore
 
     // Resolving confirm restores the prompt and its buffer on Frame 3.
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Char('y'),
+            KeyModifiers::NONE,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(true)
     );
     let frame3 = render_text(&mut terminal, &mut app);
@@ -2299,15 +2305,33 @@ fn delayed_lane_list_response_preserves_live_runtime_prompt_and_pick_behind_conf
     // Confirm -> Prompt -> Pick all still resolve with their original IDs and input.
     assert!(activate_pending_confirm_dialog(&mut app));
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Char('y'),
+            KeyModifiers::NONE,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(true)
     );
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(true)
     );
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(true)
     );
 
@@ -2360,10 +2384,18 @@ fn alt_v_in_prompt_shows_the_composer_notice_without_importing() {
     );
     assert!(apply_runtime_msg(&mut app, prompt, &mut tx));
 
+    let mut effects = Vec::new();
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Char('v'), KeyModifiers::ALT, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Char('v'),
+            KeyModifiers::ALT,
+            &mut tx,
+            &mut effects,
+        ),
         Some(true)
     );
+    assert!(effects.is_empty());
     let notice = app.log.last().expect("clipboard notice");
     assert_eq!(notice.kind(), LogKind::Status);
     assert_eq!(
@@ -2535,7 +2567,13 @@ fn onboarding_model_pick_survives_local_panel_replacements_and_replies_once() {
     assert_eq!(tx.sent[0]["result"]["ok"], true);
 
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(true)
     );
     assert!(app.overlays.runtime_dialogs.pick.is_none());
@@ -2544,7 +2582,13 @@ fn onboarding_model_pick_survives_local_panel_replacements_and_replies_once() {
         Some(LocalPanel::Context(_))
     ));
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(true)
     );
     assert_eq!(tx.sent.len(), 2);
@@ -2605,7 +2649,13 @@ fn runtime_pick_declines_and_untracks_displaced_client_tool_choice() {
         );
         assert!(apply_runtime_msg(&mut app, cancellation, &mut tx));
         assert_eq!(
-            handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+            handle_non_main_key(
+                &mut app,
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+                &mut tx,
+                &mut Vec::new()
+            ),
             Some(true)
         );
         assert_eq!(tx.sent.len(), 2);
@@ -2695,7 +2745,13 @@ fn silent_model_list_preserves_open_skills_panel_and_alt_v_does_not_type_into_sk
 
     // Alt+v while SkillsList is open is consumed without mutating search_query or selection.
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Char('v'), KeyModifiers::ALT, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Char('v'),
+            KeyModifiers::ALT,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(false)
     );
     let Some(LocalPanel::SkillsList(panel)) = &app.overlays.local_panel else {
@@ -2732,7 +2788,13 @@ fn ui_pick_cancelled_does_not_close_client_tool_choice_even_with_matching_id() {
 
     // User can still answer the client tool choice normally.
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(true)
     );
     assert_eq!(tx.sent.len(), 1);
@@ -2793,7 +2855,13 @@ fn overlapping_ui_pick_request_keeps_first_open_and_declines_second() {
     );
 
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(true)
     );
     assert_eq!(tx.sent.len(), 2);
@@ -2838,7 +2906,13 @@ fn local_lane_action_picker_esc_sends_no_rpc_and_survives_runtime_dialog_preempt
 
     // Dismissing the runtime prompt reveals the local lane action picker again.
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(true)
     );
     assert_eq!(tx.sent.len(), 1);
@@ -2850,7 +2924,13 @@ fn local_lane_action_picker_esc_sends_no_rpc_and_survives_runtime_dialog_preempt
 
     // Esc on local LaneActionPicker closes it without sending any RPC.
     assert_eq!(
-        handle_non_main_key(&mut app, KeyCode::Esc, KeyModifiers::NONE, &mut tx),
+        handle_non_main_key(
+            &mut app,
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+            &mut tx,
+            &mut Vec::new()
+        ),
         Some(true)
     );
     assert!(app.overlays.local_panel.is_none());

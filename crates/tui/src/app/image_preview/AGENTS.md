@@ -13,7 +13,8 @@ Contract and operation guide: `dev-docs/specs/tui-image-preview.md`.
 - `tests.rs`: real view/worker lifecycle, format limits, stale completion, composer
   preservation and Kitty identity tests; also shares fixtures with inline replay.
 - View lives in `app/view/ui/image_preview.rs`; handlers live in
-  `app/handlers/image_preview.rs`. `entry/run_loop.rs` owns polling/preemption.
+  `app/handlers/image_preview.rs`. `entry/run_loop.rs` drives polling and
+  `event_loop/update.rs` applies preemption and worker poll transitions.
 
 Run `cargo test --manifest-path crates/tui/Cargo.toml --locked image_preview` and
 `python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui`

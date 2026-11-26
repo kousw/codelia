@@ -56,7 +56,8 @@
 
 - Prefer one-way flow:
 - `handlers/view/render/runtime -> state`
-- Keep `entry` dependencies out of `app` and `event_loop`. Entry injects launcher configuration as data.
+- Keep `entry` dependencies out of `app` and `event_loop`, and keep `event_loop` dependencies out of `app`. Entry injects launcher configuration as data.
+- `effect.rs` defines local shell effect data shared by input, handlers and the entry runner. Update settings completion applies independently of the worker process.
 - Keep `util` independent of app state and orchestration. Keep `state` and `app_state` independent of handlers, view, and render.
 - Frame composition lives in `app/frame.rs`, which calls both `view` and `render::inline`. Keep those layers independent of each other and of `handlers`.
 - The dependency test in `src/main_tests.rs` checks production paths.

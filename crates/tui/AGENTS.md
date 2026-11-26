@@ -6,6 +6,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 ## Source Of Truth
 
 - Architecture and module boundaries: `dev-docs/specs/tui-architecture.md`
+- TEA messages, effect boundary and tick order: `dev-docs/specs/tui-tea-architecture.md`
 - Render state machine and invariants: `dev-docs/specs/tui-render-state-machine.md`
 - Terminal buffer policy and startup mode selection: `dev-docs/specs/tui-terminal-mode.md`
 - Partial alternate-mode owned text selection/copy contract: `dev-docs/specs/tui-owned-text-selection.md`
@@ -23,7 +24,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - `RenderState` invariants must hold:
   - `inserted_until <= visible_start <= visible_end <= wrapped_total`
   - `committed` tracks logical log index + source grapheme offset. `inserted_until` is its projection into the current wrapped cache and may decrease on rewrap; never preserve a raw row index across width/log changes.
-- `ConfirmSlot` transitions from `Pending` to `Active` after one draw and scrollback sync decision.
+- `ConfirmSlot` transitions from `Pending` to `Active` after one draw and scrollback sync decision. Redraw the active confirm before the next input poll.
 - `view/*` must not depend on `handlers/*`.
   - Shared pure logic belongs in `state/*` or `util/*`.
 - Owned transcript selection is alternate-mode only. Keep per-draw
@@ -37,9 +38,10 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 
 ## Module Map (Short)
 
-- `src/main.rs`: tick loop, event routing, redraw scheduling.
-- `src/entry/`: startup composition (`cli`, `bootstrap`, `terminal`) extracted from main.
-- `src/event_loop/`: runtime response/input handlers used by the tick loop.
+- `src/main.rs`: startup composition and process lifecycle.
+- `src/entry/`: startup, terminal lifecycle and generic run loop with injectable shell I/O.
+- `src/event_loop/`: TEA `update.rs` (message dispatch, redraw, exit, post-input tick control), `input.rs` (key/paste/mouse routing), and `runtime.rs` (runtime drain re-export).
+- `src/app/effect.rs`: pure local shell effect data (`SetMouseCapture`, `WriteClipboard`, `StartClipboardImport`, `StartUpdateControl`).
 - `src/app/mod.rs`: app state root (`AppState`) and orchestration helpers.
 - `src/app/state/`: input/log/ui/render state buckets.
 - `src/app/view/`: Ratatui UI composition.
