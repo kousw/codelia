@@ -1,8 +1,8 @@
 use crate::app::runtime::{send_run_start, send_run_steer, RuntimeTx};
-use crate::app::state::LogKind;
-use crate::app::util::attachments::{
+use crate::app::state::input::attachments::{
     build_run_input_payload, referenced_attachment_ids, render_input_text_with_attachment_labels,
 };
+use crate::app::state::LogKind;
 use crate::app::{
     ActiveRunSubmitMode, AppState, InFlightSteer, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS,
 };
@@ -91,7 +91,7 @@ fn make_prompt_submission(app: &mut AppState, raw_input: &str) -> PendingPromptR
         &app.pending_image_attachments,
         &app.pending_staged_attachments,
     );
-    let files = super::upload::SubmissionFiles::snapshot(app, &input_payload);
+    let files = super::upload::snapshot(app, &input_payload);
     let attachment_count = attachment_ids.len();
     let seq = app.allocate_submit_seq();
     PendingPromptRun {
@@ -111,7 +111,7 @@ fn make_prompt_submission(app: &mut AppState, raw_input: &str) -> PendingPromptR
 }
 
 fn push_user_prompt_lines(app: &mut AppState, submission: &PendingPromptRun) {
-    app.extend_lines(crate::app::util::user_message::user_message_lines(
+    app.extend_lines(crate::app::state::log::user_message_lines(
         &submission.display_text,
         &submission.image_descriptions,
     ));
@@ -150,7 +150,7 @@ pub(super) fn send_steer_submission(
     run_id: &str,
     mut submission: PendingPromptRun,
 ) -> bool {
-    if !submission.files.items.is_empty()
+    if !submission.files.is_empty()
         || app
             .pending_prompt_queue
             .iter()
@@ -386,4 +386,54 @@ pub(super) fn start_prompt_run(
 
     let _ = try_dispatch_queued_prompt(app, tx);
     true
+}
+
+#[cfg(test)]
+mod send_failure_tests {
+    use super::*;
+    use crate::app::runtime::MockRuntimeTx;
+    use std::io::ErrorKind;
+
+    #[test]
+    fn steer_send_failure_clears_in_flight_and_pauses_fallback_at_front() {
+        let mut app = AppState::default();
+        app.runtime_info.active_run_id = Some("run-1".into());
+        app.runtime_info.supports_run_steer = true;
+        app.update_run_status("running".into());
+        let submission = make_prompt_submission(&mut app, "redirect");
+        let mut tx = MockRuntimeTx::default();
+        tx.fail_next = Some(ErrorKind::BrokenPipe);
+
+        assert!(!send_ready_steer(&mut app, &mut tx, "run-1", submission));
+        assert!(app.rpc_pending.run_steer_ids.is_empty());
+        assert!(app.in_flight_steers.is_empty());
+        let paused = app
+            .pending_prompt_queue
+            .front()
+            .expect("re-enqueued paused fallback");
+        assert_eq!(paused.dispatch_attempts, PROMPT_DISPATCH_MAX_ATTEMPTS);
+        assert!(!paused.queue_id.is_empty());
+        assert!(tx.sent.is_empty());
+    }
+
+    #[test]
+    fn queued_prompt_send_failure_clears_pending_run_start_and_pauses_front() {
+        let mut app = AppState::default();
+        let mut submission = make_prompt_submission(&mut app, "hello");
+        submission.queue_id = app.allocate_prompt_queue_id();
+        app.pending_prompt_queue.push_back(submission);
+        let mut tx = MockRuntimeTx::default();
+        tx.fail_next = Some(ErrorKind::BrokenPipe);
+
+        assert!(try_dispatch_queued_prompt(&mut app, &mut tx));
+        assert!(app.rpc_pending.run_start_id.is_none());
+        assert!(app.dispatching_prompt.is_none());
+        assert_eq!(app.run_status.as_deref(), Some("error"));
+        let paused = app
+            .pending_prompt_queue
+            .front()
+            .expect("re-enqueued paused prompt");
+        assert_eq!(paused.dispatch_attempts, PROMPT_DISPATCH_MAX_ATTEMPTS);
+        assert!(tx.sent.is_empty());
+    }
 }

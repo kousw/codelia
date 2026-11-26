@@ -24,7 +24,8 @@ Current implementation anchors:
   terminal paste routes text into the composer.
 - `crates/tui/src/app/util/clipboard/mod.rs`: local clipboard adapters, including
   native file-list reads and the Windows clipboard bridge on WSL.
-- `crates/tui/src/app/util/attachments/mod.rs`: nonce-bound composer tokens, cancellable batch import and immutable file staging.
+- `crates/tui/src/app/state/input/attachments.rs`: nonce-bound composer tokens, payload serialization, and display-label rendering.
+- `crates/tui/src/app/util/attachments/mod.rs`: cancellable batch import and immutable file staging.
 - `packages/runtime/src/image-generation/attachments.ts`: submitted inline images
   become durable image references in the local runtime's image store.
 - `packages/runtime/src/environment.ts`: non-local hosts require explicit

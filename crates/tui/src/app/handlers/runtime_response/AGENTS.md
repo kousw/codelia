@@ -28,4 +28,4 @@
 
 - Correlate live Steers by run and client ID when supplied. Older runtimes use the confirmed server ID or a unique unverified server ID.
   If an applied event's IDs disagree, pause every matching candidate within that run before terminal fallback.
-- Applied live Steers render their submission display snapshot before removing the in-flight entry. Never dump prepared shell/image payloads into the transcript. Replay presentation uses `util/user_message.rs`; canonical input stays unchanged.
+- Applied live Steers render their submission display snapshot before removing the in-flight entry. Never dump prepared shell/image payloads into the transcript. Replay presentation uses `state/log/user_message.rs`; canonical input stays unchanged.

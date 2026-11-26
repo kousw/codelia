@@ -1,3 +1,5 @@
+pub(crate) mod attachments;
+
 #[derive(Default)]
 pub struct InputState {
     pub buffer: Vec<char>,

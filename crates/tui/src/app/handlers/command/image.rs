@@ -118,4 +118,30 @@ mod tests {
         assert!(model_params("openrouter owner/model").is_err());
         assert!(model_params("off extra").is_err());
     }
+
+    #[test]
+    fn image_send_failure_clears_all_three_image_slots() {
+        let mut app = AppState::default();
+        app.runtime_info.supports_image_generation = true;
+        let mut tx = crate::app::runtime::MockRuntimeTx::default();
+        tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
+
+        handle(&mut app, &mut tx, "status", false);
+        assert!(app.rpc_pending.image_artifact_id.is_none());
+        assert!(app.rpc_pending.image_model_get_id.is_none());
+        assert!(app.rpc_pending.image_model_configure_id.is_none());
+        assert!(tx.sent.is_empty());
+
+        tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
+        handle(
+            &mut app,
+            &mut tx,
+            "codelia-image-0123456789abcdef0123456789abcdef0123",
+            true,
+        );
+        assert!(app.rpc_pending.image_artifact_id.is_none());
+        assert!(app.rpc_pending.image_model_get_id.is_none());
+        assert!(app.rpc_pending.image_model_configure_id.is_none());
+        assert!(tx.sent.is_empty());
+    }
 }

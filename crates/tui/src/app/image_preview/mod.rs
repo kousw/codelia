@@ -3,7 +3,7 @@ mod decode;
 mod policy;
 mod worker;
 
-pub(crate) use decode::validate_dimensions;
+use crate::app::util::image as image_limits;
 pub(crate) use policy::PreviewPolicy;
 
 use crate::app::util::attachments::StagedAttachment;

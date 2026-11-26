@@ -50,13 +50,16 @@
   - Component tracking stores spans (`start..end`), currently populated as single-line spans for phase 1.
   - Summary spacing groups read lifecycle rows (`✔ Read: ...` + next `Read: ...`) to reduce blank lines for consecutive reads; non-read tool rows and `Error` remain separated.
   - `LogKind::Runtime` / `LogKind::Rpc` remain debug-only and are filtered when `--debug` is off.
-  - Runtime parser is split into `runtime/parser.rs` (entry + tests), `runtime/parser/types.rs` (ParsedOutput/payload types), `runtime/parser/common.rs` (shared pure presentation primitives), `runtime/parser/helpers.rs` (general rendering/formatting helpers), and domain renderers such as `runtime/parser/todo.rs`, `runtime/parser/lane.rs`, `runtime/parser/agents.rs`, and `runtime/parser/shell.rs`. Shell call summaries, tagged/JSON result parsing, task-state error classification, and output preview formatting stay together in `shell.rs`; keep the dispatcher and phase-1 behavior in `parse_runtime_output` unchanged.
+  - Runtime parser is split into `runtime/parser.rs` (wire dispatcher), `runtime/parser/tests.rs` (parser regressions), `runtime/parser/types.rs` (ParsedOutput/payload types), `runtime/parser/common.rs` (shared pure presentation primitives), `runtime/parser/helpers.rs` (general rendering/formatting helpers), and domain renderers such as `runtime/parser/todo.rs`, `runtime/parser/lane.rs`, `runtime/parser/agents.rs`, and `runtime/parser/shell.rs`. Shell call summaries, tagged/JSON result parsing, task-state error classification, and output preview formatting stay together in `shell.rs`; keep the dispatcher and phase-1 behavior in `parse_runtime_output` unchanged.
 
 ## Dependency Direction
 
 - Prefer one-way flow:
 - `handlers/view/render/runtime -> state`
-- `view` must not depend on `handlers`.
+- Keep `entry` dependencies out of `app` and `event_loop`. Entry injects launcher configuration as data.
+- Keep `util` independent of app state and orchestration. Keep `state` and `app_state` independent of handlers, view, and render.
+- Frame composition lives in `app/frame.rs`, which calls both `view` and `render::inline`. Keep those layers independent of each other and of `handlers`.
+- The dependency test in `src/main_tests.rs` checks production paths.
 - Terminal side effects belong in `render`, not `view`.
 - Keep `mod.rs` as a thin module boundary/re-export layer; put concrete app-state logic in `app_state/`.
 - `AppState` runtime concerns are grouped under `rpc_pending` (request-id waits) and `runtime_info` (session/model/capabilities).

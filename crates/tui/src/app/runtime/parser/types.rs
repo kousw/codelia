@@ -1,5 +1,12 @@
 use crate::app::state::LogLine;
+use crate::protocol::{GoalOffer, GoalSnapshot};
 use serde_json::Value;
+
+#[derive(Debug)]
+pub(crate) enum GoalNotification {
+    Updated(GoalSnapshot),
+    Ready(GoalOffer),
+}
 
 pub struct ParsedOutput {
     pub stream_update: Option<crate::app::state::stream_preview::StreamUpdate>,
@@ -15,7 +22,7 @@ pub struct ParsedOutput {
     pub canonical_run_id: Option<String>,
     pub final_text: Option<String>,
     pub rpc_response: Option<RpcResponse>,
-    pub goal_notification: Option<crate::app::goal::GoalNotification>,
+    pub goal_notification: Option<GoalNotification>,
     pub confirm_request: Option<UiConfirmRequest>,
     pub prompt_request: Option<UiPromptRequest>,
     pub pick_request: Option<UiPickRequest>,

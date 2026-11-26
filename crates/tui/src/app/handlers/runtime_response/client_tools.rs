@@ -817,7 +817,7 @@ mod tests {
 
     #[test]
     fn progress_update_remains_visible_after_inline_scrollback_commit() {
-        use crate::app::render::frame::draw_frame;
+        use crate::app::frame::draw_frame;
         use crate::app::state::LogKind;
         use ratatui::backend::TestBackend;
         use ratatui::{Terminal, TerminalOptions, Viewport};

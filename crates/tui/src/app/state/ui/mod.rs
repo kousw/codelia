@@ -1,4 +1,3 @@
-mod attachments;
 mod composer;
 mod dialogs;
 mod model;
@@ -7,7 +6,6 @@ mod skills;
 mod status;
 mod theme;
 
-pub use attachments::PendingImageAttachment;
 pub(crate) use composer::{
     active_skill_mention_token, command_suggestion_rows, complete_skill_mention,
     complete_slash_command, is_known_command, skill_suggestion_rows, unknown_command_message,

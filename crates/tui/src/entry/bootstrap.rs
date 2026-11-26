@@ -5,7 +5,7 @@ use crate::app::runtime::{send_model_list, RuntimeTx};
 use crate::app::state::LogKind;
 use crate::app::{AppState, ModelListMode};
 use crate::entry::cli::{resolve_version_label, ResumeMode};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const MAX_UPDATE_NOTICE_BYTES: u64 = 8 * 1024;
 const MAX_UPDATE_NOTICES: usize = 4;
@@ -78,11 +78,17 @@ pub(crate) fn build_initial_app(
 ) -> AppState {
     let mut app = AppState::default();
     let launch = crate::entry::launch_context::launch_context();
-    app.update_control_launcher =
-        crate::app::self_update::LauncherPaths::from_launch_context(launch);
+    app.update_control_launcher = launch.update_control.as_ref().and_then(|control| {
+        crate::app::self_update::LauncherPaths::new(
+            PathBuf::from(&control.node),
+            PathBuf::from(&control.entry),
+        )
+    });
     if app.update_control_launcher.is_some() {
         app.startup_confirmations =
-            crate::app::startup_confirmations::StartupConfirmations::from_launch_context(launch);
+            crate::app::startup_confirmations::StartupConfirmations::from_list(
+                &launch.startup_confirmations,
+            );
     }
     app.enable_debug_print = debug_print;
     app.debug_perf_enabled = debug_perf;

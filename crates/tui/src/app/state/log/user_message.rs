@@ -1,4 +1,4 @@
-use crate::app::state::{LogKind, LogLine};
+use super::{LogKind, LogLine};
 use serde_json::Value;
 
 /// Presentation only: never modify the canonical input sent to the model.

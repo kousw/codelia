@@ -1,4 +1,4 @@
-use super::frame::draw_frame;
+use crate::app::frame::draw_frame;
 use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
 use crate::app::AppState;
 use ratatui::backend::{Backend, ClearType, CrosstermBackend, WindowSize};

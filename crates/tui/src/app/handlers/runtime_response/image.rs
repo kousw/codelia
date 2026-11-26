@@ -94,7 +94,8 @@ pub(super) fn artifact(
 mod tests {
     use super::*;
     use crate::app::handlers::image_preview::{handle_command, preview_composer_image};
-    use crate::app::{PendingImageArtifactRequest, PendingImageAttachment, PendingRpcMatch};
+    use crate::app::state::PendingImageAttachment;
+    use crate::app::{PendingImageArtifactRequest, PendingRpcMatch};
     use crossterm::event::{KeyCode, KeyModifiers};
     use serde_json::json;
 
@@ -214,7 +215,7 @@ mod tests {
                 encoded_bytes: 3,
             },
         );
-        let token = crate::app::util::attachments::make_attachment_token(
+        let token = crate::app::state::input::attachments::make_attachment_token(
             &app.composer_nonce,
             "composer-image",
         );

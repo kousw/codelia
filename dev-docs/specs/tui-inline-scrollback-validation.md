@@ -16,7 +16,7 @@ viewport and terminal scrollback behavior.
 - Codelia advances committed progress only after insertion succeeds and requests a
   follow-up draw in the same tick so the cleared viewport and composer cursor
   are restored before the next input poll.
-- `render/frame.rs::draw_frame` performs at most one insertion pass and two draws.
+- `app/frame.rs::draw_frame` performs at most one insertion pass and two draws.
   If the restoring draw discovers new overflow, it leaves that insertion pending
   for the next cycle rather than clearing the viewport again before polling.
 - Rows wider than the insertion viewport are not committed. Insertion stops at

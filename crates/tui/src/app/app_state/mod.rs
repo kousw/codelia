@@ -67,7 +67,7 @@ pub struct PendingPromptRun {
     pub image_descriptions: Vec<String>,
     pub input_payload: Value,
     pub attachment_count: usize,
-    pub files: crate::app::handlers::command::upload::SubmissionFiles,
+    pub files: crate::app::state::upload::SubmissionFiles,
     pub shell_result_count: usize,
     pub dispatch_attempts: u32,
 }
@@ -184,7 +184,7 @@ pub struct RpcPendingState {
     pub model_list_scope: Option<ModelSetScope>,
     pub model_set_id: Option<String>,
     pub run_start_id: Option<String>,
-    pub upload: Option<crate::app::handlers::command::upload::PendingUpload>,
+    pub upload: Option<crate::app::state::upload::PendingUpload>,
     pub initialize_id: Option<String>,
     pub run_steer_ids: HashMap<String, String>,
     pub run_cancel_id: Option<String>,
@@ -331,7 +331,7 @@ pub struct RuntimeInfoState {
     pub supports_tasks: bool,
     pub supports_run_steer: bool,
     pub supports_attachment_upload: bool,
-    pub attachment_upload_limits: Option<crate::app::handlers::command::upload::UploadLimits>,
+    pub attachment_upload_limits: Option<crate::app::state::upload::UploadLimits>,
     pub attachment_session_epoch: u64,
 }
 

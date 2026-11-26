@@ -5,11 +5,10 @@ use crate::app::runtime::{
     send_client_tool_error, send_client_tool_success, send_pick_response, send_prompt_response,
     send_run_cancel, send_shell_detach, send_tool_call, RuntimeTx,
 };
+use crate::app::state::input::attachments::token_span_at;
 use crate::app::state::{InputState, LogKind, SelectionHitTest};
-use crate::app::util::attachments::token_span_at;
 use crate::app::util::{sanitize_paste, write_clipboard_text};
 use crate::app::{AppState, PromptDialogState};
-use crate::entry::terminal::{set_mouse_capture, TuiTerminal};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
@@ -164,7 +163,6 @@ pub(crate) fn handle_main_key(
     app: &mut AppState,
     key: KeyCode,
     modifiers: KeyModifiers,
-    terminal: &mut TuiTerminal,
     tx: &mut dyn RuntimeTx,
 ) -> bool {
     let now = Instant::now();
@@ -187,7 +185,6 @@ pub(crate) fn handle_main_key(
             if !app.mouse_capture_enabled {
                 app.clear_text_selection();
             }
-            set_mouse_capture(terminal, app.mouse_capture_enabled);
             true
         }
         (KeyCode::Char('h'), mods) if mods.contains(KeyModifiers::ALT) => {
@@ -398,49 +395,6 @@ fn handle_typed_clipboard_paste(app: &mut AppState) -> bool {
         app.start_clipboard_import();
     }
     true
-}
-
-#[cfg(test)]
-mod clipboard_input_tests {
-    use super::*;
-    use crate::app::util::attachments::make_attachment_token;
-
-    #[test]
-    fn attachment_tokens_are_atomic_cursor_and_delete_targets() {
-        let mut app = AppState::default();
-        let marker = make_attachment_token(&app.composer_nonce, "paste-1");
-        app.input.set_from(&format!("before{marker}after"));
-        app.input.cursor = "before".len() + marker.len();
-
-        assert!(handle_composer_edit(
-            &mut app,
-            KeyCode::Left,
-            KeyModifiers::NONE
-        ));
-        assert_eq!(app.input.cursor, "before".len());
-        assert!(handle_composer_edit(
-            &mut app,
-            KeyCode::Right,
-            KeyModifiers::NONE
-        ));
-        assert_eq!(app.input.cursor, "before".len() + marker.len());
-        assert!(handle_composer_edit(
-            &mut app,
-            KeyCode::Backspace,
-            KeyModifiers::NONE
-        ));
-        assert_eq!(app.input.current(), "beforeafter");
-    }
-
-    #[test]
-    fn terminal_path_and_file_uri_paste_remain_plain_text() {
-        let mut app = AppState::default();
-        let pasted = "file:///tmp/secret.txt\n/tmp/literal path";
-        assert!(handle_paste(&mut app, pasted));
-        assert_eq!(app.input.current(), pasted);
-        assert!(!app.has_pending_clipboard_import());
-        assert_eq!(app.referenced_attachment_count(), 0);
-    }
 }
 
 fn handle_prompt_key(
@@ -887,6 +841,49 @@ pub(crate) fn handle_non_main_key(
 }
 
 #[cfg(test)]
+mod clipboard_input_tests {
+    use super::*;
+    use crate::app::state::input::attachments::make_attachment_token;
+
+    #[test]
+    fn attachment_tokens_are_atomic_cursor_and_delete_targets() {
+        let mut app = AppState::default();
+        let marker = make_attachment_token(&app.composer_nonce, "paste-1");
+        app.input.set_from(&format!("before{marker}after"));
+        app.input.cursor = "before".len() + marker.len();
+
+        assert!(handle_composer_edit(
+            &mut app,
+            KeyCode::Left,
+            KeyModifiers::NONE
+        ));
+        assert_eq!(app.input.cursor, "before".len());
+        assert!(handle_composer_edit(
+            &mut app,
+            KeyCode::Right,
+            KeyModifiers::NONE
+        ));
+        assert_eq!(app.input.cursor, "before".len() + marker.len());
+        assert!(handle_composer_edit(
+            &mut app,
+            KeyCode::Backspace,
+            KeyModifiers::NONE
+        ));
+        assert_eq!(app.input.current(), "beforeafter");
+    }
+
+    #[test]
+    fn terminal_path_and_file_uri_paste_remain_plain_text() {
+        let mut app = AppState::default();
+        let pasted = "file:///tmp/secret.txt\n/tmp/literal path";
+        assert!(handle_paste(&mut app, pasted));
+        assert_eq!(app.input.current(), pasted);
+        assert!(!app.has_pending_clipboard_import());
+        assert_eq!(app.referenced_attachment_count(), 0);
+    }
+}
+
+#[cfg(test)]
 mod shell_rule_tests {
     use super::*;
     use crate::app::handlers::runtime_response::process_runtime_messages;
@@ -1298,10 +1295,13 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
             .flat_map(|line| &line.spans)
             .any(|span| span.text.contains("Update mode saved: auto.")));
         use crate::app::startup_confirmations::{self, StartupConfirmations};
-        assert!(!StartupConfirmations::from_ids("unknown").is_pending());
+        assert!(!StartupConfirmations::from_list(&["unknown".to_string()]).is_pending());
         for key in [KeyCode::Esc, KeyCode::Enter] {
-            app.startup_confirmations =
-                StartupConfirmations::from_ids("unknown,update-mode,update-mode");
+            app.startup_confirmations = StartupConfirmations::from_list(&[
+                "unknown".to_string(),
+                "update-mode".to_string(),
+                "update-mode".to_string(),
+            ]);
             app.rpc_pending.initialize_id = Some("initialize".into());
             assert!(!startup_confirmations::poll(&mut app));
             app.rpc_pending.initialize_id = None;
@@ -1565,5 +1565,40 @@ mod mouse_tests {
             false,
         ));
         assert_eq!(app.scroll_from_bottom, 3);
+    }
+
+    #[test]
+    fn f2_toggles_mouse_capture_and_clears_owned_selection() {
+        use super::handle_main_key;
+        use crossterm::event::KeyCode;
+
+        let mut app = selectable_app();
+        app.mouse_capture_enabled = true;
+        assert!(handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
+            true,
+            false,
+        ));
+        assert!(app.text_selection.is_dragging());
+
+        let mut tx = crate::app::runtime::MockRuntimeTx::default();
+        assert!(handle_main_key(
+            &mut app,
+            KeyCode::F(2),
+            KeyModifiers::NONE,
+            &mut tx
+        ));
+        assert!(!app.mouse_capture_enabled);
+        assert!(!app.text_selection.is_dragging());
+        assert!(app.text_selection.normalized_range().is_none());
+
+        assert!(handle_main_key(
+            &mut app,
+            KeyCode::F(2),
+            KeyModifiers::NONE,
+            &mut tx
+        ));
+        assert!(app.mouse_capture_enabled);
     }
 }

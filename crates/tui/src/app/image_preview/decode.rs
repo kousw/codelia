@@ -1,3 +1,7 @@
+// `super::image_limits` is wired in both `app::image_preview` and
+// `examples/image-preview/source.rs` (`#[path = ...]`) so this decoder stays
+// decoupled from crate paths.
+use super::image_limits::{validate_dimensions, MAX_DIMENSION};
 use std::{
     fs::{self, OpenOptions},
     io::{self, Cursor, Read},
@@ -7,8 +11,6 @@ use std::{
 use image::{DynamicImage, ImageFormat, ImageReader};
 
 pub(crate) const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_DIMENSION: u32 = 12_288;
-const MAX_PIXELS: u64 = 20_000_000;
 const MAX_DECODE_BYTES: u64 = 128 * 1024 * 1024;
 const PREVIEW_DIMENSION: u32 = 1024;
 
@@ -77,20 +79,6 @@ fn reader(bytes: &[u8]) -> io::Result<ImageReader<Cursor<&[u8]>>> {
     limits.max_alloc = Some(MAX_DECODE_BYTES);
     reader.limits(limits);
     Ok(reader)
-}
-
-pub(crate) fn validate_dimensions(width: u32, height: u32) -> io::Result<()> {
-    if width == 0
-        || height == 0
-        || width > MAX_DIMENSION
-        || height > MAX_DIMENSION
-        || u64::from(width) * u64::from(height) > MAX_PIXELS
-    {
-        return Err(io::Error::other(
-            "Image dimensions exceed the preview limit (12288 px per side, 20 MP)",
-        ));
-    }
-    Ok(())
 }
 
 pub(crate) fn decode(bytes: &[u8]) -> io::Result<(DynamicImage, u32, u32)> {

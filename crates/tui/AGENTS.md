@@ -44,7 +44,8 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - `src/app/mod.rs`: app state root (`AppState`) and orchestration helpers.
 - `src/app/state/`: input/log/ui/render state buckets.
 - `src/app/view/`: Ratatui UI composition.
-- `src/app/render/`: terminal-facing side effects (inline history insertion/cursor sync).
+- `src/app/frame.rs`: bounded draw, inline history insertion, and viewport restoration.
+- `src/app/render/`: inline history insertion and cursor sync.
 - `src/app/handlers/`: key flows and command/panel/confirm handling.
 - `src/app/runtime/`: runtime process adapter and protocol parser.
 - `src/app/util/`: shared helpers (text, attachments, clipboard).

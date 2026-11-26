@@ -4,9 +4,11 @@ mod event_loop;
 use codelia_protocol as protocol;
 
 use crate::app::runtime::{
-    send_initialize, shutdown_runtime, spawn_runtime, RuntimeTx, StdioRuntimeTx,
+    send_initialize, shutdown_runtime, spawn_runtime, RuntimeLaunchConfig, RuntimeTx,
+    StdioRuntimeTx,
 };
 use crate::app::view::desired_height;
+use crate::entry::launch_context::launch_context;
 use crate::entry::run_loop::{run_tui_loop, RunLoopTerminal};
 
 use crate::entry::bootstrap::{
@@ -52,7 +54,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             terminal_selection.requested, terminal_selection.resolved, terminal_selection.reason
         );
     }
+    let runtime_launch = launch_context()
+        .runtime
+        .as_ref()
+        .map(|runtime| RuntimeLaunchConfig {
+            command: &runtime.command,
+            args: &runtime.args,
+        });
     let (mut child, mut child_stdin, rx) = spawn_runtime(
+        runtime_launch.as_ref(),
         sandbox_mode
             .as_ref()
             .map(|(flag, mode)| (*flag, mode.as_str())),

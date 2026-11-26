@@ -146,7 +146,7 @@ Use `debug_assert!` for these invariants in debug builds.
 3. Follow-up redraw
 - If any lines were inserted this tick, set `sync_phase = InsertedNeedsRedraw` and force exactly one redraw.
 - Restore the viewport immediately in the same tick, before the next input poll. The LF-based Ratatui insertion path clears the viewport; leaving the redraw until the next tick causes a visible blank interval.
-- `render/frame.rs::draw_frame` bounds a cycle to one insertion pass and two draws. If the restoring draw introduces overflow through a resize/layout change, leave it in `NeedsInsert` and schedule another cycle. Do not insert again after the final restoring draw or loop until the terminal stops resizing.
+- `app/frame.rs::draw_frame` bounds a cycle to one insertion pass and two draws. If the restoring draw introduces overflow through a resize/layout change, leave it in `NeedsInsert` and schedule another cycle. Do not insert again after the final restoring draw or loop until the terminal stops resizing.
 
 4. Clear/reset behavior
 - On explicit log reset, reset both `committed` and `inserted_until` to zero and clear cached wrap metadata.

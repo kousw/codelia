@@ -1,10 +1,10 @@
+use crate::app::frame::draw_frame;
 use crate::app::handlers::confirm::activate_pending_confirm_dialog;
-use crate::app::render::frame::draw_frame;
 use crate::app::runtime::RuntimeTx;
 use crate::app::state::LogKind;
 use crate::app::util::sample_memory;
 use crate::app::AppState;
-use crate::entry::terminal::{with_synchronized_update, TuiTerminal};
+use crate::entry::terminal::{set_mouse_capture, with_synchronized_update, TuiTerminal};
 use crate::entry::terminal_mode::ResolvedTerminalMode;
 use crate::event_loop::input::{
     apply_redraw, blocks_input_paste, handle_ctrl_c, handle_main_key, handle_mouse_event,
@@ -72,6 +72,7 @@ pub(crate) fn run_tui_loop(
     } = terminal_session;
     let mut needs_redraw = true;
     let mut should_exit = false;
+    let mut applied_mouse_capture = app.mouse_capture_enabled;
     let mut update_choice_size = None;
     let key_debug = std::env::var("CODELIA_TUI_KEY_DEBUG").ok().as_deref() == Some("1");
     let mut last_ctrl_c_at: Option<Instant> = None;
@@ -116,6 +117,11 @@ pub(crate) fn run_tui_loop(
             app.push_line(LogKind::Runtime, format!("runtime exited: {}", status));
             needs_redraw = true;
             should_exit = true;
+        }
+
+        if app.mouse_capture_enabled != applied_mouse_capture {
+            set_mouse_capture(terminal, app.mouse_capture_enabled);
+            applied_mouse_capture = app.mouse_capture_enabled;
         }
 
         // Paint runtime dialogs and the current selection before routing another key.
@@ -194,11 +200,12 @@ pub(crate) fn run_tui_loop(
                     }
                     if let Some(redraw) = handle_non_main_key(app, key.code, key.modifiers, tx) {
                         apply_redraw(&mut needs_redraw, redraw);
-                    } else if !startup_pending
-                        && handle_main_key(app, key.code, key.modifiers, terminal, tx)
-                    {
-                        app.prune_unreferenced_attachments();
-                        needs_redraw = true;
+                    } else if !startup_pending {
+                        let redraw = handle_main_key(app, key.code, key.modifiers, tx);
+                        if redraw {
+                            app.prune_unreferenced_attachments();
+                            needs_redraw = true;
+                        }
                     }
                 }
                 Event::Paste(text) => {

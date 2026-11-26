@@ -186,7 +186,7 @@ mod tests {
     };
     use crate::app::handlers::runtime_response::handle_run_start_response;
     use crate::app::runtime::{MockRuntimeTx, RpcResponse};
-    use crate::app::util::attachments::make_attachment_token;
+    use crate::app::state::input::attachments::make_attachment_token;
     use crate::app::{
         AppState, PendingPromptRun, PendingShellResult, PROMPT_DISPATCH_MAX_ATTEMPTS,
     };
@@ -393,7 +393,7 @@ mod tests {
             let attachment_id = app.next_image_attachment_id();
             app.add_pending_image_attachment(
                 attachment_id.clone(),
-                crate::app::PendingImageAttachment {
+                crate::app::state::PendingImageAttachment {
                     data_url: "data:image/png;base64,AAAA".to_string(),
                     width: 10,
                     height: 10,

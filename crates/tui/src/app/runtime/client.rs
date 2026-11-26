@@ -21,11 +21,18 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 /// Synchronous runtime RPC transport and request ID allocator.
+///
+/// An error returned from `send_line` means delivery outcome is unknown (for example,
+/// buffered bytes may remain in `BufWriter` after a failed flush); callers must treat
+/// state as uncertain rather than retrying blindly.
 pub(crate) trait RuntimeTx {
     fn next_id(&mut self) -> String;
     fn send_line(&mut self, line: &str) -> io::Result<()>;
 }
 
+/// Stdio JSON-RPC transport backed by a single runtime child's stdin.
+/// Create one instance per runtime connection so monotonically increasing IDs
+/// stay unique for the connection lifetime.
 pub(crate) struct StdioRuntimeTx<'a> {
     stdin: &'a mut BufWriter<ChildStdin>,
     rpc_id: u64,
@@ -46,43 +53,6 @@ impl RuntimeTx for StdioRuntimeTx<'_> {
     fn send_line(&mut self, line: &str) -> io::Result<()> {
         self.stdin.write_all(line.as_bytes())?;
         self.stdin.flush()
-    }
-}
-
-#[cfg(test)]
-#[derive(Default)]
-pub(crate) struct MockRuntimeTx {
-    rpc_id: u64,
-    id_prefix: String,
-    pub(crate) sent: Vec<Value>,
-    pub(crate) fail_next: Option<io::ErrorKind>,
-}
-
-#[cfg(test)]
-impl MockRuntimeTx {
-    pub(crate) fn with_id_prefix(prefix: &str) -> Self {
-        Self {
-            id_prefix: prefix.to_owned(),
-            ..Self::default()
-        }
-    }
-}
-
-#[cfg(test)]
-impl RuntimeTx for MockRuntimeTx {
-    fn next_id(&mut self) -> String {
-        self.rpc_id += 1;
-        format!("{}{}", self.id_prefix, self.rpc_id)
-    }
-
-    fn send_line(&mut self, line: &str) -> io::Result<()> {
-        if let Some(kind) = self.fail_next.take() {
-            return Err(kind.into());
-        }
-        let payload: Value = serde_json::from_str(line.trim_end())
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        self.sent.push(payload);
-        Ok(())
     }
 }
 
@@ -364,11 +334,16 @@ fn spawn_reader<T: std::io::Read + Send + 'static>(
     });
 }
 
+pub(crate) struct RuntimeLaunchConfig<'a> {
+    pub(crate) command: &'a str,
+    pub(crate) args: &'a [String],
+}
+
 /// `CODELIA_RUNTIME_CMD` / `_ARGS` developer override first (including values
 /// set by a `CODELIA_TUI_CMD` wrapper), then the launcher context's bundled
 /// runtime, then the source checkout default.
 pub(crate) fn resolve_runtime_command(
-    launch: Option<&crate::entry::launch_context::RuntimeLaunch>,
+    launch: Option<&RuntimeLaunchConfig<'_>>,
     env_cmd: Option<String>,
     env_args: Option<String>,
 ) -> (String, Vec<String>) {
@@ -380,7 +355,7 @@ pub(crate) fn resolve_runtime_command(
         return (runtime_cmd, runtime_args);
     }
     if let Some(runtime) = launch {
-        return (runtime.command.clone(), runtime.args.clone());
+        return (runtime.command.to_owned(), runtime.args.to_vec());
     }
     (
         "bun".to_string(),
@@ -388,11 +363,12 @@ pub(crate) fn resolve_runtime_command(
     )
 }
 
-pub fn spawn_runtime(sandbox_mode: Option<(&str, &str)>) -> RuntimeSpawnResult {
+pub(crate) fn spawn_runtime(
+    launch: Option<&RuntimeLaunchConfig<'_>>,
+    sandbox_mode: Option<(&str, &str)>,
+) -> RuntimeSpawnResult {
     let (runtime_cmd, mut runtime_args) = resolve_runtime_command(
-        crate::entry::launch_context::launch_context()
-            .runtime
-            .as_ref(),
+        launch,
         env::var("CODELIA_RUNTIME_CMD").ok(),
         env::var("CODELIA_RUNTIME_ARGS").ok(),
     );
@@ -574,7 +550,7 @@ pub fn send_run_start(
 pub(crate) fn send_goal_continue(
     tx: &mut dyn RuntimeTx,
     id: &str,
-    offer: &crate::app::goal::GoalOffer,
+    offer: &crate::protocol::GoalOffer,
 ) -> std::io::Result<()> {
     let params = GoalContinueParams {
         session_id: offer.session_id.clone(),
@@ -895,19 +871,60 @@ pub fn send_session_open(
 }
 
 #[cfg(test)]
+#[derive(Default)]
+pub(crate) struct MockRuntimeTx {
+    rpc_id: u64,
+    id_prefix: String,
+    pub(crate) sent: Vec<Value>,
+    pub(crate) fail_next: Option<io::ErrorKind>,
+}
+
+#[cfg(test)]
+impl MockRuntimeTx {
+    pub(crate) fn with_id_prefix(prefix: &str) -> Self {
+        Self {
+            id_prefix: prefix.to_owned(),
+            ..Self::default()
+        }
+    }
+}
+
+#[cfg(test)]
+impl RuntimeTx for MockRuntimeTx {
+    fn next_id(&mut self) -> String {
+        self.rpc_id += 1;
+        format!("{}{}", self.id_prefix, self.rpc_id)
+    }
+
+    fn send_line(&mut self, line: &str) -> io::Result<()> {
+        if let Some(kind) = self.fail_next.take() {
+            return Err(kind.into());
+        }
+        assert!(
+            line.ends_with('\n') && !line[..line.len() - 1].contains('\n'),
+            "RPC wire frame must end with a single trailing newline: {line:?}"
+        );
+        let payload: Value = serde_json::from_str(&line[..line.len() - 1])
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        self.sent.push(payload);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::{
         initialize_params, resolve_runtime_command, should_include_tui_client_tools_from_values,
-        shutdown_runtime, split_args, tui_client_tools, ASK_USER_CHOICE_TIMEOUT_MS,
+        shutdown_runtime, split_args, tui_client_tools, RuntimeLaunchConfig,
+        ASK_USER_CHOICE_TIMEOUT_MS,
     };
-    use crate::entry::launch_context::RuntimeLaunch;
     use serde_json::json;
 
     #[test]
     fn runtime_command_prefers_env_override_then_launcher_context() {
-        let launch = RuntimeLaunch {
-            command: "/usr/bin/node".to_owned(),
-            args: vec!["/opt/O'Neill runtime/index.cjs".to_owned()],
+        let launch = RuntimeLaunchConfig {
+            command: "/usr/bin/node",
+            args: &["/opt/O'Neill runtime/index.cjs".to_owned()],
         };
         assert_eq!(
             resolve_runtime_command(Some(&launch), None, None),

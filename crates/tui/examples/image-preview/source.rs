@@ -3,10 +3,14 @@ use std::{io, path::Path};
 
 #[path = "../../src/app/image_preview/decode.rs"]
 mod decoder;
+#[path = "../../src/app/util/image.rs"]
+mod image_limits;
 
 pub(super) use decoder::safe_label;
 #[cfg(test)]
-pub(super) use decoder::{decode, validate_dimensions, MAX_FILE_BYTES};
+pub(super) use decoder::{decode, MAX_FILE_BYTES};
+#[cfg(test)]
+pub(super) use image_limits::validate_dimensions;
 
 pub(super) fn load(path: Option<&Path>) -> io::Result<(DynamicImage, String)> {
     match path {

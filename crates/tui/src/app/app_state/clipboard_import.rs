@@ -1,8 +1,10 @@
 use super::{new_composer_nonce, AppState};
+use crate::app::state::input::attachments::{
+    make_attachment_token, referenced_attachment_ids, token_span, token_spans,
+};
 use crate::app::state::LogKind;
 use crate::app::util::attachments::{
-    make_attachment_token, referenced_attachment_ids, token_span, token_spans, ImportedBatch,
-    IMPORT_ID_PREFIX, MAX_ATTACHMENT_COUNT, MAX_IMAGE_COUNT, MAX_MESSAGE_BYTES,
+    ImportedBatch, IMPORT_ID_PREFIX, MAX_ATTACHMENT_COUNT, MAX_IMAGE_COUNT, MAX_MESSAGE_BYTES,
 };
 use std::collections::HashSet;
 
@@ -191,9 +193,8 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::util::attachments::{
-        render_input_text_with_attachment_labels, StagedAttachment,
-    };
+    use crate::app::state::input::attachments::render_input_text_with_attachment_labels;
+    use crate::app::util::attachments::StagedAttachment;
 
     fn complete(app: &mut AppState, marker: &str, name: &str) {
         let file =

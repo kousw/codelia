@@ -8,7 +8,7 @@
 - `mod.rs`: shared loop-local aliases (`RuntimeStdin`, `RuntimeReceiver`).
 
 ## Dependency Direction
-- `event_loop/input.rs` is currently treated as Layer 2 application logic and may depend on `app/*`.
+- `event_loop/input.rs` handles application input and depends on `app/*`. F2 updates mouse-capture state here. `entry/run_loop.rs` applies that change to the terminal.
 - `event_loop/runtime.rs` should remain a thin wiring boundary only.
 - `event_loop/*` must not depend on view internals beyond public draw/render APIs already used by `main.rs`.
 - Runtime response handling implementation lives under `app/handlers/runtime_response/*`.

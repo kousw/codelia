@@ -1,5 +1,5 @@
 use super::handlers::command::can_dispatch_prompt_now;
-use super::runtime::{send_goal_continue, send_request, RpcResponse, RuntimeTx};
+use super::runtime::{send_goal_continue, send_request, GoalNotification, RpcResponse, RuntimeTx};
 use super::state::LogKind;
 use super::util::sanitize_paste;
 use super::AppState;
@@ -10,17 +10,9 @@ const ACK_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) use crate::protocol::GoalSnapshot;
 use crate::protocol::{
-    methods, GoalGetParams, GoalPauseParams, GoalSetParams, GoalStatus, GoalTarget, Patch,
+    methods, GoalGetParams, GoalOffer, GoalPauseParams, GoalSetParams, GoalStatus, GoalTarget,
+    Patch,
 };
-
-/// The `goal.ready` continuation offer.
-pub(crate) use crate::protocol::GoalOffer;
-
-#[derive(Debug)]
-pub(crate) enum GoalNotification {
-    Updated(GoalSnapshot),
-    Ready(GoalOffer),
-}
 
 #[derive(Debug)]
 enum Request {
@@ -665,5 +657,37 @@ mod tests {
         assert_eq!(app.runtime_info.active_run_id.as_deref(), Some("run"));
         assert!(app.goal.continuation.is_none());
         assert!(app.rpc_pending.run_start_id.is_none());
+    }
+
+    #[test]
+    fn goal_continue_send_failure_keeps_run_start_id_and_schedules_immediate_check() {
+        let mut app = AppState::default();
+        app.goal.supported = true;
+        app.runtime_info.session_id = Some("session".into());
+        app.goal.synced_session = Some("session".into());
+        app.goal.offer = Some(
+            serde_json::from_value(json!({
+                "session_id": "session",
+                "goal_id": "goal",
+                "revision": 1,
+                "continuation_id": "continuation",
+            }))
+            .unwrap(),
+        );
+        let mut tx = crate::app::runtime::MockRuntimeTx::default();
+        tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
+        let now = Instant::now();
+
+        assert!(tick(&mut app, &mut tx, now));
+        assert_eq!(app.rpc_pending.run_start_id.as_deref(), Some("1"));
+        assert_eq!(app.run_status.as_deref(), Some("starting"));
+        let continuation = app
+            .goal
+            .continuation
+            .as_ref()
+            .expect("continuation kept for verification");
+        assert_eq!(continuation.request_id, "1");
+        assert_eq!(continuation.check_at, now);
+        assert!(tx.sent.is_empty());
     }
 }

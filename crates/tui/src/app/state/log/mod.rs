@@ -1,3 +1,7 @@
+mod user_message;
+
+pub(crate) use user_message::{steer_message_lines, user_message_lines};
+
 use crate::app::util::text::sanitize_for_tui;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,3 +1,7 @@
+pub(crate) mod frame;
+#[cfg(test)]
+mod frame_tests;
+
 pub(crate) mod goal;
 pub(crate) mod handlers;
 pub(crate) mod image_preview;
@@ -18,11 +22,11 @@ mod app_state;
 pub(crate) use crate::app::state::{
     ConfirmDialogState, ConfirmMode, ConfirmPhase, ContextPanelState, CursorPhase, LaneListItem,
     LaneListPanelState, ModelListMode, ModelListPanelState, ModelListSubmitAction,
-    ModelListViewMode, ModelPickerState, ModelSetScope, PendingImageAttachment, PickDialogItem,
-    PickDialogState, PromptDialogState, ProviderPickerState, ReasoningPickerState,
-    SelectionProjectionId, SelectionRange, SessionListPanelState, SkillsListItemState,
-    SkillsListPanelState, SkillsScopeFilter, StatusLineMode, SyncPhase, ThemeListPanelState,
-    TranscriptHitMap, WrappedLogCache, WrappedLogRow,
+    ModelListViewMode, ModelPickerState, ModelSetScope, PickDialogItem, PickDialogState,
+    PromptDialogState, ProviderPickerState, ReasoningPickerState, SelectionProjectionId,
+    SelectionRange, SessionListPanelState, SkillsListItemState, SkillsListPanelState,
+    SkillsScopeFilter, StatusLineMode, SyncPhase, ThemeListPanelState, TranscriptHitMap,
+    WrappedLogCache, WrappedLogRow,
 };
 pub(crate) use app_state::{
     ActiveRunSubmitMode, AppState, ErrorDetailMode, InFlightSteer, LogComponentSpan, ModelFastMode,

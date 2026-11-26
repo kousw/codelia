@@ -41,15 +41,9 @@ pub(crate) struct StartupConfirmations {
 }
 
 impl StartupConfirmations {
-    pub(crate) fn from_launch_context(
-        context: &crate::entry::launch_context::LaunchContext,
-    ) -> Self {
-        Self::from_ids(&context.startup_confirmations.join(","))
-    }
-
-    pub(crate) fn from_ids(ids: &str) -> Self {
+    pub(crate) fn from_list(ids: &[String]) -> Self {
         let mut phase = Self::default();
-        for item in ids.split(',').filter_map(StartupConfirmation::from_id) {
+        for item in ids.iter().filter_map(|id| StartupConfirmation::from_id(id)) {
             if !phase.queue.contains(&item) {
                 phase.queue.push_back(item);
             }

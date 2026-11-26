@@ -211,7 +211,7 @@ fn apply_initialize_result(app: &mut AppState, result: &InitializeResult) {
     info.attachment_upload_limits = caps
         .attachment_upload_limits
         .as_ref()
-        .and_then(crate::app::handlers::command::upload::UploadLimits::from_wire);
+        .and_then(crate::app::state::upload::UploadLimits::from_wire);
     info.supports_attachment_upload =
         caps.supports_attachment_upload == Some(true) && info.attachment_upload_limits.is_some();
     info.supports_run_steer = caps.supports_run_steer.unwrap_or(false);

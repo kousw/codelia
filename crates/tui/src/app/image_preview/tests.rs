@@ -1,7 +1,6 @@
 use super::*;
-use crate::app::{
-    handlers, render::frame::draw_frame, state::LogKind, AppState, PendingImageAttachment,
-};
+use crate::app::state::{LogKind, PendingImageAttachment};
+use crate::app::{frame::draw_frame, handlers, AppState};
 use base64::Engine;
 use image::{DynamicImage, ImageFormat, RgbaImage};
 use ratatui::{backend::TestBackend, Terminal};
@@ -69,7 +68,7 @@ fn bounded_decoder_rejects_invalid_input_and_never_upscales_small_sources() {
     let (image, _, _) = decode::decode(&png(1100, 550)).unwrap();
     assert_eq!((image.width(), image.height()), (1024, 512));
     for dimensions in [(0, 1), (1, 0), (12_289, 1), (1, 12_289), (5000, 5000)] {
-        assert!(decode::validate_dimensions(dimensions.0, dimensions.1).is_err());
+        assert!(super::image_limits::validate_dimensions(dimensions.0, dimensions.1).is_err());
     }
     assert!(decode::decode(b"not an image").is_err());
     assert!(decode::decode(&vec![0; decode::MAX_FILE_BYTES as usize + 1]).is_err());
@@ -259,7 +258,8 @@ fn composer_preview_uses_last_referenced_image_without_consuming_attachments() {
                 encoded_bytes: 100,
             },
         );
-        let token = crate::app::util::attachments::make_attachment_token(&app.composer_nonce, id);
+        let token =
+            crate::app::state::input::attachments::make_attachment_token(&app.composer_nonce, id);
         app.input.insert_str(&token);
     }
     let input = app.input.current();

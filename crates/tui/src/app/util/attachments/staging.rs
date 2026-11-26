@@ -216,7 +216,7 @@ fn describe(bytes: &[u8]) -> io::Result<(&'static str, Option<(u32, u32)>)> {
         limits.max_alloc = Some(128 * 1024 * 1024);
         reader.limits(limits);
         let (width, height) = reader.into_dimensions().map_err(io::Error::other)?;
-        crate::app::image_preview::validate_dimensions(width, height)?;
+        crate::app::util::image::validate_dimensions(width, height)?;
         Ok((media_type, Some((width, height))))
     } else {
         let is_text = format.is_none()

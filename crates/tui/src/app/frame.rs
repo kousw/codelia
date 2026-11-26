@@ -1,4 +1,4 @@
-use super::inline::apply_terminal_effects;
+use super::render::inline::apply_terminal_effects;
 use crate::app::view::draw_ui;
 use crate::app::{AppState, SyncPhase};
 use ratatui::backend::Backend;

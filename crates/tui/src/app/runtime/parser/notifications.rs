@@ -3,8 +3,9 @@
 //! happens in `typed_output` (`parser.rs`).
 use super::common::{format_percent, format_u64_with_commas};
 use super::helpers::summary_and_detail_line;
-use super::types::{ParsedOutput, UiConfirmRequest, UiPickItem, UiPickRequest, UiPromptRequest};
-use crate::app::goal::GoalNotification;
+use super::types::{
+    GoalNotification, ParsedOutput, UiConfirmRequest, UiPickItem, UiPickRequest, UiPromptRequest,
+};
 use crate::app::state::LogKind;
 use crate::protocol::{
     GoalOffer, GoalSnapshot, LlmCallDiagnostics, RunContextNotify, RunDiagnosticsNotify,

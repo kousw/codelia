@@ -106,12 +106,7 @@ pub(crate) struct LauncherPaths {
 }
 
 impl LauncherPaths {
-    pub(crate) fn from_launch_context(
-        context: &crate::entry::launch_context::LaunchContext,
-    ) -> Option<Self> {
-        let control = context.update_control.as_ref()?;
-        let node = PathBuf::from(&control.node);
-        let entry = PathBuf::from(&control.entry);
+    pub(crate) fn new(node: PathBuf, entry: PathBuf) -> Option<Self> {
         (node.is_absolute() && entry.is_absolute()).then_some(Self { node, entry })
     }
 }
@@ -328,5 +323,26 @@ fn mode_picker(id: &str, title: &str, message: String, selected: Mode) -> PickDi
         review_offset: None,
         shell_rule_picker: None,
         local_update_picker: true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LauncherPaths;
+    use std::path::PathBuf;
+
+    #[test]
+    fn launcher_paths_require_absolute_node_and_entry() {
+        assert!(
+            LauncherPaths::new(PathBuf::from("node"), PathBuf::from("/abs/entry.js")).is_none()
+        );
+        assert!(
+            LauncherPaths::new(PathBuf::from("/usr/bin/node"), PathBuf::from("entry.js")).is_none()
+        );
+        let valid = LauncherPaths::new(
+            PathBuf::from("/usr/bin/node"),
+            PathBuf::from("/opt/codelia/cli.js"),
+        );
+        assert!(valid.is_some());
     }
 }

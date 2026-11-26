@@ -295,7 +295,7 @@ pub(super) fn agent_event_output(
             // The renderer takes JSON derived from the decoded content.
             let content = serde_json::to_value(&event.content).ok();
             ParsedOutput {
-                lines: crate::app::util::user_message::steer_message_lines(content.as_ref()),
+                lines: crate::app::state::log::steer_message_lines(content.as_ref()),
                 applied_steer_id: (!replayed).then_some(event.steer_id),
                 applied_steer_client_id: if replayed {
                     None

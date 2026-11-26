@@ -4,7 +4,9 @@ pub(crate) mod render;
 pub(crate) mod selection;
 pub(crate) mod stream_preview;
 pub(crate) mod ui;
+pub(crate) mod upload;
 
+pub(crate) use crate::app::util::image::PendingImageAttachment;
 pub(crate) use input::InputState;
 pub(crate) use log::{LogColor, LogKind, LogLine, LogSpan, LogTone};
 pub(crate) use render::{
@@ -19,8 +21,8 @@ pub(crate) use ui::{
     complete_slash_command, is_known_command, parse_theme_name, skill_suggestion_rows,
     theme_options, unknown_command_message, ConfirmDialogState, ConfirmMode, ContextPanelState,
     LaneListItem, LaneListPanelState, ModelListMode, ModelListPanelState, ModelListSubmitAction,
-    ModelListViewMode, ModelPickerState, ModelSetScope, PendingImageAttachment, PickDialogItem,
-    PickDialogState, PromptDialogState, ProviderPickerState, ReasoningPickerState,
-    SessionListPanelState, ShellRulePicker, SkillsListItemState, SkillsListPanelState,
-    SkillsScopeFilter, StatusLineMode, ThemeListPanelState, ThemeName,
+    ModelListViewMode, ModelPickerState, ModelSetScope, PickDialogItem, PickDialogState,
+    PromptDialogState, ProviderPickerState, ReasoningPickerState, SessionListPanelState,
+    ShellRulePicker, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, StatusLineMode,
+    ThemeListPanelState, ThemeName,
 };

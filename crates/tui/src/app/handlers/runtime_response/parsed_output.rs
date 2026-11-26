@@ -458,7 +458,7 @@ pub(super) fn apply_parsed_output(
             applied_steer_position(app, &run_id, &steer_id, applied_steer_client_id.as_deref())
                 .and_then(|index| app.in_flight_steers.remove(index));
         if let Some(steer) = applied {
-            lines = crate::app::util::user_message::user_message_lines(
+            lines = crate::app::state::log::user_message_lines(
                 &steer.submission.display_text,
                 &steer.submission.image_descriptions,
             );

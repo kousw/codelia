@@ -1,4 +1,3 @@
-use crate::app::PendingImageAttachment;
 use arboard::{Clipboard, Error as ClipboardError};
 use base64::Engine;
 use serde_json::Value;
@@ -18,6 +17,8 @@ const MAX_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
 const WINDOWS_CLIPBOARD_TEXT_TIMEOUT: Duration = Duration::from_secs(2);
 const WINDOWS_CLIPBOARD_TEXT_SCRIPT: &str =
     "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())";
+
+pub(crate) use crate::app::util::image::PendingImageAttachment;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardTextBackend {
@@ -298,7 +299,7 @@ fn parse_windows_clipboard_image_json(
         .ok_or_else(|| {
             ClipboardImageError::Clipboard("missing height in PowerShell image payload".to_string())
         })?;
-    crate::app::image_preview::validate_dimensions(width, height)
+    crate::app::util::image::validate_dimensions(width, height)
         .map_err(|error| ClipboardImageError::Encode(error.to_string()))?;
     let base64_data = value.get("base64").and_then(Value::as_str).ok_or_else(|| {
         ClipboardImageError::Clipboard("missing base64 in PowerShell image payload".to_string())
@@ -494,7 +495,7 @@ fn read_native_bitmap(
         .map_err(|_| ClipboardImageError::Encode("Clipboard image width is too large".into()))?;
     let height = u32::try_from(image.height)
         .map_err(|_| ClipboardImageError::Encode("Clipboard image height is too large".into()))?;
-    crate::app::image_preview::validate_dimensions(width, height)
+    crate::app::util::image::validate_dimensions(width, height)
         .map_err(|error| ClipboardImageError::Encode(error.to_string()))?;
     let encoded = encode_png_rgba(width, height, image.bytes.as_ref(), max_bytes)?;
     let data_url = format!(

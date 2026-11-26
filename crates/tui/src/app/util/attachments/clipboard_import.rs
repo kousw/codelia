@@ -2,8 +2,7 @@ use super::staging::{
     file_label, StagedAttachment, MAX_ATTACHMENT_COUNT, MAX_IMAGE_BYTES, MAX_IMAGE_COUNT,
     MAX_MESSAGE_BYTES,
 };
-use crate::app::util::clipboard::{read_typed_clipboard, ClipboardSource};
-use crate::app::PendingImageAttachment;
+use crate::app::util::clipboard::{read_typed_clipboard, ClipboardSource, PendingImageAttachment};
 use std::io;
 use std::path::PathBuf;
 use std::sync::{

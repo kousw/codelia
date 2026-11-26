@@ -1,5 +1,5 @@
+use crate::app::state::input::attachments::render_input_with_attachment_labels;
 use crate::app::state::InputState;
-use crate::app::util::attachments::render_input_with_attachment_labels;
 use crate::app::util::text::{char_width, detect_continuation_prefix};
 use crate::app::AppState;
 use ratatui::layout::Rect;
