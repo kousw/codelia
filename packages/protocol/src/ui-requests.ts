@@ -59,6 +59,17 @@ export const UiPickRequestParamsSchema = z
 	.object({
 		/** Only set by a runtime that selects the structured approval path. */
 		approval: z.boolean().optional(),
+		/**
+		 * Set only with `approval: true` when allowing runs one parent shell
+		 * command outside the sandbox as the login user. Clients may require a
+		 * deliberate choice instead of a default action; older clients ignore it.
+		 */
+		escalation: z.enum(["unsandboxed"]).optional(),
+		/**
+		 * Set to `false` only with `escalation` when configured protected paths
+		 * are not enforced for that command. Omitted when none are configured.
+		 */
+		protected_paths_enforced: z.boolean().optional(),
 		message: z.string().optional(),
 		run_id: z.string().optional(),
 		title: z.string(),

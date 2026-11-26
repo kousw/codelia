@@ -1163,6 +1163,14 @@ export const createShellAuthorizer =
 				? JSON.stringify(input.reviewHistory)
 				: undefined,
 			reviewCoverageDiagnostic,
+			...(escalated
+				? {
+						escalation: "unsandboxed" as const,
+						...(extraProtectedPaths.length > 0
+							? { protectedPathsEnforced: false as const }
+							: {}),
+					}
+				: {}),
 			deduplicate: input.id !== undefined,
 			receiptScope: input.receiptScope,
 			...(profile === "development" &&

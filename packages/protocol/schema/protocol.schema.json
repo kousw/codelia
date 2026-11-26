@@ -7485,6 +7485,15 @@
 				"approval": {
 					"type": "boolean"
 				},
+				"escalation": {
+					"type": "string",
+					"enum": [
+						"unsandboxed"
+					]
+				},
+				"protected_paths_enforced": {
+					"type": "boolean"
+				},
 				"message": {
 					"type": "string"
 				},

@@ -163,9 +163,12 @@ export const runtimeApprovalDispatcher = (
 	const confirmation: ApprovalService = adapters.approvalService ?? {
 		available: () => !!state.uiCapabilities?.supports_structured_approval,
 		confirm: async (request, signal) => {
-			const unsandboxed = request.route.additional.some(
-				isUnsandboxedShellResource,
-			);
+			// Only the shell authorizer sets `escalation`; a host tool whose name
+			// resembles the unsandboxed resource must not inherit its labels.
+			const unsandboxed =
+				request.escalation === "unsandboxed" &&
+				request.subject === "shell" &&
+				request.route.additional.some(isUnsandboxedShellResource);
 			const labels = {
 				allow_once: unsandboxed
 					? "Run once (unsandboxed)"
@@ -222,14 +225,20 @@ export const runtimeApprovalDispatcher = (
 						request.shellStage === "rule"
 							? "Save this command allowance?"
 							: unsandboxed
-								? request.preview.includes(
-										"Configured protected paths are not enforced",
-									)
+								? request.protectedPathsEnforced === false
 									? "Approve unsandboxed shell? (protected paths not enforced)"
 									: "Approve unsandboxed shell?"
 								: `Approve ${request.subject}?`,
 					message: preview,
 					approval: true,
+					...(unsandboxed
+						? {
+								escalation: "unsandboxed" as const,
+								...(request.protectedPathsEnforced === false
+									? { protected_paths_enforced: false }
+									: {}),
+							}
+						: {}),
 					items: request.choices.map((choice) => ({
 						id: `${request.requestId}/${choice}`,
 						label: labels[choice],

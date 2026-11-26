@@ -110,6 +110,10 @@ export type Confirmation = Readonly<{
 	shellStage?: "initial" | "rule" | "unavailable";
 	reviewDiagnostic?: ReviewDiagnostic;
 	reviewWithheldForPrivacy?: boolean;
+	/** Set by the shell authorizer for a one-command unsandboxed launch. */
+	escalation?: "unsandboxed";
+	/** False when configured protected paths do not apply to an unsandboxed launch. */
+	protectedPathsEnforced?: false;
 }>;
 
 export type ApprovalService = {
@@ -303,6 +307,10 @@ export class ApprovalDispatcher {
 		/** Safe explanation for an enabled Auto approve request outside review coverage. */
 		reviewCoverageDiagnostic?: ReviewDiagnostic;
 		grantSession?: SessionGrant;
+		/** Set by the shell authorizer for a one-command unsandboxed launch. */
+		escalation?: "unsandboxed";
+		/** False when configured protected paths do not apply to an unsandboxed launch. */
+		protectedPathsEnforced?: false;
 		interactiveShell?: InteractiveShellConfirmation;
 		save?:
 			| {
@@ -643,6 +651,14 @@ export class ApprovalDispatcher {
 											: {}),
 										expiresAt: Date.now() + 120_000,
 										choices,
+										...(options.escalation === "unsandboxed"
+											? {
+													escalation: "unsandboxed" as const,
+													...(options.protectedPathsEnforced === false
+														? { protectedPathsEnforced: false as const }
+														: {}),
+												}
+											: {}),
 										...details,
 									},
 									signal,
