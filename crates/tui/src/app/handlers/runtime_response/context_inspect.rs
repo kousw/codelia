@@ -1,7 +1,7 @@
 use super::formatters::push_rpc_error;
 use super::panel_builders::format_context_file_row;
 use crate::app::runtime::RpcResponse;
-use crate::app::{AppState, ContextPanelState};
+use crate::app::{AppState, ContextPanelState, LocalPanel};
 use crate::protocol::{decode_result, methods, ContextInspectFile, ContextInspectResult};
 
 pub(super) fn handle_context_inspect_response(app: &mut AppState, response: RpcResponse) {
@@ -107,16 +107,10 @@ fn apply_context_inspect_result(app: &mut AppState, result: &ContextInspectResul
     } else {
         rows.push("unavailable".to_string());
     }
-    app.model_list_panel = None;
-    app.reasoning_picker = None;
-    app.session_list_panel = None;
-    app.lane_list_panel = None;
-    app.skills_list_panel = None;
-    app.theme_list_panel = None;
-    app.context_panel = Some(ContextPanelState {
+    app.overlays.local_panel = Some(LocalPanel::Context(ContextPanelState {
         title: "Context".to_string(),
         header: "snapshot".to_string(),
         rows,
         selected: 0,
-    });
+    }));
 }

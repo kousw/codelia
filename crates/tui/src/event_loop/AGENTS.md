@@ -19,6 +19,9 @@
 ## Notes
 - Keep `main.rs` as composition/orchestration root; move additional tick-loop branches here first.
 - Prefer pure helpers for formatting/parsing when possible; isolate side effects to runtime send calls and `AppState` mutation.
+- Route terminal paste through `AppState::paste_target` with the startup gate.
+  An uncovered prompt accepts text paste even during startup. Alt+V in that
+  prompt shows the composer-only file and image paste notice.
 - Route the full crossterm `MouseEvent` for owned transcript selection. Gate it
   on resolved alternate mode, mouse capture, a current hit map, and no modal
   owner; preserve wheel handling independently. Only an unmodified primary

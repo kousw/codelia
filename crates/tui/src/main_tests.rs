@@ -296,7 +296,9 @@ fn apply_lane_list_result_adds_new_lane_row() {
 
     apply_lane_list_result(&mut app, &payload);
 
-    let panel = app.lane_list_panel.expect("lane panel present");
+    let Some(crate::app::LocalPanel::LaneList(panel)) = app.overlays.local_panel else {
+        panic!("lane panel expected");
+    };
     assert_eq!(panel.rows.len(), 2);
     assert_eq!(panel.rows[1], "+ New lane");
 }

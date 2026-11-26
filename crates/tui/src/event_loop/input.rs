@@ -1,5 +1,5 @@
-use crate::app::handlers;
 use crate::app::handlers::confirm::handle_confirm_key;
+use crate::app::handlers::{self, panels};
 use crate::app::log_wrap::selected_text_for_range;
 use crate::app::runtime::{
     send_client_tool_error, send_client_tool_success, send_pick_response, send_prompt_response,
@@ -9,8 +9,8 @@ use crate::app::state::input::attachments::token_span_at;
 use crate::app::state::{InputState, LogKind, SelectionHitTest};
 use crate::app::util::{sanitize_paste, write_clipboard_text};
 use crate::app::{
-    AppState, ConfirmSlot, PendingRpc, PendingRpcSlot, PromptDialogState, PromptSlot,
-    RuntimeDialogRef,
+    AppState, ConfirmSlot, LocalPanel, PasteTarget, PendingRpc, PendingRpcSlot, PromptDialogState,
+    PromptSlot, RuntimeDialogRef,
 };
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use serde_json::{json, Value};
@@ -361,46 +361,35 @@ fn handle_composer_edit(app: &mut AppState, key: KeyCode, modifiers: KeyModifier
     edited
 }
 
-pub(crate) fn handle_paste(app: &mut AppState, text: &str) -> bool {
+pub(crate) fn handle_paste(app: &mut AppState, text: &str, startup_pending: bool) -> bool {
+    let input = match app.paste_target(startup_pending) {
+        PasteTarget::Blocked => return false,
+        PasteTarget::RuntimePrompt => {
+            let Some(prompt) = &mut app.overlays.runtime_dialogs.prompt else {
+                return false;
+            };
+            &mut prompt.input
+        }
+        PasteTarget::Composer => &mut app.input,
+    };
     let cleaned = sanitize_paste(text);
     if cleaned.is_empty() {
         return false;
     }
-    if blocks_composer_paste(app) {
-        return false;
-    }
-    if let Some(prompt) = &mut app.runtime_dialogs.prompt {
-        prompt.input.insert_str(&cleaned);
-    } else {
-        app.input.insert_str(&cleaned);
-    }
+    input.insert_str(&cleaned);
     true
 }
 
-pub(crate) fn blocks_input_paste(app: &AppState) -> bool {
-    app.image_preview.is_open()
-        || app.runtime_dialogs.confirm.is_some()
-        || app.runtime_dialogs.pick.is_some()
-        || app.queue_picker_focused()
-        || app.reasoning_picker.is_some()
-        || app.lane_list_panel.is_some()
-}
-
-fn blocks_composer_paste(app: &AppState) -> bool {
-    blocks_input_paste(app) || app.skills_list_panel.is_some() || app.theme_list_panel.is_some()
-}
-
 fn handle_typed_clipboard_paste(app: &mut AppState) -> bool {
-    if blocks_composer_paste(app) {
-        return false;
-    }
-    if app.runtime_dialogs.prompt.is_some() || app.bang_input_mode {
-        app.push_line(
-            LogKind::Status,
-            "File and image paste is available in the chat composer.",
-        );
-    } else {
-        app.start_clipboard_import();
+    match app.paste_target(false) {
+        PasteTarget::Blocked => return false,
+        PasteTarget::Composer if !app.bang_input_mode => app.start_clipboard_import(),
+        PasteTarget::RuntimePrompt | PasteTarget::Composer => {
+            app.push_line(
+                LogKind::Status,
+                "File and image paste is available in the chat composer.",
+            );
+        }
     }
     true
 }
@@ -411,15 +400,18 @@ fn handle_prompt_key(
     modifiers: KeyModifiers,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let prompt = app.runtime_dialogs.prompt.as_mut()?;
+    let prompt = app.overlays.runtime_dialogs.prompt.as_mut()?;
     let prompt_id = prompt.state.id.clone();
     let multiline = prompt.state.multiline;
     let secret = prompt.state.secret;
 
     let mut handled = true;
     match (key, modifiers) {
+        (KeyCode::Char('v'), mods) if mods.contains(KeyModifiers::ALT) => {
+            handled = handle_typed_clipboard_paste(app);
+        }
         (KeyCode::Esc, _) => {
-            app.runtime_dialogs.prompt = None;
+            app.overlays.runtime_dialogs.prompt = None;
             app.new_lane_task_id = None;
             if prompt_id != "lane:new-task" && prompt_id != "lane:new-seed" {
                 if let Err(error) = send_prompt_response(tx, &prompt_id, None) {
@@ -432,14 +424,14 @@ fn handle_prompt_key(
         }
         (KeyCode::Enter, _) => {
             let value = prompt.input.current();
-            app.runtime_dialogs.prompt = None;
+            app.overlays.runtime_dialogs.prompt = None;
 
             if prompt_id == "lane:new-task" {
                 let task_id = value.trim();
                 if task_id.is_empty() {
                     app.push_line(LogKind::Error, "task_id is required");
                     app.new_lane_task_id = None;
-                    app.runtime_dialogs.prompt = Some(PromptSlot {
+                    app.overlays.runtime_dialogs.prompt = Some(PromptSlot {
                         state: PromptDialogState {
                             id: "lane:new-task".to_string(),
                             title: "New lane".to_string(),
@@ -452,7 +444,7 @@ fn handle_prompt_key(
                     return Some(true);
                 }
                 app.new_lane_task_id = Some(task_id.to_string());
-                app.runtime_dialogs.prompt = Some(PromptSlot {
+                app.overlays.runtime_dialogs.prompt = Some(PromptSlot {
                     state: PromptDialogState {
                         id: "lane:new-seed".to_string(),
                         title: "New lane".to_string(),
@@ -498,7 +490,7 @@ fn handle_prompt_key(
 }
 
 fn handle_pick_key(app: &mut AppState, key: KeyCode, tx: &mut dyn RuntimeTx) -> Option<bool> {
-    let pick = app.runtime_dialogs.pick.as_mut()?;
+    let pick = app.overlays.runtime_dialogs.pick.as_mut()?;
     if let Some(offset) = pick.review_offset.as_mut() {
         match key {
             KeyCode::Esc | KeyCode::Char('d' | 'D') => pick.review_offset = None,
@@ -532,13 +524,13 @@ fn handle_pick_key(app: &mut AppState, key: KeyCode, tx: &mut dyn RuntimeTx) -> 
             return Some(true);
         }
         app.render_state.drawn_update_choice = None;
-        if let Some(picker) = app.runtime_dialogs.pick.take() {
+        if let Some(picker) = app.overlays.runtime_dialogs.pick.take() {
             crate::app::self_update::finish_picker(app, picker, key == KeyCode::Enter);
         }
         return Some(true);
     }
     if pick.shell_rule_picker.is_some() && matches!(key, KeyCode::Enter | KeyCode::Esc) {
-        if let Some(picker) = app.runtime_dialogs.pick.take() {
+        if let Some(picker) = app.overlays.runtime_dialogs.pick.take() {
             if key == KeyCode::Enter {
                 handlers::shell_rules::select(app, tx, picker);
             }
@@ -552,7 +544,7 @@ fn handle_pick_key(app: &mut AppState, key: KeyCode, tx: &mut dyn RuntimeTx) -> 
     match key {
         KeyCode::Esc => {
             let id = pick.id.clone();
-            app.runtime_dialogs.pick = None;
+            app.overlays.runtime_dialogs.pick = None;
             if app.rpc_pending.client_tool_choice_ids.remove(&id) {
                 if let Err(error) = send_client_tool_error(tx, &id, "choice cancelled") {
                     app.push_error_report("client tool response error", error.to_string());
@@ -592,7 +584,7 @@ fn handle_pick_key(app: &mut AppState, key: KeyCode, tx: &mut dyn RuntimeTx) -> 
                     .map(|item| vec![item.id.clone()])
                     .unwrap_or_default()
             };
-            app.runtime_dialogs.pick = None;
+            app.overlays.runtime_dialogs.pick = None;
 
             if app.rpc_pending.client_tool_choice_ids.remove(&id) {
                 let selected_id = ids.first().cloned();
@@ -795,7 +787,7 @@ pub(crate) fn handle_non_main_key(
     modifiers: KeyModifiers,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    match app.runtime_dialogs.top() {
+    match app.overlays.runtime_dialogs.top() {
         Some(RuntimeDialogRef::Confirm(ConfirmSlot::Pending(_))) => return Some(false),
         Some(RuntimeDialogRef::Confirm(ConfirmSlot::Active { .. })) => {
             return handle_confirm_key(app, key, modifiers, tx);
@@ -805,47 +797,30 @@ pub(crate) fn handle_non_main_key(
         None => {}
     }
 
-    if let Some(redraw) = crate::app::handlers::panels::handle_session_list_panel_key(app, key, tx)
+    if app.overlays.local_panel.is_some()
+        && key == KeyCode::Char('v')
+        && modifiers.contains(KeyModifiers::ALT)
     {
-        return Some(redraw);
-    }
-
-    if let Some(redraw) = crate::app::handlers::panels::handle_lane_list_panel_key(app, key, tx) {
-        return Some(redraw);
-    }
-
-    if let Some(redraw) = crate::app::handlers::panels::handle_skills_list_panel_key(app, key) {
-        return Some(redraw);
-    }
-
-    if let Some(redraw) = crate::app::handlers::panels::handle_theme_list_panel_key(app, key, tx) {
-        return Some(redraw);
-    }
-
-    if let Some(redraw) = crate::app::handlers::panels::handle_context_panel_key(app, key) {
-        return Some(redraw);
-    }
-
-    if let Some(redraw) = crate::app::handlers::panels::handle_model_list_panel_key(app, key, tx) {
-        return Some(redraw);
-    }
-
-    if let Some(redraw) = crate::app::handlers::panels::handle_provider_picker_key(app, key, tx) {
-        return Some(redraw);
-    }
-
-    if let Some(redraw) = crate::app::handlers::panels::handle_model_picker_key(app, key, tx) {
-        return Some(redraw);
-    }
-
-    if let Some(redraw) = crate::app::handlers::panels::handle_reasoning_picker_key(app, key, tx) {
-        return Some(redraw);
-    }
-
-    if app.queue_picker_focused() && !modifiers.is_empty() {
         return Some(false);
     }
-    handlers::handle_queue_steer_picker_key(app, key, tx)
+
+    match &app.overlays.local_panel {
+        Some(LocalPanel::SessionList(_)) => panels::handle_session_list_panel_key(app, key, tx),
+        Some(LocalPanel::LaneList(_)) => panels::handle_lane_list_panel_key(app, key, tx),
+        Some(LocalPanel::Context(_)) => panels::handle_context_panel_key(app, key),
+        Some(LocalPanel::SkillsList(_)) => panels::handle_skills_list_panel_key(app, key),
+        Some(LocalPanel::ThemeList(_)) => panels::handle_theme_list_panel_key(app, key, tx),
+        Some(LocalPanel::ModelList(_)) => panels::handle_model_list_panel_key(app, key, tx),
+        Some(LocalPanel::ProviderPicker(_)) => panels::handle_provider_picker_key(app, key, tx),
+        Some(LocalPanel::ModelPicker(_)) => panels::handle_model_picker_key(app, key, tx),
+        Some(LocalPanel::ReasoningPicker(_)) => panels::handle_reasoning_picker_key(app, key, tx),
+        None => {
+            if app.queue_picker_focused() && !modifiers.is_empty() {
+                return Some(false);
+            }
+            handlers::handle_queue_steer_picker_key(app, key, tx)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -884,7 +859,7 @@ mod clipboard_input_tests {
     fn terminal_path_and_file_uri_paste_remain_plain_text() {
         let mut app = AppState::default();
         let pasted = "file:///tmp/secret.txt\n/tmp/literal path";
-        assert!(handle_paste(&mut app, pasted));
+        assert!(handle_paste(&mut app, pasted, false));
         assert_eq!(app.input.current(), pasted);
         assert!(!app.has_pending_clipboard_import());
         assert_eq!(app.referenced_attachment_count(), 0);
@@ -978,7 +953,7 @@ mod shell_rule_tests {
             for key in keys {
                 assert_eq!(handle_pick_key(&mut app, key, &mut tx), Some(true));
             }
-            assert!(app.runtime_dialogs.pick.is_none());
+            assert!(app.overlays.runtime_dialogs.pick.is_none());
         }
         respond(
             &mut app,
@@ -1010,12 +985,21 @@ mod shell_rule_tests {
         for (request_id, confirm) in [("permissions-7", false), ("permissions-8", true)] {
             submit(&mut app, &mut tx, "/permissions remove");
             respond(&mut app, &mut tx, request_id, &tool_list);
-            assert_eq!(app.runtime_dialogs.pick.as_ref().unwrap().items.len(), 1);
+            assert_eq!(
+                app.overlays
+                    .runtime_dialogs
+                    .pick
+                    .as_ref()
+                    .unwrap()
+                    .items
+                    .len(),
+                1
+            );
             assert_eq!(
                 handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
                 Some(true)
             );
-            let dialog = app.runtime_dialogs.pick.as_ref().unwrap();
+            let dialog = app.overlays.runtime_dialogs.pick.as_ref().unwrap();
             assert!(dialog.message.as_deref().unwrap().contains("webfetch"));
             assert_eq!(dialog.selected, 0);
             if confirm {
@@ -1081,7 +1065,7 @@ mod shell_rule_tests {
                 .to_owned();
             sender.send(json!({"id":id,"jsonrpc":"2.0","result":{"approval_mode":null,"paths":{"global":"/config.json","project":null},"rules":[],"project_allow_trust":{"trusted":false,"workspace":"/workspace","revision":"snapshot-1","rules":[{"tool":"shell","command":"cargo test"}]}}}).to_string()).unwrap();
             assert!(process_runtime_messages(&mut app, &rx, &mut tx));
-            let dialog = app.runtime_dialogs.pick.as_ref().unwrap();
+            let dialog = app.overlays.runtime_dialogs.pick.as_ref().unwrap();
             let message = dialog.message.as_ref().unwrap();
             assert!(message.contains("future edits"));
             assert!(message.contains("cargo test"));
@@ -1160,6 +1144,7 @@ mod shell_rule_tests {
         .expect("fixture approval pick");
         assert!(process_runtime_messages(&mut app, &rx, &mut tx));
         assert!(app
+            .overlays
             .runtime_dialogs
             .pick
             .as_ref()
@@ -1270,6 +1255,7 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
             assert!(app.render_state.drawn_update_choice.is_none());
             key(app, KeyCode::Enter);
             let pick = app
+                .overlays
                 .runtime_dialogs
                 .pick
                 .as_ref()
@@ -1285,7 +1271,7 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
                 // Even with enough room, a new selection must be drawn before Enter.
                 key(app, KeyCode::Up);
                 key(app, KeyCode::Enter);
-                assert!(app.runtime_dialogs.pick.is_some());
+                assert!(app.overlays.runtime_dialogs.pick.is_some());
                 assert!(app.pending_update_control.is_none());
                 key(app, KeyCode::Down);
                 terminal
@@ -1301,6 +1287,7 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
             assert!(app.input.current().is_empty());
             poll(&mut app);
             let picker = app
+                .overlays
                 .runtime_dialogs
                 .pick
                 .as_ref()
@@ -1313,7 +1300,7 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
             );
             pick_auto_in_short_terminal(&mut app, &mut tx, key == KeyCode::Enter);
             assert_eq!(handle_pick_key(&mut app, key, &mut tx), Some(true));
-            assert!(app.runtime_dialogs.pick.is_none());
+            assert!(app.overlays.runtime_dialogs.pick.is_none());
             assert_eq!(app.pending_update_control.is_some(), key == KeyCode::Enter);
         }
         poll(&mut app);
@@ -1338,9 +1325,9 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
                 .insert("session-open".into(), PendingRpc::SessionOpen);
             assert!(!startup_confirmations::poll(&mut app));
             app.rpc_pending.remove_slot(PendingRpcSlot::SessionOpen);
-            assert!(app.runtime_dialogs.pick.is_none());
+            assert!(app.overlays.runtime_dialogs.pick.is_none());
             assert!(startup_confirmations::poll(&mut app));
-            app.runtime_dialogs.prompt = Some(PromptSlot {
+            app.overlays.runtime_dialogs.prompt = Some(PromptSlot {
                 state: PromptDialogState {
                     id: "auth".into(),
                     title: "Authentication".into(),
@@ -1351,12 +1338,12 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
                 input: Default::default(),
             });
             assert!(startup_confirmations::poll(&mut app));
-            assert!(app.runtime_dialogs.pick.is_none());
+            assert!(app.overlays.runtime_dialogs.pick.is_none());
             assert!(!startup_confirmations::poll(&mut app));
             assert!(app.startup_confirmations.is_pending());
-            app.runtime_dialogs.prompt = None;
+            app.overlays.runtime_dialogs.prompt = None;
             assert!(startup_confirmations::poll(&mut app));
-            let picker = app.runtime_dialogs.pick.as_ref().unwrap();
+            let picker = app.overlays.runtime_dialogs.pick.as_ref().unwrap();
             assert!(self_update::is_startup_picker(picker));
             assert_eq!(picker.items[picker.selected].id, "notify");
             pick_auto_in_short_terminal(&mut app, &mut tx, key == KeyCode::Enter);
@@ -1364,7 +1351,7 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
                 handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut tx),
                 Some(true)
             );
-            assert!(app.runtime_dialogs.pick.is_none());
+            assert!(app.overlays.runtime_dialogs.pick.is_none());
             if key == KeyCode::Enter {
                 assert!(!startup_confirmations::poll(&mut app));
                 assert!(

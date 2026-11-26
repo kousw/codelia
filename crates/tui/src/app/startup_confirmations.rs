@@ -73,14 +73,16 @@ pub(crate) fn poll(app: &mut AppState) -> bool {
             app.startup_confirmations.answered = false;
             continue;
         }
-        if (app.runtime_dialogs.confirm_state().is_some() || app.runtime_dialogs.prompt.is_some())
+        if (app.overlays.runtime_dialogs.confirm_state().is_some()
+            || app.overlays.runtime_dialogs.prompt.is_some())
             && app
+                .overlays
                 .runtime_dialogs
                 .pick
                 .as_ref()
                 .is_some_and(|panel| item.owns_picker(panel))
         {
-            app.runtime_dialogs.pick = None;
+            app.overlays.runtime_dialogs.pick = None;
             return true;
         }
         if app.rpc_pending.has_slot(PendingRpcSlot::Initialize)
@@ -90,7 +92,7 @@ pub(crate) fn poll(app: &mut AppState) -> bool {
             return false;
         }
         // A runtime picker may replace this panel; only a local answer advances the queue.
-        app.runtime_dialogs.pick = Some(item.picker());
+        app.overlays.runtime_dialogs.pick = Some(item.picker());
         return true;
     }
     false

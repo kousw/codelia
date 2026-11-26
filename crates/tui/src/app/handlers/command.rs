@@ -737,13 +737,13 @@ mod tests {
             app.pending_prompt_queue[1].dispatch_attempts =
                 crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
             app.input.set_from("unfinished draft");
-            assert!(!handle_paste(&mut app, "paste"));
+            assert!(!handle_paste(&mut app, "paste", false));
             assert_eq!(
                 handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::SHIFT, tx),
                 Some(false)
             );
             assert!(app.in_flight_steers.is_empty());
-            assert!(app.queue_steer_picker.is_some());
+            assert!(app.overlays.queue_focus.is_some());
             let mut press = |app: &mut AppState, key| {
                 assert_eq!(
                     handle_non_main_key(app, key, KeyModifiers::NONE, tx),
@@ -755,7 +755,7 @@ mod tests {
             press(&mut app, KeyCode::Down);
             app.pending_prompt_queue.pop_front();
             press(&mut app, KeyCode::Enter);
-            assert!(app.queue_steer_picker.is_none());
+            assert!(app.overlays.queue_focus.is_none());
             assert_eq!(app.input.current(), "unfinished draft");
             assert_eq!(app.in_flight_steers[0].submission.user_text, "second");
             assert_eq!(app.pending_prompt_queue[0].user_text, "paused");
@@ -785,7 +785,7 @@ mod tests {
                 handle_queue_steer_picker_key(&mut app, KeyCode::Enter, tx),
                 Some(true)
             );
-            assert!(app.queue_steer_picker.is_none());
+            assert!(app.overlays.queue_focus.is_none());
             assert_eq!(app.input.current(), "draft");
             assert_eq!(app.pending_prompt_queue.len(), 1);
             assert!(app.in_flight_steers.is_empty());

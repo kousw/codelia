@@ -2,7 +2,7 @@ use super::formatters::push_rpc_error;
 use super::panel_builders::build_session_list_panel;
 use crate::app::runtime::{send_model_list, RpcResponse, RuntimeTx};
 use crate::app::state::LogKind;
-use crate::app::{AppState, ModelListMode, ModelSetScope, PendingRpc, PendingRpcSlot};
+use crate::app::{AppState, LocalPanel, ModelListMode, ModelSetScope, PendingRpc, PendingRpcSlot};
 use crate::protocol::{decode_result, methods, rpc_error_code, SessionListResult};
 use serde_json::Value;
 
@@ -96,7 +96,9 @@ pub(super) fn handle_session_update_response(app: &mut AppState, response: RpcRe
                 "Unpinned run history is eligible for diagnostic removal and compression; original messages and active writers are protected.",
             );
         }
-        app.session_list_panel = None;
+        if matches!(app.overlays.local_panel, Some(LocalPanel::SessionList(_))) {
+            app.overlays.local_panel = None;
+        }
     }
 }
 
@@ -159,11 +161,14 @@ fn apply_session_list_result(app: &mut AppState, result: &SessionListResult, sho
         app.push_line(LogKind::Status, message);
         app.push_line(LogKind::Space, "");
     }
-    app.session_list_panel = Some(build_session_list_panel(
+    if app.overlays.has_onboarding_model_pick() {
+        return;
+    }
+    app.overlays.local_panel = Some(LocalPanel::SessionList(build_session_list_panel(
         sessions,
         show_all,
         current_workspace_root.as_deref(),
-    ));
+    )));
 }
 
 #[cfg(test)]

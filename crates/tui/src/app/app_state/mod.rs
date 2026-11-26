@@ -1,13 +1,11 @@
 use crate::app::state::InputState;
 use crate::app::state::LogLine;
 use crate::app::state::{
-    ContextPanelState, LaneListPanelState, ModelListPanelState, ModelPickerState,
-    PendingImageAttachment, PerfDebugStats, ProviderPickerState, ReasoningPickerState, RenderState,
-    SessionListPanelState, SkillsListItemState, SkillsListPanelState, StatusLineMode,
-    TextSelectionPhase, ThemeListPanelState, TranscriptHitMap, WrappedLogCache,
+    PendingImageAttachment, PerfDebugStats, RenderState, SkillsListItemState, StatusLineMode,
+    TextSelectionPhase, TranscriptHitMap, WrappedLogCache,
 };
 use crate::app::util::attachments::{ClipboardImport, StagedAttachment};
-use crate::app::RuntimeDialogs;
+use crate::app::OverlayState;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -72,11 +70,6 @@ pub struct PendingPromptRun {
     pub files: crate::app::state::upload::SubmissionFiles,
     pub shell_result_count: usize,
     pub dispatch_attempts: u32,
-}
-
-pub struct QueueSteerPicker {
-    pub run_id: String,
-    pub queue_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -283,16 +276,7 @@ pub struct AppState {
     pub run_elapsed: Option<Duration>,
     pub spinner_index: usize,
     pub spinner_last_tick: Instant,
-    pub model_picker: Option<ModelPickerState>,
-    pub provider_picker: Option<ProviderPickerState>,
-    pub reasoning_picker: Option<ReasoningPickerState>,
-    pub model_list_panel: Option<ModelListPanelState>,
-    pub session_list_panel: Option<SessionListPanelState>,
-    pub lane_list_panel: Option<LaneListPanelState>,
-    pub context_panel: Option<ContextPanelState>,
-    pub skills_list_panel: Option<SkillsListPanelState>,
-    pub theme_list_panel: Option<ThemeListPanelState>,
-    pub runtime_dialogs: RuntimeDialogs,
+    pub overlays: OverlayState,
     pub(crate) startup_confirmations: crate::app::startup_confirmations::StartupConfirmations,
     pub(crate) update_control_launcher: Option<crate::app::self_update::LauncherPaths>,
     pub(crate) pending_update_control: Option<crate::app::self_update::PendingUpdateControl>,
@@ -323,7 +307,6 @@ pub struct AppState {
     pub pending_shell_results: Vec<PendingShellResult>,
     pub active_shell_wait_task_id: Option<String>,
     pub pending_prompt_queue: VecDeque<PendingPromptRun>,
-    pub queue_steer_picker: Option<QueueSteerPicker>,
     pub dispatching_prompt: Option<PendingPromptRun>,
     pub in_flight_steers: VecDeque<InFlightSteer>,
     pub active_run_submit_mode: ActiveRunSubmitMode,
@@ -374,16 +357,7 @@ impl Default for AppState {
             run_elapsed: None,
             spinner_index: 0,
             spinner_last_tick: Instant::now(),
-            model_picker: None,
-            provider_picker: None,
-            reasoning_picker: None,
-            model_list_panel: None,
-            session_list_panel: None,
-            lane_list_panel: None,
-            context_panel: None,
-            skills_list_panel: None,
-            theme_list_panel: None,
-            runtime_dialogs: RuntimeDialogs::default(),
+            overlays: OverlayState::default(),
             startup_confirmations: Default::default(),
             update_control_launcher: None,
             pending_update_control: None,
@@ -414,7 +388,6 @@ impl Default for AppState {
             pending_shell_results: Vec::new(),
             active_shell_wait_task_id: None,
             pending_prompt_queue: VecDeque::new(),
-            queue_steer_picker: None,
             dispatching_prompt: None,
             in_flight_steers: VecDeque::new(),
             active_run_submit_mode: ActiveRunSubmitMode::default(),

@@ -177,7 +177,7 @@ pub(super) fn render_input(
 }
 
 pub(super) fn dialog_editor(app: &AppState) -> Option<(&InputState, bool)> {
-    match app.runtime_dialogs.visible_top()? {
+    match app.overlays.runtime_dialogs.visible_top()? {
         RuntimeDialogRef::Confirm(ConfirmSlot::Active { input, .. }) => Some((input, false)),
         RuntimeDialogRef::Prompt(prompt) => Some((&prompt.input, prompt.state.secret)),
         _ => None,

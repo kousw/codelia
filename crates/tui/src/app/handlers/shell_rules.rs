@@ -476,14 +476,14 @@ fn list_response(
         return;
     }
     if choose_removal {
-        if app.runtime_dialogs.is_any_open() {
+        if app.overlays.runtime_dialogs.is_any_open() {
             app.push_line(
                 LogKind::Status,
                 "Finish the current dialog, then run /permissions remove again.",
             );
             return;
         }
-        app.runtime_dialogs.pick = Some(picker(
+        app.overlays.runtime_dialogs.pick = Some(picker(
             ShellRulePicker::Choose { session_id },
             "Remove a saved rule [D details]",
             Some("Enter selects a rule. Esc closes the picker.".to_owned()),
@@ -627,7 +627,7 @@ pub(crate) fn select(app: &mut AppState, tx: &mut dyn RuntimeTx, picker_state: P
         return;
     };
     if !confirming {
-        app.runtime_dialogs.pick = Some(picker(
+        app.overlays.runtime_dialogs.pick = Some(picker(
             ShellRulePicker::Confirm { session_id },
             "Remove this rule? [D details]",
             Some(format!(

@@ -3,7 +3,7 @@ use crate::app::runtime::{
     ClientToolCancel, ClientToolRequest, RuntimeTx,
 };
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
-use crate::app::{AppState, ContextPanelState, PickDialogItem, PickDialogState};
+use crate::app::{AppState, ContextPanelState, LocalPanel, PickDialogItem, PickDialogState};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
@@ -379,7 +379,7 @@ fn handle_ask_user_choice(
     request: ClientToolRequest,
     tx: &mut dyn RuntimeTx,
 ) -> bool {
-    if app.runtime_dialogs.pick.is_some() {
+    if app.overlays.runtime_dialogs.pick.is_some() {
         if let Err(error) = send_client_tool_error(tx, &request.id, "pick dialog is busy") {
             app.push_error_report("client tool response error", error.to_string());
         }
@@ -397,7 +397,7 @@ fn handle_ask_user_choice(
     app.rpc_pending
         .client_tool_choice_ids
         .insert(request.id.clone());
-    app.runtime_dialogs.pick = Some(PickDialogState {
+    app.overlays.runtime_dialogs.pick = Some(PickDialogState {
         id: request.id,
         title: dialog.title,
         message: dialog.message,
@@ -445,12 +445,20 @@ fn handle_open_selector(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    app.context_panel = Some(ContextPanelState {
+    if app.overlays.has_onboarding_model_pick() {
+        if let Err(error) =
+            send_client_tool_error(tx, &request.id, "onboarding pick dialog is active")
+        {
+            app.push_error_report("client tool response error", error.to_string());
+        }
+        return true;
+    }
+    app.overlays.local_panel = Some(LocalPanel::Context(ContextPanelState {
         title,
         header,
         rows,
         selected: 0,
-    });
+    }));
     if let Err(error) = send_client_tool_text_success(tx, &request.id, "selector opened") {
         app.push_error_report("client tool response error", error.to_string());
     }
@@ -467,12 +475,20 @@ fn handle_preview_artifact(
         .to_string();
     let kind = arg_str(&request.arguments, "kind").unwrap_or("text");
     let content = arg_str(&request.arguments, "content").unwrap_or("");
-    app.context_panel = Some(ContextPanelState {
+    if app.overlays.has_onboarding_model_pick() {
+        if let Err(error) =
+            send_client_tool_error(tx, &request.id, "onboarding pick dialog is active")
+        {
+            app.push_error_report("client tool response error", error.to_string());
+        }
+        return true;
+    }
+    app.overlays.local_panel = Some(LocalPanel::Context(ContextPanelState {
         title,
         header: format!("artifact kind={kind}"),
         rows: panel_rows_from_content(content),
         selected: 0,
-    });
+    }));
     if let Err(error) = send_client_tool_text_success(tx, &request.id, "artifact previewed") {
         app.push_error_report("client tool response error", error.to_string());
     }
@@ -574,12 +590,13 @@ pub(super) fn handle_client_tool_cancel(
     }
 
     let matches_active_dialog = app
+        .overlays
         .runtime_dialogs
         .pick
         .as_ref()
         .is_some_and(|dialog| dialog.id == cancellation.request_id);
     if matches_active_dialog {
-        app.runtime_dialogs.pick = None;
+        app.overlays.runtime_dialogs.pick = None;
         let message = match cancellation.reason.as_str() {
             "timeout" => "Choice request timed out.",
             _ => "Choice request cancelled.",
@@ -642,7 +659,7 @@ mod tests {
                 tx,
             );
 
-            let pick = app.runtime_dialogs.pick.expect("pick dialog");
+            let pick = app.overlays.runtime_dialogs.pick.expect("pick dialog");
             assert_eq!(pick.message.as_deref(), Some("Pick a direction."));
             let ids = pick
                 .items
@@ -674,7 +691,7 @@ mod tests {
                 tx,
             );
 
-            assert!(app.runtime_dialogs.pick.is_none());
+            assert!(app.overlays.runtime_dialogs.pick.is_none());
             assert!(!app
                 .rpc_pending
                 .client_tool_choice_ids

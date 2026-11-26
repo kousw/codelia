@@ -1,6 +1,7 @@
 mod composer;
 mod dialogs;
 mod model;
+mod overlays;
 mod panels;
 mod skills;
 mod status;
@@ -12,12 +13,13 @@ pub(crate) use composer::{
 };
 pub use dialogs::{
     ConfirmDialogState, ConfirmMode, ConfirmSlot, PickDialogItem, PickDialogState,
-    PromptDialogState, PromptSlot, RuntimeDialogRef, RuntimeDialogs, ShellRulePicker,
+    PromptDialogState, PromptSlot, RuntimeDialogRef, ShellRulePicker,
 };
 pub use model::{
     ModelListMode, ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
     ModelSetScope, ProviderPickerState, ReasoningPickerState,
 };
+pub use overlays::{LocalPanel, OverlayState, PasteTarget, QueueSteerPicker};
 pub use panels::{
     ContextPanelState, LaneListItem, LaneListPanelState, SessionListPanelState, ThemeListPanelState,
 };

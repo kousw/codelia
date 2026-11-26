@@ -201,7 +201,7 @@ fn real_view_halfblocks_toggle_resize_and_close_restore_transcript_and_composer(
         .any(|cell| cell.symbol() == "▀"));
     assert!(app.selection_input_blocked());
     assert!(!handlers::can_dispatch_prompt_now(&app));
-    assert!(crate::event_loop::input::blocks_input_paste(&app));
+    assert_eq!(app.paste_target(false), crate::app::PasteTarget::Blocked);
     for key in [KeyCode::Char('x'), KeyCode::Backspace] {
         assert!(app.image_preview.handle_key(key, KeyModifiers::NONE));
     }

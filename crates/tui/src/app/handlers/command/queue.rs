@@ -116,7 +116,7 @@ pub(crate) fn open_queue_steer_picker(app: &mut AppState) {
         app.push_line(LogKind::Status, "No queued prompts available to steer.");
         return;
     };
-    app.queue_steer_picker = Some(crate::app::app_state::QueueSteerPicker {
+    app.overlays.queue_focus = Some(crate::app::QueueSteerPicker {
         run_id: run_id.to_owned(),
         queue_id,
     });
@@ -128,13 +128,13 @@ pub(crate) fn handle_queue_steer_picker_key(
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
     use crossterm::event::KeyCode;
-    let picker = app.queue_steer_picker.as_ref()?;
+    let picker = app.overlays.queue_focus.as_ref()?;
     if key == KeyCode::Esc {
-        app.queue_steer_picker = None;
+        app.overlays.queue_focus = None;
         return Some(true);
     }
     if app.steerable_run_id() != Some(picker.run_id.as_str()) {
-        app.queue_steer_picker = None;
+        app.overlays.queue_focus = None;
         return Some(true);
     }
     if key == KeyCode::Enter {
@@ -142,7 +142,7 @@ pub(crate) fn handle_queue_steer_picker_key(
             .steerable_prompts()
             .find(|p| p.queue_id == picker.queue_id)
             .map(|p| p.queue_id.clone());
-        app.queue_steer_picker = None;
+        app.overlays.queue_focus = None;
         if let Some(id) = id {
             handle_queue_steer(app, tx, &id);
         }
@@ -159,7 +159,7 @@ pub(crate) fn handle_queue_steer_picker_key(
     }
     .map(|p| p.queue_id.clone());
     if let Some(id) = adjacent {
-        app.queue_steer_picker.as_mut()?.queue_id = id;
+        app.overlays.queue_focus.as_mut()?.queue_id = id;
     }
     Some(true)
 }

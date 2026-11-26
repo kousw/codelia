@@ -12,8 +12,8 @@ use crate::app::runtime::parser::test_support::{
 use crate::app::runtime::{AgentMsg, MockRuntimeTx, RunControlMsg, RuntimeMsg, RuntimeTx};
 use crate::app::state::{LogKind, LogLine};
 use crate::app::{
-    AppState, ConfirmSlot, LogComponentSpan, PendingPromptRun, PendingRpc, PendingRpcSlot,
-    RuntimeDialogRef,
+    AppState, ConfirmSlot, LocalPanel, LogComponentSpan, PasteTarget, PendingPromptRun, PendingRpc,
+    PendingRpcSlot, RuntimeDialogRef,
 };
 use crate::event_loop::input::{handle_non_main_key, handle_paste};
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -612,7 +612,8 @@ fn client_tool_timeout_clears_matching_choice_dialog_and_pending_id() {
         );
         assert!(apply_runtime_msg(&mut app, request, tx));
         assert_eq!(
-            app.runtime_dialogs
+            app.overlays
+                .runtime_dialogs
                 .pick
                 .as_ref()
                 .map(|dialog| dialog.id.as_str()),
@@ -628,7 +629,7 @@ fn client_tool_timeout_clears_matching_choice_dialog_and_pending_id() {
         );
         assert!(apply_runtime_msg(&mut app, cancellation, tx));
 
-        assert!(app.runtime_dialogs.pick.is_none());
+        assert!(app.overlays.runtime_dialogs.pick.is_none());
         assert!(!app
             .rpc_pending
             .client_tool_choice_ids
@@ -653,7 +654,7 @@ fn receive_confirm(app: &mut AppState, tx: &mut MockRuntimeTx, id: &str) {
     );
     assert!(apply_runtime_msg(app, request, tx));
     assert!(matches!(
-        app.runtime_dialogs.top(),
+        app.overlays.runtime_dialogs.top(),
         Some(RuntimeDialogRef::Confirm(ConfirmSlot::Pending(state))) if state.id == id
     ));
 }
@@ -694,7 +695,7 @@ fn confirm_preempts_client_choice_and_reveals_the_same_selection_on_close() {
     assert!(tx.sent.is_empty());
     assert!(activate_pending_confirm_dialog(&mut app));
     assert!(matches!(
-        app.runtime_dialogs.top(),
+        app.overlays.runtime_dialogs.top(),
         Some(RuntimeDialogRef::Confirm(ConfirmSlot::Active { .. }))
     ));
     assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Up), Some(true));
@@ -703,7 +704,7 @@ fn confirm_preempts_client_choice_and_reveals_the_same_selection_on_close() {
     assert_eq!(tx.sent[0]["id"], "confirm");
     assert_eq!(tx.sent[0]["result"]["ok"], true);
     assert!(matches!(
-        app.runtime_dialogs.top(),
+        app.overlays.runtime_dialogs.top(),
         Some(RuntimeDialogRef::Pick(pick)) if pick.id == "choice" && pick.selected == 1
     ));
 
@@ -714,7 +715,7 @@ fn confirm_preempts_client_choice_and_reveals_the_same_selection_on_close() {
         tx.sent[1]["result"]["result"]["value"]["selected_id"],
         "second"
     );
-    assert!(!app.runtime_dialogs.is_any_open());
+    assert!(!app.overlays.runtime_dialogs.is_any_open());
 }
 
 #[test]
@@ -736,10 +737,11 @@ fn confirm_preempts_prompt_and_preserves_its_buffer_and_cursor() {
         dialog_key(&mut app, &mut tx, KeyCode::Char('x')),
         Some(false)
     );
-    assert!(!handle_paste(&mut app, "blocked while pending"));
+    assert_eq!(app.paste_target(false), PasteTarget::Blocked);
+    assert!(!handle_paste(&mut app, "blocked while pending", false));
     assert!(activate_pending_confirm_dialog(&mut app));
     assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Tab), Some(true));
-    assert!(!handle_paste(&mut app, "blocked while active"));
+    assert!(!handle_paste(&mut app, "blocked while active", false));
     assert_eq!(
         dialog_key(&mut app, &mut tx, KeyCode::Char('n')),
         Some(true)
@@ -747,13 +749,13 @@ fn confirm_preempts_prompt_and_preserves_its_buffer_and_cursor() {
     assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(true));
     assert_eq!(tx.sent[0]["result"]["reason"], "n");
 
-    let Some(RuntimeDialogRef::Prompt(prompt)) = app.runtime_dialogs.top() else {
+    let Some(RuntimeDialogRef::Prompt(prompt)) = app.overlays.runtime_dialogs.top() else {
         panic!("prompt should regain focus");
     };
     assert_eq!(prompt.state.id, "prompt");
     assert_eq!(prompt.input.current(), "abcd");
     assert_eq!(prompt.input.cursor, 3);
-    assert!(handle_paste(&mut app, "!"));
+    assert!(handle_paste(&mut app, "!", false));
     assert_eq!(dialog_key(&mut app, &mut tx, KeyCode::Enter), Some(true));
     assert_eq!(tx.sent.len(), 2);
     assert_eq!(tx.sent[1]["id"], "prompt");
@@ -776,7 +778,12 @@ fn replacement_confirm_waits_for_activation_and_starts_with_empty_reason() {
     );
     assert!(!activate_pending_confirm_dialog(&mut app));
     assert_eq!(
-        app.runtime_dialogs.active_confirm().unwrap().1.current(),
+        app.overlays
+            .runtime_dialogs
+            .active_confirm()
+            .unwrap()
+            .1
+            .current(),
         "x"
     );
 
@@ -789,6 +796,7 @@ fn replacement_confirm_waits_for_activation_and_starts_with_empty_reason() {
     assert!(app.input.current().is_empty());
     assert!(activate_pending_confirm_dialog(&mut app));
     assert!(app
+        .overlays
         .runtime_dialogs
         .active_confirm()
         .unwrap()
@@ -802,7 +810,7 @@ fn replacement_confirm_waits_for_activation_and_starts_with_empty_reason() {
     assert_eq!(tx.sent.len(), 1);
     assert_eq!(tx.sent[0]["id"], "replacement");
     assert_eq!(tx.sent[0]["result"]["ok"], true);
-    assert!(!app.runtime_dialogs.is_any_open());
+    assert!(!app.overlays.runtime_dialogs.is_any_open());
 }
 
 #[test]
@@ -820,7 +828,8 @@ fn stale_client_tool_cancel_leaves_active_choice_untouched() {
         assert!(apply_runtime_msg(&mut app, stale_cancellation, tx));
 
         assert_eq!(
-            app.runtime_dialogs
+            app.overlays
+                .runtime_dialogs
                 .pick
                 .as_ref()
                 .map(|dialog| dialog.id.as_str()),
@@ -1866,7 +1875,7 @@ fn malformed_secret_prompt_is_declined_without_opening_the_input_dialog() {
         r#"{"jsonrpc":"2.0","id":"ui-1","method":"ui.prompt.request","params":{"title":"Secret","message":"Enter password","secret":null}}"#,
     );
     apply_runtime_msg(&mut app, parsed, &mut tx);
-    assert!(app.runtime_dialogs.prompt.is_none());
+    assert!(app.overlays.runtime_dialogs.prompt.is_none());
     let [reply] = tx.sent.as_slice() else {
         panic!("expected one prompt reply");
     };
@@ -1957,8 +1966,8 @@ fn malformed_server_request_logs_diagnostic_and_replies_once() {
         assert_eq!(line.kind(), LogKind::Error);
         assert!(line.plain_text().contains(method));
     }
-    assert!(app.runtime_dialogs.confirm.is_none());
-    assert!(app.runtime_dialogs.pick.is_none());
+    assert!(app.overlays.runtime_dialogs.confirm.is_none());
+    assert!(app.overlays.runtime_dialogs.pick.is_none());
     assert_eq!(tx.sent.len(), 2);
     let decline = &tx.sent[0];
     assert_eq!(decline["id"], "ui-1");
@@ -2163,7 +2172,7 @@ fn pending_or_active_confirm_over_update_picker_clears_drawn_update_choice() {
     let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
     let mut app = AppState::default();
     let mut tx = MockRuntimeTx::default();
-    app.runtime_dialogs.pick = Some(crate::app::self_update::startup_picker());
+    app.overlays.runtime_dialogs.pick = Some(crate::app::self_update::startup_picker());
 
     terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
     assert!(app.render_state.drawn_update_choice.is_some());
@@ -2221,9 +2230,12 @@ fn delayed_lane_list_response_preserves_live_runtime_prompt_and_pick_behind_conf
 
     // Async /lane response arrives while runtime dialogs are open.
     super::lane::apply_lane_list_result(&mut app, &json!({"lanes": []}));
-    assert!(app.lane_list_panel.is_some());
-    assert!(app.runtime_dialogs.prompt.is_some());
-    assert!(app.runtime_dialogs.pick.is_some());
+    assert!(matches!(
+        app.overlays.local_panel,
+        Some(crate::app::LocalPanel::LaneList(_))
+    ));
+    assert!(app.overlays.runtime_dialogs.prompt.is_some());
+    assert!(app.overlays.runtime_dialogs.pick.is_some());
 
     // Confirm -> Prompt -> Pick all still resolve with their original IDs and input.
     assert!(activate_pending_confirm_dialog(&mut app));
@@ -2246,4 +2258,242 @@ fn delayed_lane_list_response_preserves_live_runtime_prompt_and_pick_behind_conf
     assert_eq!(tx.sent[1]["result"]["value"], "keep-me");
     assert_eq!(tx.sent[2]["id"], "pick-live");
     assert_eq!(tx.sent[2]["result"]["ids"], json!(["opt-a"]));
+}
+
+#[test]
+fn text_paste_targets_prompt_above_pick_even_during_startup() {
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    app.input.set_from("composer draft");
+    assert_eq!(app.paste_target(true), PasteTarget::Blocked);
+    assert!(!handle_paste(&mut app, "blocked during startup", true));
+
+    for raw in [
+        r#"{"jsonrpc":"2.0","id":"pick","method":"ui.pick.request","params":{"title":"Pick","items":[{"id":"option","label":"Option"}]}}"#,
+        r#"{"jsonrpc":"2.0","id":"prompt","method":"ui.prompt.request","params":{"title":"Input","message":"Enter value"}}"#,
+    ] {
+        assert!(apply_runtime_msg(
+            &mut app,
+            parse_runtime_output(raw),
+            &mut tx
+        ));
+    }
+    assert!(app.overlays.runtime_dialogs.pick.is_some());
+    for (startup_pending, text) in [(false, "normal"), (true, " startup")] {
+        assert_eq!(
+            app.paste_target(startup_pending),
+            PasteTarget::RuntimePrompt
+        );
+        assert!(handle_paste(&mut app, text, startup_pending));
+    }
+    let prompt = app.overlays.runtime_dialogs.prompt.as_ref().unwrap();
+    assert_eq!(prompt.input.current(), "normal startup");
+    assert_eq!(app.input.current(), "composer draft");
+    assert_eq!(app.overlays.paste_target(true, false), PasteTarget::Blocked);
+}
+
+#[test]
+fn alt_v_in_prompt_shows_the_composer_notice_without_importing() {
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    let prompt = parse_runtime_output(
+        r#"{"jsonrpc":"2.0","id":"prompt","method":"ui.prompt.request","params":{"title":"Input","message":"Enter value","default_value":"draft"}}"#,
+    );
+    assert!(apply_runtime_msg(&mut app, prompt, &mut tx));
+
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Char('v'), KeyModifiers::ALT, &mut tx),
+        Some(true)
+    );
+    let notice = app.log.last().expect("clipboard notice");
+    assert_eq!(notice.kind(), LogKind::Status);
+    assert_eq!(
+        notice.plain_text(),
+        "File and image paste is available in the chat composer."
+    );
+    let prompt = app.overlays.runtime_dialogs.prompt.as_ref().unwrap();
+    assert_eq!(prompt.input.current(), "draft");
+    assert!(!app.has_pending_clipboard_import());
+}
+
+#[test]
+fn client_context_panels_replace_local_panel_and_preserve_other_tiers() {
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    app.overlays.queue_focus = Some(crate::app::QueueSteerPicker {
+        run_id: "run-1".into(),
+        queue_id: "q1".into(),
+    });
+    for raw in [
+        r#"{"jsonrpc":"2.0","id":"pick","method":"ui.pick.request","params":{"title":"Pick","items":[{"id":"option","label":"Option"}]}}"#,
+        r#"{"jsonrpc":"2.0","id":"prompt","method":"ui.prompt.request","params":{"title":"Input","message":"Enter value","default_value":"draft"}}"#,
+    ] {
+        assert!(apply_runtime_msg(
+            &mut app,
+            parse_runtime_output(raw),
+            &mut tx
+        ));
+    }
+    receive_confirm(&mut app, &mut tx, "confirm");
+
+    for (name, args, expected_row) in [
+        (
+            "tui_open_selector",
+            json!({"items":[{"label":"Option A"}]}),
+            "Option A",
+        ),
+        (
+            "tui_preview_artifact",
+            json!({"content":"Preview body"}),
+            "Preview body",
+        ),
+    ] {
+        app.overlays.local_panel = Some(LocalPanel::ThemeList(crate::app::ThemeListPanelState {
+            title: "Themes".into(),
+            header: String::new(),
+            rows: vec![],
+            theme_ids: vec![],
+            selected: 0,
+        }));
+        let request = parse_runtime_output(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": name,
+                "method": "client.tool.call",
+                "params": {
+                    "run_id": "run-1",
+                    "name": name,
+                    "arguments": args,
+                    "raw_arguments": "{}"
+                }
+            })
+            .to_string(),
+        );
+        assert!(apply_runtime_msg(&mut app, request, &mut tx));
+        let Some(LocalPanel::Context(panel)) = &app.overlays.local_panel else {
+            panic!("context panel expected after {name}");
+        };
+        assert_eq!(panel.rows, [expected_row]);
+        let dialogs = &app.overlays.runtime_dialogs;
+        assert!(matches!(
+            dialogs.confirm,
+            Some(ConfirmSlot::Pending(ref confirm)) if confirm.id == "confirm"
+        ));
+        assert_eq!(dialogs.prompt.as_ref().unwrap().state.id, "prompt");
+        assert_eq!(dialogs.prompt.as_ref().unwrap().input.current(), "draft");
+        assert_eq!(dialogs.pick.as_ref().unwrap().id, "pick");
+        let queue_focus = app.overlays.queue_focus.as_ref().unwrap();
+        assert_eq!(queue_focus.run_id, "run-1");
+        assert_eq!(queue_focus.queue_id, "q1");
+        assert!(!app.queue_picker_focused());
+    }
+}
+
+#[test]
+fn onboarding_model_pick_survives_delayed_session_list_and_replies_once() {
+    use crate::event_loop::input::handle_non_main_key;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+
+    let pick = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "pick-onboard",
+            "method": "ui.pick.request",
+            "params": {
+                "title": "Select model (openai)",
+                "items": [
+                    { "id": "gpt-6-luna", "label": "gpt-6-luna", "detail": "ctx=128K | in=$1" }
+                ]
+            }
+        })
+        .to_string(),
+    );
+    assert!(apply_runtime_msg(&mut app, pick, &mut tx));
+    assert!(app.overlays.has_onboarding_model_pick());
+
+    // Delayed session.list response must not clobber the onboarding pick.
+    app.rpc_pending.insert(
+        "sess-list".to_owned(),
+        PendingRpc::SessionList { show_all: false },
+    );
+    let sess_resp = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "sess-list",
+            "result": { "sessions": [] }
+        })
+        .to_string(),
+    );
+    assert!(apply_runtime_msg(&mut app, sess_resp, &mut tx));
+    assert!(app.overlays.has_onboarding_model_pick());
+
+    // Pressing Enter submits the onboarding pick reply once with the original ID.
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Enter, KeyModifiers::NONE, &mut tx),
+        Some(true)
+    );
+    assert_eq!(tx.sent.len(), 1);
+    assert_eq!(tx.sent[0]["id"], "pick-onboard");
+    assert_eq!(tx.sent[0]["result"]["ids"], json!(["gpt-6-luna"]));
+}
+
+#[test]
+fn silent_model_list_preserves_open_skills_panel_and_alt_v_does_not_type_into_skills_search() {
+    use crate::event_loop::input::handle_non_main_key;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = AppState::default();
+    let mut tx = MockRuntimeTx::default();
+    app.overlays.local_panel = Some(LocalPanel::SkillsList(crate::app::SkillsListPanelState {
+        title: "Skills".into(),
+        header: String::new(),
+        rows: vec!["alpha".into()],
+        filtered_indices: vec![0],
+        items: vec![crate::app::SkillsListItemState {
+            name: "alpha".into(),
+            scope: "repo".into(),
+            path: "/repo/.agents/skills/alpha/SKILL.md".into(),
+            description: "desc".into(),
+            enabled: true,
+        }],
+        selected: 0,
+        search_query: "al".into(),
+        scope_filter: crate::app::SkillsScopeFilter::All,
+    }));
+
+    // Background silent model.list must leave the open SkillsList panel intact.
+    app.rpc_pending.insert(
+        "ml-silent".to_owned(),
+        PendingRpc::ModelList {
+            mode: crate::app::ModelListMode::Silent,
+            scope: crate::app::ModelSetScope::Config,
+        },
+    );
+    let ml_resp = parse_runtime_output(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "ml-silent",
+            "result": { "provider": "openai", "models": ["gpt-6-luna"], "current": "gpt-6-luna" }
+        })
+        .to_string(),
+    );
+    assert!(apply_runtime_msg(&mut app, ml_resp, &mut tx));
+    assert!(matches!(
+        app.overlays.local_panel,
+        Some(LocalPanel::SkillsList(_))
+    ));
+
+    // Alt+v while SkillsList is open is consumed without mutating search_query or selection.
+    assert_eq!(
+        handle_non_main_key(&mut app, KeyCode::Char('v'), KeyModifiers::ALT, &mut tx),
+        Some(false)
+    );
+    let Some(LocalPanel::SkillsList(panel)) = &app.overlays.local_panel else {
+        panic!("skills panel should remain open");
+    };
+    assert_eq!(panel.search_query, "al");
+    assert_eq!(panel.selected, 0);
 }

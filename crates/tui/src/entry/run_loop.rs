@@ -7,8 +7,8 @@ use crate::app::{AppState, RuntimeDialogRef};
 use crate::entry::terminal::{set_mouse_capture, with_synchronized_update, TuiTerminal};
 use crate::entry::terminal_mode::ResolvedTerminalMode;
 use crate::event_loop::input::{
-    apply_redraw, blocks_input_paste, handle_ctrl_c, handle_main_key, handle_mouse_event,
-    handle_non_main_key, handle_paste, maybe_request_skills_catalog,
+    apply_redraw, handle_ctrl_c, handle_main_key, handle_mouse_event, handle_non_main_key,
+    handle_paste, maybe_request_skills_catalog,
 };
 use crate::event_loop::runtime::{can_auto_start_initial_message, process_runtime_messages};
 use crate::event_loop::RuntimeReceiver;
@@ -129,7 +129,7 @@ pub(crate) fn run_tui_loop(
             let frame_started = Instant::now();
             let inline_scrollback = terminal_mode.uses_inline_scrollback();
             let size_before = if matches!(
-                app.runtime_dialogs.top(),
+                app.overlays.runtime_dialogs.top(),
                 Some(RuntimeDialogRef::Pick(pick)) if pick.local_update_picker
             ) {
                 terminal.size().ok()
@@ -208,12 +208,7 @@ pub(crate) fn run_tui_loop(
                     }
                 }
                 Event::Paste(text) => {
-                    if (startup_pending && app.runtime_dialogs.prompt.is_none())
-                        || blocks_input_paste(app)
-                    {
-                        continue;
-                    }
-                    if handle_paste(app, &text) {
+                    if handle_paste(app, &text, startup_pending) {
                         app.prune_unreferenced_attachments();
                         apply_redraw(&mut needs_redraw, true);
                     }

@@ -10,8 +10,8 @@ use crate::app::runtime::{
 };
 use crate::app::state::{InputState, LogKind, LogLine, LogTone};
 use crate::app::{
-    AppState, PendingRpcSlot, PickDialogItem, PickDialogState, PromptDialogState, PromptSlot,
-    PROMPT_DISPATCH_RETRY_BACKOFF,
+    AppState, LocalPanel, PendingRpcSlot, PickDialogItem, PickDialogState, PromptDialogState,
+    PromptSlot, PROMPT_DISPATCH_RETRY_BACKOFF,
 };
 use std::time::Instant;
 
@@ -53,12 +53,13 @@ fn apply_ui_request(app: &mut AppState, request: ServerUiMsg) {
         ServerUiMsg::Pick(request) => handle_pick_request(app, request),
         ServerUiMsg::PickCancelled { id } => {
             if app
+                .overlays
                 .runtime_dialogs
                 .pick
                 .as_ref()
                 .is_some_and(|dialog| dialog.id == id)
             {
-                app.runtime_dialogs.pick = None;
+                app.overlays.runtime_dialogs.pick = None;
             }
         }
     }
@@ -319,7 +320,7 @@ fn handle_prompt_request(app: &mut AppState, request: UiPromptRequest) {
     if let Some(default_value) = request.default_value.as_deref() {
         input.set_from(default_value);
     }
-    app.runtime_dialogs.prompt = Some(PromptSlot {
+    app.overlays.runtime_dialogs.prompt = Some(PromptSlot {
         state: PromptDialogState {
             id: request.id,
             title: request.title,
@@ -333,12 +334,12 @@ fn handle_prompt_request(app: &mut AppState, request: UiPromptRequest) {
 
 fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
     if let Some(panel) = build_onboarding_model_list_panel(&request) {
-        app.runtime_dialogs.pick = None;
-        app.model_list_panel = Some(panel);
+        app.overlays.runtime_dialogs.pick = None;
+        app.overlays.local_panel = Some(LocalPanel::ModelList(panel));
         return;
     }
     let chosen = vec![false; request.items.len()];
-    app.runtime_dialogs.pick = Some(PickDialogState {
+    app.overlays.runtime_dialogs.pick = Some(PickDialogState {
         id: request.id,
         title: request.title,
         message: request.message,

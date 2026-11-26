@@ -5,7 +5,8 @@ use crate::app::runtime::{
 use crate::app::state::parse_theme_name;
 use crate::app::state::LogKind;
 use crate::app::{
-    AppState, ModelListMode, ModelListSubmitAction, ModelSetScope, PendingRpc, PendingRpcSlot,
+    AppState, LocalPanel, ModelListMode, ModelListSubmitAction, ModelSetScope, PendingRpc,
+    PendingRpcSlot,
 };
 use crossterm::event::KeyCode;
 
@@ -14,13 +15,35 @@ const SESSION_HISTORY_MAX_EVENTS: usize = 500;
 
 #[cfg(test)]
 mod reasoning_level_tests {
-    use super::{request_session_history, request_session_list, REASONING_LEVELS};
+    use super::{
+        handle_model_picker_key, request_session_history, request_session_list, REASONING_LEVELS,
+    };
     use crate::app::runtime::MockRuntimeTx;
-    use crate::app::{AppState, PendingRpc, PendingRpcSlot};
+    use crate::app::{AppState, LocalPanel, ModelPickerState, PendingRpc, PendingRpcSlot};
+    use crossterm::event::KeyCode;
 
     #[test]
     fn reasoning_picker_includes_max_after_xhigh() {
         assert_eq!(REASONING_LEVELS, ["low", "medium", "high", "xhigh", "max"]);
+    }
+
+    #[test]
+    fn model_picker_enter_keeps_the_new_reasoning_picker() {
+        let mut app = AppState::default();
+        let mut tx = MockRuntimeTx::default();
+        app.overlays.local_panel = Some(LocalPanel::ModelPicker(ModelPickerState {
+            models: vec!["model".into()],
+            selected: 0,
+        }));
+
+        assert_eq!(
+            handle_model_picker_key(&mut app, KeyCode::Enter, &mut tx),
+            Some(true)
+        );
+        assert!(matches!(
+            app.overlays.local_panel,
+            Some(LocalPanel::ReasoningPicker(ref picker)) if picker.model == "model"
+        ));
     }
 
     #[test]
@@ -90,13 +113,15 @@ fn open_reasoning_picker(
         .as_ref()
         .and_then(|current| levels.iter().position(|value| value == current))
         .unwrap_or_else(|| usize::from(levels.len() > 1));
-    app.reasoning_picker = Some(crate::app::ReasoningPickerState {
-        provider: provider.map(str::to_string),
-        model,
-        scope,
-        levels,
-        selected,
-    });
+    app.overlays.local_panel = Some(LocalPanel::ReasoningPicker(
+        crate::app::ReasoningPickerState {
+            provider: provider.map(str::to_string),
+            model,
+            scope,
+            levels,
+            selected,
+        },
+    ));
 }
 
 fn append_skill_mention(app: &mut AppState, skill_name: &str) {
@@ -150,11 +175,13 @@ pub(crate) fn request_session_list(app: &mut AppState, tx: &mut dyn RuntimeTx, s
 }
 
 pub(crate) fn handle_context_panel_key(app: &mut AppState, key: KeyCode) -> Option<bool> {
-    let panel = app.context_panel.as_mut()?;
+    let Some(LocalPanel::Context(panel)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
     let mut needs_redraw = false;
     match key {
         KeyCode::Esc | KeyCode::Enter => {
-            app.context_panel = None;
+            app.overlays.local_panel = None;
             needs_redraw = true;
         }
         KeyCode::Up => {
@@ -182,21 +209,21 @@ pub(crate) fn handle_context_panel_key(app: &mut AppState, key: KeyCode) -> Opti
 }
 
 pub(crate) fn handle_skills_list_panel_key(app: &mut AppState, key: KeyCode) -> Option<bool> {
-    app.skills_list_panel.as_ref()?;
+    let Some(LocalPanel::SkillsList(panel)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
     let mut needs_redraw = false;
     match key {
         KeyCode::Esc => {
-            app.skills_list_panel = None;
+            app.overlays.local_panel = None;
             needs_redraw = true;
         }
         KeyCode::Enter => {
-            let selected = app.skills_list_panel.as_ref().and_then(|panel| {
-                panel
-                    .selected_item_index()
-                    .and_then(|index| panel.items.get(index))
-                    .map(|item| (item.name.clone(), item.enabled))
-            });
-            app.skills_list_panel = None;
+            let selected = panel
+                .selected_item_index()
+                .and_then(|index| panel.items.get(index))
+                .map(|item| (item.name.clone(), item.enabled));
+            app.overlays.local_panel = None;
             if let Some((name, enabled)) = selected {
                 if enabled {
                     append_skill_mention(app, &name);
@@ -211,53 +238,38 @@ pub(crate) fn handle_skills_list_panel_key(app: &mut AppState, key: KeyCode) -> 
             needs_redraw = true;
         }
         KeyCode::Up => {
-            if let Some(panel) = app.skills_list_panel.as_mut() {
-                panel.selected = panel.selected.saturating_sub(1);
-            }
+            panel.selected = panel.selected.saturating_sub(1);
             needs_redraw = true;
         }
         KeyCode::Down => {
-            if let Some(panel) = app.skills_list_panel.as_mut() {
-                if panel.selected + 1 < panel.filtered_indices.len() {
-                    panel.selected += 1;
-                }
+            if panel.selected + 1 < panel.filtered_indices.len() {
+                panel.selected += 1;
             }
             needs_redraw = true;
         }
         KeyCode::PageUp => {
-            if let Some(panel) = app.skills_list_panel.as_mut() {
-                panel.selected = panel.selected.saturating_sub(5);
-            }
+            panel.selected = panel.selected.saturating_sub(5);
             needs_redraw = true;
         }
         KeyCode::PageDown => {
-            if let Some(panel) = app.skills_list_panel.as_mut() {
-                let next = panel.selected.saturating_add(5);
-                panel.selected = usize::min(next, panel.filtered_indices.len().saturating_sub(1));
-            }
+            let next = panel.selected.saturating_add(5);
+            panel.selected = usize::min(next, panel.filtered_indices.len().saturating_sub(1));
             needs_redraw = true;
         }
         KeyCode::Tab => {
-            if let Some(panel) = app.skills_list_panel.as_mut() {
-                panel.scope_filter = panel.scope_filter.cycle();
-                panel.rebuild();
-            }
+            panel.scope_filter = panel.scope_filter.cycle();
+            panel.rebuild();
             needs_redraw = true;
         }
         KeyCode::Char(' ') | KeyCode::Char('e') | KeyCode::Char('E') => {
-            let selected_index = app
-                .skills_list_panel
-                .as_ref()
-                .and_then(|panel| panel.selected_item_index());
+            let selected_index = panel.selected_item_index();
             if let Some(index) = selected_index {
                 let mut update: Option<(String, bool)> = None;
-                if let Some(panel) = app.skills_list_panel.as_mut() {
-                    if let Some(item) = panel.items.get_mut(index) {
-                        item.enabled = !item.enabled;
-                        update = Some((item.path.clone(), item.enabled));
-                    }
-                    panel.rebuild();
+                if let Some(item) = panel.items.get_mut(index) {
+                    item.enabled = !item.enabled;
+                    update = Some((item.path.clone(), item.enabled));
                 }
+                panel.rebuild();
                 if let Some((path, enabled)) = update {
                     if enabled {
                         app.disabled_skill_paths.remove(&path);
@@ -269,17 +281,13 @@ pub(crate) fn handle_skills_list_panel_key(app: &mut AppState, key: KeyCode) -> 
             needs_redraw = true;
         }
         KeyCode::Backspace => {
-            if let Some(panel) = app.skills_list_panel.as_mut() {
-                panel.search_query.pop();
-                panel.rebuild();
-            }
+            panel.search_query.pop();
+            panel.rebuild();
             needs_redraw = true;
         }
         KeyCode::Char(ch) => {
-            if let Some(panel) = app.skills_list_panel.as_mut() {
-                panel.search_query.push(ch);
-                panel.rebuild();
-            }
+            panel.search_query.push(ch);
+            panel.rebuild();
             needs_redraw = true;
         }
         _ => {}
@@ -292,11 +300,13 @@ pub(crate) fn handle_theme_list_panel_key(
     key: KeyCode,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let panel = app.theme_list_panel.as_mut()?;
+    let Some(LocalPanel::ThemeList(panel)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
     let mut needs_redraw = false;
     match key {
         KeyCode::Esc => {
-            app.theme_list_panel = None;
+            app.overlays.local_panel = None;
             needs_redraw = true;
         }
         KeyCode::Up => {
@@ -323,7 +333,7 @@ pub(crate) fn handle_theme_list_panel_key(
                 .theme_ids
                 .get(panel.selected)
                 .and_then(|value| parse_theme_name(value));
-            app.theme_list_panel = None;
+            app.overlays.local_panel = None;
             if let Some(theme) = selected_theme {
                 if !app.runtime_info.supports_theme_set {
                     app.push_line(LogKind::Status, "Theme update unavailable");
@@ -350,7 +360,9 @@ pub(crate) fn handle_model_list_panel_key(
     key: KeyCode,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let panel = app.model_list_panel.as_mut()?;
+    let Some(LocalPanel::ModelList(panel)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
     let mut needs_redraw = false;
     match key {
         KeyCode::Esc => {
@@ -358,7 +370,7 @@ pub(crate) fn handle_model_list_panel_key(
                 ModelListSubmitAction::UiPick { request_id, .. } => Some(request_id.clone()),
                 ModelListSubmitAction::ModelSet { .. } => None,
             };
-            app.model_list_panel = None;
+            app.overlays.local_panel = None;
             if let Some(request_id) = pending_pick_id {
                 let ids: Vec<String> = Vec::new();
                 if let Err(error) = send_pick_response(tx, &request_id, &ids) {
@@ -382,7 +394,7 @@ pub(crate) fn handle_model_list_panel_key(
                     item_ids: item_ids.clone(),
                 },
             };
-            app.model_list_panel = None;
+            app.overlays.local_panel = None;
             if let Some(model) = model {
                 match submit_action {
                     ModelListSubmitAction::ModelSet { scope } => {
@@ -437,11 +449,13 @@ pub(crate) fn handle_session_list_panel_key(
     key: KeyCode,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let panel = app.session_list_panel.as_mut()?;
+    let Some(LocalPanel::SessionList(panel)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
     let mut needs_redraw = false;
     match key {
         KeyCode::Esc => {
-            app.session_list_panel = None;
+            app.overlays.local_panel = None;
             needs_redraw = true;
         }
         KeyCode::Enter => {
@@ -454,7 +468,7 @@ pub(crate) fn handle_session_list_panel_key(
             }
             let selected = panel.selected;
             let session_id = panel.session_ids.get(selected).cloned();
-            app.session_list_panel = None;
+            app.overlays.local_panel = None;
             if let Some(session_id) = session_id {
                 if app.runtime_info.session_id.as_ref() != Some(&session_id) {
                     app.runtime_info.attachment_session_epoch += 1;
@@ -504,11 +518,13 @@ pub(crate) fn handle_lane_list_panel_key(
     key: KeyCode,
     _tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let panel = app.lane_list_panel.as_mut()?;
+    let Some(LocalPanel::LaneList(panel)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
     let mut needs_redraw = false;
     match key {
         KeyCode::Esc => {
-            app.lane_list_panel = None;
+            app.overlays.local_panel = None;
             needs_redraw = true;
         }
         KeyCode::Up => {
@@ -533,7 +549,7 @@ pub(crate) fn handle_lane_list_panel_key(
         KeyCode::Enter => {
             if panel.selected >= panel.lanes.len() {
                 app.new_lane_task_id = None;
-                app.runtime_dialogs.prompt = Some(crate::app::PromptSlot {
+                app.overlays.runtime_dialogs.prompt = Some(crate::app::PromptSlot {
                     state: crate::app::PromptDialogState {
                         id: "lane:new-task".to_string(),
                         title: "New lane".to_string(),
@@ -545,7 +561,7 @@ pub(crate) fn handle_lane_list_panel_key(
                 });
                 needs_redraw = true;
             } else if let Some(lane) = panel.lanes.get(panel.selected).cloned() {
-                app.runtime_dialogs.pick = Some(crate::app::PickDialogState {
+                app.overlays.runtime_dialogs.pick = Some(crate::app::PickDialogState {
                     id: format!("lane:action:{}", lane.lane_id),
                     title: format!("Lane {}", lane.lane_id),
                     message: None,
@@ -583,11 +599,13 @@ pub(crate) fn handle_provider_picker_key(
     key: KeyCode,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let picker = app.provider_picker.as_mut()?;
+    let Some(LocalPanel::ProviderPicker(picker)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
     let mut needs_redraw = false;
     match key {
         KeyCode::Esc => {
-            app.provider_picker = None;
+            app.overlays.local_panel = None;
             needs_redraw = true;
         }
         KeyCode::Up => {
@@ -606,9 +624,7 @@ pub(crate) fn handle_provider_picker_key(
             let provider = picker.providers.get(picker.selected).cloned();
             let mode = picker.mode;
             let scope = picker.scope;
-            app.provider_picker = None;
-            app.model_list_panel = None;
-            app.reasoning_picker = None;
+            app.overlays.local_panel = None;
             if let Some(provider) = provider {
                 let id = tx.next_id();
                 app.rpc_pending
@@ -631,11 +647,13 @@ pub(crate) fn handle_model_picker_key(
     key: KeyCode,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let picker = app.model_picker.as_mut()?;
+    let Some(LocalPanel::ModelPicker(picker)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
     let mut needs_redraw = false;
     match key {
         KeyCode::Esc => {
-            app.model_picker = None;
+            app.overlays.local_panel = None;
             needs_redraw = true;
         }
         KeyCode::Up => {
@@ -651,12 +669,12 @@ pub(crate) fn handle_model_picker_key(
             }
         }
         KeyCode::Enter => {
-            if let Some(model) = picker.models.get(picker.selected).cloned() {
+            let model = picker.models.get(picker.selected).cloned();
+            app.overlays.local_panel = None;
+            if let Some(model) = model {
                 let provider = app.runtime_info.current_provider.clone();
                 open_reasoning_picker(app, provider.as_deref(), model, ModelSetScope::Config, tx);
             }
-            app.model_picker = None;
-            app.model_list_panel = None;
             needs_redraw = true;
         }
         _ => {}
@@ -669,11 +687,13 @@ pub(crate) fn handle_reasoning_picker_key(
     key: KeyCode,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let picker = app.reasoning_picker.as_mut()?;
+    let Some(LocalPanel::ReasoningPicker(picker)) = app.overlays.local_panel.as_mut() else {
+        return None;
+    };
     let mut needs_redraw = false;
     match key {
         KeyCode::Esc => {
-            app.reasoning_picker = None;
+            app.overlays.local_panel = None;
             needs_redraw = true;
         }
         KeyCode::Up => {
@@ -693,7 +713,7 @@ pub(crate) fn handle_reasoning_picker_key(
             let model = picker.model.clone();
             let scope = picker.scope;
             let reasoning = picker.levels.get(picker.selected).cloned();
-            app.reasoning_picker = None;
+            app.overlays.local_panel = None;
             if let Some(reasoning) = reasoning {
                 let id = tx.next_id();
                 app.rpc_pending.insert(id.clone(), PendingRpc::ModelSet);

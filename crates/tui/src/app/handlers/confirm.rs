@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 pub fn handle_confirm_request(app: &mut AppState, request: UiConfirmRequest) {
     app.scroll_from_bottom = 0;
-    app.runtime_dialogs.confirm = Some(ConfirmSlot::Pending(ConfirmDialogState {
+    app.overlays.runtime_dialogs.confirm = Some(ConfirmSlot::Pending(ConfirmDialogState {
         id: request.id,
         title: request.title,
         message: request.message,
@@ -21,7 +21,7 @@ pub fn handle_confirm_request(app: &mut AppState, request: UiConfirmRequest) {
 }
 
 pub fn activate_pending_confirm_dialog(app: &mut AppState) -> bool {
-    app.runtime_dialogs.activate_pending_confirm()
+    app.overlays.runtime_dialogs.activate_pending_confirm()
 }
 
 struct ConfirmResponse {
@@ -213,7 +213,7 @@ pub fn handle_confirm_key(
     modifiers: KeyModifiers,
     tx: &mut dyn RuntimeTx,
 ) -> Option<bool> {
-    let (confirm, input) = app.runtime_dialogs.active_confirm_mut()?;
+    let (confirm, input) = app.overlays.runtime_dialogs.active_confirm_mut()?;
     let update = match confirm.mode {
         ConfirmMode::Select => handle_confirm_select_key(
             key,
@@ -227,7 +227,7 @@ pub fn handle_confirm_key(
 
     if let Some(response) = update.response {
         let confirm_id = confirm.id.clone();
-        app.runtime_dialogs.confirm = None;
+        app.overlays.runtime_dialogs.confirm = None;
         // After confirm closes, force a bottom-aligned scrollback sync.
         app.scroll_from_bottom = 0;
         app.request_scrollback_sync();

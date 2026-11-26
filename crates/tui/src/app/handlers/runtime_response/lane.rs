@@ -1,6 +1,8 @@
 use crate::app::runtime::{send_tool_call, RpcResponse, RuntimeTx};
 use crate::app::state::LogKind;
-use crate::app::{AppState, LaneListItem, LaneListPanelState, PendingRpc, PendingRpcSlot};
+use crate::app::{
+    AppState, LaneListItem, LaneListPanelState, LocalPanel, PendingRpc, PendingRpcSlot,
+};
 use serde_json::{json, Value};
 
 fn extract_tool_call_result(response: RpcResponse) -> Result<Value, String> {
@@ -154,26 +156,21 @@ pub(crate) fn apply_lane_list_result(app: &mut AppState, result: &Value) {
     }
     rows.push("+ New lane".to_string());
 
-    app.model_list_panel = None;
-    app.reasoning_picker = None;
-    app.session_list_panel = None;
-    app.context_panel = None;
-    app.skills_list_panel = None;
-    app.theme_list_panel = None;
     if app
+        .overlays
         .runtime_dialogs
         .prompt
         .as_ref()
         .is_some_and(|prompt| matches!(prompt.state.id.as_str(), "lane:new-task" | "lane:new-seed"))
     {
-        app.runtime_dialogs.prompt = None;
+        app.overlays.runtime_dialogs.prompt = None;
         app.new_lane_task_id = None;
     }
-    app.lane_list_panel = Some(LaneListPanelState {
+    app.overlays.local_panel = Some(LocalPanel::LaneList(LaneListPanelState {
         title: "Lanes".to_string(),
         header: "lane_id | task_id | state | mux".to_string(),
         rows,
         lanes: items,
         selected: 0,
-    });
+    }));
 }

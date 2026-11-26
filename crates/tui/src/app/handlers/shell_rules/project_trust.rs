@@ -88,7 +88,7 @@ pub(super) fn confirm(
         );
         return;
     }
-    if app.runtime_dialogs.is_any_open() {
+    if app.overlays.runtime_dialogs.is_any_open() {
         app.push_line(
             LogKind::Status,
             "Finish the current dialog, then run /permissions again.",
@@ -106,7 +106,7 @@ pub(super) fn confirm(
         },
         rule_text(&snapshot.rules)
     );
-    app.runtime_dialogs.pick = Some(picker(
+    app.overlays.runtime_dialogs.pick = Some(picker(
         ShellRulePicker::Trust {
             trusted,
             workspace,

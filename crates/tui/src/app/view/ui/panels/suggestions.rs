@@ -24,7 +24,7 @@ fn queue_row(item: &crate::app::PendingPromptRun) -> String {
 }
 
 pub(super) fn build_queue_panel_view(app: &AppState) -> Option<PanelView> {
-    if let Some(picker) = &app.queue_steer_picker {
+    if let Some(picker) = &app.overlays.queue_focus {
         let mut lines = Vec::new();
         let mut selected = None;
         if app.steerable_run_id() == Some(picker.run_id.as_str()) {
@@ -242,7 +242,7 @@ mod tests {
                 .push_back(queued(&format!("q{i}"), "item"));
         }
         app.pending_prompt_queue[2].files.steer_target = Some("run".into());
-        app.queue_steer_picker = Some(crate::app::app_state::QueueSteerPicker {
+        app.overlays.queue_focus = Some(crate::app::QueueSteerPicker {
             run_id: "run".into(),
             queue_id: "q6".into(),
         });

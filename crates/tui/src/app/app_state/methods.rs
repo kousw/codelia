@@ -3,6 +3,7 @@ use super::{
 };
 use crate::app::state::{LogKind, LogLine, LogTone, RenderState, StatusLineMode, SyncPhase};
 use crate::app::util::PerfMemorySample;
+use crate::app::PasteTarget;
 use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -100,24 +101,16 @@ impl AppState {
     }
 
     pub fn has_interaction_panel(&self) -> bool {
-        self.queue_steer_picker.is_some() || self.has_other_interaction_panel()
+        self.overlays.queue_focus.is_some() || self.overlays.has_modal_or_panel()
     }
 
     pub fn queue_picker_focused(&self) -> bool {
-        self.queue_steer_picker.is_some() && !self.has_other_interaction_panel()
+        self.overlays.queue_focus.is_some() && !self.overlays.has_modal_or_panel()
     }
 
-    fn has_other_interaction_panel(&self) -> bool {
-        self.runtime_dialogs.is_any_open()
-            || self.model_picker.is_some()
-            || self.provider_picker.is_some()
-            || self.reasoning_picker.is_some()
-            || self.model_list_panel.is_some()
-            || self.session_list_panel.is_some()
-            || self.lane_list_panel.is_some()
-            || self.context_panel.is_some()
-            || self.skills_list_panel.is_some()
-            || self.theme_list_panel.is_some()
+    pub fn paste_target(&self, startup_pending: bool) -> PasteTarget {
+        self.overlays
+            .paste_target(self.image_preview.is_open(), startup_pending)
     }
 
     pub fn is_running(&self) -> bool {

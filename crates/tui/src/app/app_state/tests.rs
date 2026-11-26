@@ -1,9 +1,7 @@
-use super::{
-    AppState, ErrorDetailMode, PendingRpc, PendingRpcSlot, SkillsListItemState,
-    SkillsListPanelState,
-};
+use super::{AppState, ErrorDetailMode, PendingRpc, PendingRpcSlot, SkillsListItemState};
 use crate::app::state::{
-    ConfirmDialogState, ConfirmMode, ConfirmSlot, CursorPhase, SkillsScopeFilter, SyncPhase,
+    ConfirmDialogState, ConfirmMode, ConfirmSlot, CursorPhase, SkillsListPanelState,
+    SkillsScopeFilter, SyncPhase,
 };
 use crate::app::state::{LogKind, LogLine};
 
@@ -74,16 +72,16 @@ fn sample_confirm_dialog() -> ConfirmDialogState {
 #[test]
 fn clear_log_preserves_pending_and_active_confirm() {
     let mut app = AppState::default();
-    app.runtime_dialogs.confirm = Some(ConfirmSlot::Pending(sample_confirm_dialog()));
+    app.overlays.runtime_dialogs.confirm = Some(ConfirmSlot::Pending(sample_confirm_dialog()));
     app.clear_log();
-    assert!(app.runtime_dialogs.is_confirm_pending());
+    assert!(app.overlays.runtime_dialogs.is_confirm_pending());
 
-    assert!(app.runtime_dialogs.activate_pending_confirm());
-    let (_, input) = app.runtime_dialogs.active_confirm_mut().unwrap();
+    assert!(app.overlays.runtime_dialogs.activate_pending_confirm());
+    let (_, input) = app.overlays.runtime_dialogs.active_confirm_mut().unwrap();
     input.set_from("reason");
 
     app.clear_log();
-    let (state, input) = app.runtime_dialogs.active_confirm().unwrap();
+    let (state, input) = app.overlays.runtime_dialogs.active_confirm().unwrap();
     assert_eq!(state.id, "confirm_1");
     assert_eq!(input.current(), "reason");
 }
@@ -118,15 +116,15 @@ fn render_state_scenario_tracks_sync_confirm_and_cursor_phases() {
     app.assert_render_invariants();
 
     // confirm pending -> active
-    app.runtime_dialogs.confirm = Some(ConfirmSlot::Pending(sample_confirm_dialog()));
-    assert!(app.runtime_dialogs.is_confirm_pending());
+    app.overlays.runtime_dialogs.confirm = Some(ConfirmSlot::Pending(sample_confirm_dialog()));
+    assert!(app.overlays.runtime_dialogs.is_confirm_pending());
     app.assert_render_invariants();
-    assert!(app.runtime_dialogs.activate_pending_confirm());
-    assert!(app.runtime_dialogs.active_confirm().is_some());
+    assert!(app.overlays.runtime_dialogs.activate_pending_confirm());
+    assert!(app.overlays.runtime_dialogs.active_confirm().is_some());
     app.assert_render_invariants();
 
     // confirm close -> next input cycle
-    app.runtime_dialogs.confirm = None;
+    app.overlays.runtime_dialogs.confirm = None;
     app.request_scrollback_sync();
     assert_eq!(app.render_state.sync_phase, SyncPhase::NeedsInsert);
     app.assert_render_invariants();
@@ -220,4 +218,95 @@ fn clear_log_removes_only_the_pending_image_artifact_slot() {
         app.rpc_pending.take("model"),
         Some(PendingRpc::ImageModelGet)
     ));
+}
+
+#[test]
+fn every_local_panel_blocks_paste() {
+    use crate::app::{
+        ContextPanelState, LaneListPanelState, LocalPanel, ModelListMode, ModelListPanelState,
+        ModelListSubmitAction, ModelListViewMode, ModelPickerState, ModelSetScope, PasteTarget,
+        ProviderPickerState, ReasoningPickerState, SessionListPanelState, ThemeListPanelState,
+    };
+    let panels = [
+        LocalPanel::SessionList(SessionListPanelState {
+            title: "Sessions".into(),
+            header: String::new(),
+            rows: vec![],
+            session_ids: vec![],
+            selected: 0,
+            show_all: false,
+        }),
+        LocalPanel::LaneList(LaneListPanelState {
+            title: "Lanes".into(),
+            header: String::new(),
+            rows: vec![],
+            lanes: vec![],
+            selected: 0,
+        }),
+        LocalPanel::Context(ContextPanelState {
+            title: "Context".into(),
+            header: String::new(),
+            rows: vec![],
+            selected: 0,
+        }),
+        LocalPanel::SkillsList(sample_panel()),
+        LocalPanel::ThemeList(ThemeListPanelState {
+            title: "Themes".into(),
+            header: String::new(),
+            rows: vec![],
+            theme_ids: vec![],
+            selected: 0,
+        }),
+        LocalPanel::ModelList(ModelListPanelState {
+            title: "Models".into(),
+            header_limits: String::new(),
+            rows_limits: vec![],
+            header_cost: String::new(),
+            rows_cost: vec![],
+            model_ids: vec![],
+            selected: 0,
+            view_mode: ModelListViewMode::Limits,
+            submit_action: ModelListSubmitAction::ModelSet {
+                scope: ModelSetScope::Config,
+            },
+        }),
+        LocalPanel::ProviderPicker(ProviderPickerState {
+            providers: vec!["openai".into()],
+            selected: 0,
+            mode: ModelListMode::List,
+            scope: ModelSetScope::Config,
+        }),
+        LocalPanel::ModelPicker(ModelPickerState {
+            models: vec!["model".into()],
+            selected: 0,
+        }),
+        LocalPanel::ReasoningPicker(ReasoningPickerState {
+            provider: Some("openai".into()),
+            model: "model".into(),
+            scope: ModelSetScope::Config,
+            levels: vec!["low".into()],
+            selected: 0,
+        }),
+    ];
+    let mut app = AppState::default();
+    assert_eq!(app.paste_target(false), PasteTarget::Composer);
+    for panel in panels {
+        app.overlays.local_panel = Some(panel);
+        assert_eq!(app.paste_target(false), PasteTarget::Blocked);
+    }
+}
+
+#[test]
+fn queue_focus_blocks_editor_input_but_allows_queued_dispatch() {
+    use crate::app::{PasteTarget, QueueSteerPicker};
+
+    let mut app = AppState::default();
+    app.overlays.queue_focus = Some(QueueSteerPicker {
+        run_id: "completed-run".into(),
+        queue_id: "q1".into(),
+    });
+    assert!(app.queue_picker_focused());
+    assert!(app.has_interaction_panel());
+    assert_eq!(app.paste_target(false), PasteTarget::Blocked);
+    assert!(crate::app::handlers::can_dispatch_prompt_now(&app));
 }

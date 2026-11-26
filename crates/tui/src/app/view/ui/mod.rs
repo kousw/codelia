@@ -54,7 +54,7 @@ fn drawn_update_choice(
     app: &AppState,
     panel: Rect,
 ) -> Option<(String, usize)> {
-    let Some(RuntimeDialogRef::Pick(picker)) = app.runtime_dialogs.top() else {
+    let Some(RuntimeDialogRef::Pick(picker)) = app.overlays.runtime_dialogs.top() else {
         return None;
     };
     if !picker.local_update_picker {

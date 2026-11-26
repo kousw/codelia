@@ -3,7 +3,7 @@ use super::panel_builders::build_model_list_panel;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::ModelFastMode;
-use crate::app::{AppState, ModelListMode, ModelPickerState, ModelSetScope};
+use crate::app::{AppState, LocalPanel, ModelListMode, ModelPickerState, ModelSetScope};
 use crate::protocol::{decode_result, methods, ModelListResult};
 
 pub(super) fn handle_model_list_response(
@@ -67,41 +67,44 @@ fn apply_model_list_result(
     if let Some(source) = &result.source {
         app.runtime_info.current_model_source = Some(source.as_str().to_owned());
     }
-    app.skills_list_panel = None;
-    app.theme_list_panel = None;
     if matches!(mode, ModelListMode::Silent) {
         return;
     }
     if models.is_empty() {
+        if matches!(
+            app.overlays.local_panel,
+            Some(LocalPanel::SkillsList(_) | LocalPanel::ThemeList(_))
+        ) {
+            app.overlays.local_panel = None;
+        }
         app.push_line(LogKind::Error, "model.list returned no models");
         return;
     }
 
     if matches!(mode, ModelListMode::Picker) {
-        app.model_list_panel = None;
-        app.reasoning_picker = None;
         let selected = current
             .as_ref()
             .and_then(|value| models.iter().position(|model| model == value))
             .unwrap_or(0);
-        app.model_picker = Some(ModelPickerState { models, selected });
+        app.overlays.local_panel = Some(LocalPanel::ModelPicker(ModelPickerState {
+            models,
+            selected,
+        }));
         return;
     }
 
-    app.model_picker = None;
-    app.reasoning_picker = None;
     let provider_label = provider
         .or_else(|| app.runtime_info.current_provider.clone())
         .unwrap_or_else(|| "openai".to_string());
     let current_label = current.clone().unwrap_or_else(|| "-".to_string());
-    app.model_list_panel = Some(build_model_list_panel(
+    app.overlays.local_panel = Some(LocalPanel::ModelList(build_model_list_panel(
         provider_label,
         current_label,
         models,
         result.details.as_ref(),
         current.as_deref(),
         scope,
-    ));
+    )));
 }
 
 pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcResponse) {
@@ -192,10 +195,10 @@ mod responses_provider_tests {
             ["low", "medium", "high"]
         );
         assert!(app.runtime_info.model_reasoning_levels["text-only"].is_empty());
-        assert_eq!(
-            app.model_picker.expect("model picker").models,
-            ["strata", "text-only"]
-        );
+        let Some(LocalPanel::ModelPicker(picker)) = app.overlays.local_panel else {
+            panic!("model picker expected");
+        };
+        assert_eq!(picker.models, ["strata", "text-only"]);
     }
     #[test]
     fn model_response_restores_ultrafast_and_boolean_modes() {

@@ -8,8 +8,8 @@ use crate::app::state::{
 };
 use crate::app::ModelFastMode;
 use crate::app::{
-    AppState, ErrorDetailMode, ModelListMode, ModelSetScope, PendingRpc, PendingRpcSlot,
-    ProviderPickerState, SkillsScopeFilter,
+    AppState, ErrorDetailMode, LocalPanel, ModelListMode, ModelSetScope, PendingRpc,
+    PendingRpcSlot, ProviderPickerState, SkillsScopeFilter,
 };
 use serde_json::json;
 
@@ -103,10 +103,17 @@ pub(super) fn handle_model_session_command<'a>(
                 );
                 return;
             }
-            app.model_list_panel = None;
-            app.reasoning_picker = None;
-            app.skills_list_panel = None;
-            app.theme_list_panel = None;
+            if matches!(
+                app.overlays.local_panel,
+                Some(
+                    LocalPanel::ModelList(_)
+                        | LocalPanel::ReasoningPicker(_)
+                        | LocalPanel::SkillsList(_)
+                        | LocalPanel::ThemeList(_)
+                )
+            ) {
+                app.overlays.local_panel = None;
+            }
             let id = tx.next_id();
             app.rpc_pending.insert(id.clone(), PendingRpc::ModelSet);
             if let Err(error) = send_model_set(
@@ -144,10 +151,17 @@ fn send_model_set_for_scope(
     model: &str,
     scope: ModelSetScope,
 ) {
-    app.model_list_panel = None;
-    app.reasoning_picker = None;
-    app.skills_list_panel = None;
-    app.theme_list_panel = None;
+    if matches!(
+        app.overlays.local_panel,
+        Some(
+            LocalPanel::ModelList(_)
+                | LocalPanel::ReasoningPicker(_)
+                | LocalPanel::SkillsList(_)
+                | LocalPanel::ThemeList(_)
+        )
+    ) {
+        app.overlays.local_panel = None;
+    }
     let id = tx.next_id();
     app.rpc_pending.insert(id.clone(), PendingRpc::ModelSet);
     let (provider, name) = model
@@ -170,10 +184,6 @@ fn send_model_set_for_scope(
 }
 
 fn open_model_provider_picker(app: &mut AppState, scope: ModelSetScope) {
-    app.model_list_panel = None;
-    app.reasoning_picker = None;
-    app.skills_list_panel = None;
-    app.theme_list_panel = None;
     let providers = if app.runtime_info.model_providers.is_empty() {
         MODEL_PROVIDERS
             .iter()
@@ -191,12 +201,12 @@ fn open_model_provider_picker(app: &mut AppState, scope: ModelSetScope) {
     if providers.is_empty() {
         app.push_line(LogKind::Error, "no model providers available");
     } else {
-        app.provider_picker = Some(ProviderPickerState {
+        app.overlays.local_panel = Some(LocalPanel::ProviderPicker(ProviderPickerState {
             providers,
             selected,
             mode: ModelListMode::List,
             scope,
-        });
+        }));
     }
 }
 
@@ -210,7 +220,9 @@ mod responses_provider_tests {
         app.runtime_info.model_providers = vec!["openai".into(), "home".into()];
         app.runtime_info.current_provider = Some("home".into());
         open_model_provider_picker(&mut app, ModelSetScope::Session);
-        let picker = app.provider_picker.expect("provider picker");
+        let Some(LocalPanel::ProviderPicker(picker)) = app.overlays.local_panel else {
+            panic!("provider picker expected");
+        };
         assert_eq!(picker.providers, ["openai", "home"]);
         assert_eq!(picker.selected, 1);
         assert!(matches!(picker.scope, ModelSetScope::Session));
@@ -250,10 +262,17 @@ pub(super) fn handle_fast_command<'a>(
         app.push_line(LogKind::Error, "No current model; use /model first.");
         return;
     };
-    app.model_list_panel = None;
-    app.reasoning_picker = None;
-    app.skills_list_panel = None;
-    app.theme_list_panel = None;
+    if matches!(
+        app.overlays.local_panel,
+        Some(
+            LocalPanel::ModelList(_)
+                | LocalPanel::ReasoningPicker(_)
+                | LocalPanel::SkillsList(_)
+                | LocalPanel::ThemeList(_)
+        )
+    ) {
+        app.overlays.local_panel = None;
+    }
     let id = tx.next_id();
     app.rpc_pending.insert(id.clone(), PendingRpc::ModelSet);
     let scope = if app.runtime_info.current_model_source.as_deref() == Some("session") {
@@ -301,8 +320,12 @@ pub(super) fn handle_context_command<'a>(
     let id = tx.next_id();
     app.rpc_pending
         .insert(id.clone(), PendingRpc::ContextInspect);
-    app.skills_list_panel = None;
-    app.theme_list_panel = None;
+    if matches!(
+        app.overlays.local_panel,
+        Some(LocalPanel::SkillsList(_) | LocalPanel::ThemeList(_))
+    ) {
+        app.overlays.local_panel = None;
+    }
     if let Err(error) = send_context_inspect(tx, &id, include_agents, include_skills) {
         app.rpc_pending.remove_slot(PendingRpcSlot::ContextInspect);
         app.push_error_report("send error", error.to_string());
@@ -383,12 +406,19 @@ pub(super) fn handle_skills_command<'a>(
     }
 
     let query = query_parts.join(" ");
-    app.model_list_panel = None;
-    app.reasoning_picker = None;
-    app.session_list_panel = None;
-    app.context_panel = None;
-    app.skills_list_panel = None;
-    app.theme_list_panel = None;
+    if matches!(
+        app.overlays.local_panel,
+        Some(
+            LocalPanel::ModelList(_)
+                | LocalPanel::ReasoningPicker(_)
+                | LocalPanel::SessionList(_)
+                | LocalPanel::Context(_)
+                | LocalPanel::SkillsList(_)
+                | LocalPanel::ThemeList(_)
+        )
+    ) {
+        app.overlays.local_panel = None;
+    }
     let id = tx.next_id();
     app.rpc_pending.insert(
         id.clone(),
@@ -440,7 +470,9 @@ pub(super) fn handle_theme_command<'a>(
             app.push_error_report("send error", error.to_string());
             return;
         }
-        app.theme_list_panel = None;
+        if matches!(app.overlays.local_panel, Some(LocalPanel::ThemeList(_))) {
+            app.overlays.local_panel = None;
+        }
         return;
     }
 
@@ -470,21 +502,13 @@ pub(super) fn handle_theme_command<'a>(
 
     let header = "Enter: apply & save theme  Esc: close".to_string();
 
-    app.model_list_panel = None;
-    app.reasoning_picker = None;
-    app.session_list_panel = None;
-    app.context_panel = None;
-    app.skills_list_panel = None;
-    app.lane_list_panel = None;
-    app.provider_picker = None;
-    app.model_picker = None;
-    app.theme_list_panel = Some(ThemeListPanelState {
+    app.overlays.local_panel = Some(LocalPanel::ThemeList(ThemeListPanelState {
         title: "Theme picker".to_string(),
         header,
         rows,
         theme_ids,
         selected,
-    });
+    }));
 }
 
 pub(super) fn handle_mcp_command<'a>(
@@ -504,8 +528,12 @@ pub(super) fn handle_mcp_command<'a>(
     let id = tx.next_id();
     app.rpc_pending
         .insert(id.clone(), PendingRpc::McpList { detail_id });
-    app.skills_list_panel = None;
-    app.theme_list_panel = None;
+    if matches!(
+        app.overlays.local_panel,
+        Some(LocalPanel::SkillsList(_) | LocalPanel::ThemeList(_))
+    ) {
+        app.overlays.local_panel = None;
+    }
     if let Err(error) = send_mcp_list(tx, &id, Some("loaded")) {
         app.rpc_pending.remove_slot(PendingRpcSlot::McpList);
         app.push_error_report("send error", error.to_string());
@@ -644,13 +672,20 @@ pub(super) fn handle_lane_command<'a>(
         app.push_line(LogKind::Status, "Lane commands unavailable");
         return;
     }
-    app.model_list_panel = None;
-    app.reasoning_picker = None;
-    app.session_list_panel = None;
-    app.context_panel = None;
-    app.skills_list_panel = None;
-    app.lane_list_panel = None;
-    app.theme_list_panel = None;
+    if matches!(
+        app.overlays.local_panel,
+        Some(
+            LocalPanel::ModelList(_)
+                | LocalPanel::ReasoningPicker(_)
+                | LocalPanel::SessionList(_)
+                | LocalPanel::Context(_)
+                | LocalPanel::SkillsList(_)
+                | LocalPanel::LaneList(_)
+                | LocalPanel::ThemeList(_)
+        )
+    ) {
+        app.overlays.local_panel = None;
+    }
 
     let id = tx.next_id();
     app.rpc_pending.insert(id.clone(), PendingRpc::LaneList);

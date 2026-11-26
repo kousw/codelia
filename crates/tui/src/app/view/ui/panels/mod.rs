@@ -6,7 +6,7 @@ mod render;
 mod suggestions;
 mod types;
 
-use crate::app::{AppState, ConfirmSlot, RuntimeDialogRef};
+use crate::app::{AppState, ConfirmSlot, LocalPanel, RuntimeDialogRef};
 
 use dialogs::{build_confirm_panel_view, build_pick_panel_view, build_prompt_panel_view};
 use lists::{
@@ -29,7 +29,7 @@ pub(super) fn render_composer_panel(
     max_lines: u16,
     width: usize,
 ) -> Vec<ratatui::text::Line<'static>> {
-    if let Some(RuntimeDialogRef::Pick(pick)) = app.runtime_dialogs.visible_top() {
+    if let Some(RuntimeDialogRef::Pick(pick)) = app.overlays.runtime_dialogs.visible_top() {
         if pick.approval {
             return dialogs::render_approval_pick(pick, view, max_lines, width);
         }
@@ -41,7 +41,7 @@ pub(super) fn render_composer_panel(
 }
 
 pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
-    if let Some(dialog) = app.runtime_dialogs.visible_top() {
+    if let Some(dialog) = app.overlays.runtime_dialogs.visible_top() {
         return match dialog {
             RuntimeDialogRef::Confirm(ConfirmSlot::Pending(_)) => None,
             RuntimeDialogRef::Confirm(ConfirmSlot::Active { state, .. }) => {
@@ -52,69 +52,50 @@ pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
         };
     }
 
-    if let Some(panel) = &app.session_list_panel {
-        return Some(build_session_list_panel_view(panel));
-    }
-
-    if let Some(panel) = &app.lane_list_panel {
-        return Some(build_lane_list_panel_view(panel));
-    }
-
-    if let Some(panel) = &app.context_panel {
-        return Some(build_context_panel_view(panel));
-    }
-
-    if let Some(panel) = &app.skills_list_panel {
-        return Some(build_skills_list_panel_view(panel));
-    }
-
-    if let Some(panel) = &app.theme_list_panel {
-        return Some(build_theme_list_panel_view(panel));
-    }
-
-    if let Some(panel) = &app.model_list_panel {
-        return Some(build_model_list_panel_view(panel));
-    }
-
-    if let Some(picker) = &app.provider_picker {
-        return Some(build_picker_panel_view(
+    match &app.overlays.local_panel {
+        Some(LocalPanel::SessionList(panel)) => Some(build_session_list_panel_view(panel)),
+        Some(LocalPanel::LaneList(panel)) => Some(build_lane_list_panel_view(panel)),
+        Some(LocalPanel::Context(panel)) => Some(build_context_panel_view(panel)),
+        Some(LocalPanel::SkillsList(panel)) => Some(build_skills_list_panel_view(panel)),
+        Some(LocalPanel::ThemeList(panel)) => Some(build_theme_list_panel_view(panel)),
+        Some(LocalPanel::ModelList(panel)) => Some(build_model_list_panel_view(panel)),
+        Some(LocalPanel::ProviderPicker(picker)) => Some(build_picker_panel_view(
             "Select provider".to_string(),
             &picker.providers,
             picker.selected,
             app.runtime_info.current_provider.as_deref(),
-        ));
-    }
+        )),
+        Some(LocalPanel::ModelPicker(picker)) => {
+            let provider_label = app
+                .runtime_info
+                .current_provider
+                .as_deref()
+                .unwrap_or("openai");
+            let title = format!("Select model ({provider_label})");
+            Some(build_picker_panel_view(
+                title,
+                &picker.models,
+                picker.selected,
+                app.runtime_info.current_model.as_deref(),
+            ))
+        }
 
-    if let Some(picker) = &app.model_picker {
-        let provider_label = app
-            .runtime_info
-            .current_provider
-            .as_deref()
-            .unwrap_or("openai");
-        let title = format!("Select model ({provider_label})");
-        return Some(build_picker_panel_view(
-            title,
-            &picker.models,
-            picker.selected,
-            app.runtime_info.current_model.as_deref(),
-        ));
-    }
+        Some(LocalPanel::ReasoningPicker(picker)) => {
+            let provider = picker.provider.as_deref().unwrap_or("openai");
+            let title = format!("Select reasoning ({provider}/{})", picker.model);
+            Some(build_picker_panel_view(
+                title,
+                &picker.levels,
+                picker.selected,
+                app.runtime_info.current_reasoning.as_deref(),
+            ))
+        }
 
-    if let Some(picker) = &app.reasoning_picker {
-        let provider = picker.provider.as_deref().unwrap_or("openai");
-        let title = format!("Select reasoning ({provider}/{})", picker.model);
-        return Some(build_picker_panel_view(
-            title,
-            &picker.levels,
-            picker.selected,
-            app.runtime_info.current_reasoning.as_deref(),
-        ));
+        None => build_queue_panel_view(app)
+            .or_else(|| build_command_panel_view(app))
+            .or_else(|| build_skill_suggestion_panel_view(app))
+            .or_else(|| build_attachment_panel_view(app)),
     }
-
-    build_queue_panel_view(app)
-        .or_else(|| build_command_panel_view(app))
-        .or_else(|| build_skill_suggestion_panel_view(app))
-        .or_else(|| build_attachment_panel_view(app))
 }
 
 // Focus owns the input area. Even a one-row terminal shows the current item.

@@ -7,6 +7,9 @@
 - `input/`: composer buffer, cursor, history behavior.
 - `log/`: render-safe log line model (`LogLine`, kinds/spans).
 - `ui/`: panel/dialog/picker/composer suggestion state and pure UI logic.
+  `ui/overlays.rs` defines the three overlay tiers and shared paste routing.
+  Queue focus counts as an interaction overlay and allows queued dispatch when
+  the other dispatch gates permit it.
 - `render.rs`: render synchronization state (`RenderState`, phases, cache stats).
 - `selection.rs`: side-effect-free transcript selection transitions and frame
   hit-map types.

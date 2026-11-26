@@ -233,17 +233,7 @@ pub(super) fn can_dispatch_prompt_now(app: &AppState) -> bool {
     {
         return false;
     }
-    !app.image_preview.is_open()
-        && !app.runtime_dialogs.is_any_open()
-        && app.provider_picker.is_none()
-        && app.model_picker.is_none()
-        && app.reasoning_picker.is_none()
-        && app.model_list_panel.is_none()
-        && app.session_list_panel.is_none()
-        && app.lane_list_panel.is_none()
-        && app.context_panel.is_none()
-        && app.skills_list_panel.is_none()
-        && app.theme_list_panel.is_none()
+    !app.image_preview.is_open() && !app.overlays.has_modal_or_panel()
 }
 
 pub(super) fn try_dispatch_queued_prompt(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool {

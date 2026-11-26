@@ -63,7 +63,12 @@
 - Terminal side effects belong in `render`, not `view`.
 - Keep `mod.rs` as a thin module boundary/re-export layer; put concrete app-state logic in `app_state/`.
 - `AppState` runtime concerns are grouped under `rpc_pending` (request-id waits) and `runtime_info` (session/model/capabilities).
-- `runtime_dialogs` holds independent confirm, prompt, and pick slots. Use `top()` for both view and key dispatch so confirm takes precedence over prompt, then pick. The confirm slot blocks keys while pending and gains its own reason editor after the first draw and scrollback sync decision. A covered prompt keeps its editor and a covered pick keeps its selection.
+- `AppState.overlays` orders runtime dialogs, one local panel, and queue steer focus.
+  Replace the local panel with one assignment and keep the other tiers independent.
+  Runtime slots keep confirm > prompt > pick priority with `top()` for input and
+  `visible_top()` for drawing so pending confirm keeps the underlying frame visible.
+  Onboarding model selection still uses `LocalPanel::ModelList` with the
+  `UiPick` submit action, and update and shell-rule pickers still use the pick slot.
 - `PendingRpcs` owns outgoing request metadata. Singleton slots keep the latest request, and `run.steer` supports multiple request IDs. Server-initiated choice IDs are tracked separately.
 - Route responses through goal handling, upload handling, `rpc_pending.take(&response.id)`, then the unmatched fallback. Goal tracking stays in `app.goal` and a pending `goal.continue` shares the `RunStart` slot.
 - `handlers` and `runtime/parser` should depend on `app::theme` / `app::markdown`, not `view/*`.

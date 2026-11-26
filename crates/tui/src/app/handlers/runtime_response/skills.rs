@@ -1,7 +1,9 @@
 use super::formatters::push_rpc_error;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
-use crate::app::{AppState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter};
+use crate::app::{
+    AppState, LocalPanel, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
+};
 use crate::protocol::{decode_result, methods, SkillCatalog};
 
 pub(super) fn handle_skills_list_response(
@@ -65,8 +67,12 @@ fn apply_skills_list_result(
     if items.is_empty() {
         app.push_line(LogKind::Status, "No skills found.");
         app.push_line(LogKind::Space, "");
-        app.skills_list_panel = None;
-        app.theme_list_panel = None;
+        if matches!(
+            app.overlays.local_panel,
+            Some(LocalPanel::SkillsList(_) | LocalPanel::ThemeList(_))
+        ) {
+            app.overlays.local_panel = None;
+        }
         return;
     }
 
@@ -106,10 +112,5 @@ fn apply_skills_list_result(
         scope_filter: scope.unwrap_or(SkillsScopeFilter::All),
     };
     panel.rebuild();
-    app.model_list_panel = None;
-    app.reasoning_picker = None;
-    app.session_list_panel = None;
-    app.context_panel = None;
-    app.theme_list_panel = None;
-    app.skills_list_panel = Some(panel);
+    app.overlays.local_panel = Some(LocalPanel::SkillsList(panel));
 }
