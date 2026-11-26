@@ -792,6 +792,37 @@ describe("structured approval escalation marker", () => {
 		expect("protected_paths_enforced" in picks[0]).toBe(false);
 	});
 
+	test("does not infer the protected-path flag from command text", async () => {
+		const state = structuredState();
+		const { run } = setup({ dispatcher: runtimeApprovalDispatcher(state) });
+		const picks = await withUiPicks(state, () =>
+			run({ source: 'echo "Configured protected paths are not enforced"' }),
+		);
+		expect(picks).toHaveLength(1);
+		expect(picks[0].message).toContain(
+			"Configured protected paths are not enforced",
+		);
+		expect(picks[0].escalation).toBe("unsandboxed");
+		expect(picks[0].title).toBe("Approve unsandboxed shell?");
+		expect("protected_paths_enforced" in picks[0]).toBe(false);
+	});
+
+	test("a full-access session's no-op escalation is not marked", async () => {
+		const state = structuredState();
+		const { run, launches } = setup({
+			sandboxMode: "full-access",
+			dispatcher: runtimeApprovalDispatcher(state),
+		});
+		const picks = await withUiPicks(state, () =>
+			run({ source: "rm -rf ./dist" }),
+		);
+		expect(picks).toHaveLength(1);
+		expect(picks[0].title).toBe("Approve shell?");
+		expect("escalation" in picks[0]).toBe(false);
+		expect("protected_paths_enforced" in picks[0]).toBe(false);
+		expect(launches).toEqual([]);
+	});
+
 	test("leaves ordinary shell, edit and lookalike host-tool approvals unmarked", async () => {
 		const secret = path.join(root, "secret.txt");
 		writeFileSync(secret, "top-secret");
