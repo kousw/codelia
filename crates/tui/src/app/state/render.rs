@@ -1,5 +1,5 @@
 use crate::app::state::log::LogLine;
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncPhase {
@@ -76,4 +76,12 @@ pub struct WrappedLogCache {
     pub log_version: u64,
     pub committed: LogPosition,
     pub wrapped: Vec<WrappedLogRow>,
+    pub line_row_ranges: Vec<Range<usize>>,
+    pub dirty_from: usize,
+}
+
+impl WrappedLogCache {
+    pub fn mark_dirty_from(&mut self, line_index: usize) {
+        self.dirty_from = self.dirty_from.min(line_index);
+    }
 }

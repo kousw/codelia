@@ -59,14 +59,21 @@ fn actionable_error_hint(text: &str) -> Option<&'static str> {
 }
 
 impl AppState {
-    pub(super) fn mark_log_changed(&mut self) {
+    pub(super) fn mark_log_dirty_from(&mut self, line_index: usize) {
         self.log_version = self.log_version.wrapping_add(1);
-        self.wrapped_log_cache = None;
+        if let Some(cache) = self.wrapped_log_cache.as_mut() {
+            cache.mark_dirty_from(line_index);
+        }
         self.text_selection.clear();
         self.transcript_hit_map = None;
         self.selection_notice = None;
         self.selection_notice_expires_at = None;
         self.log_changed = true;
+    }
+
+    pub(super) fn mark_log_changed(&mut self) {
+        self.wrapped_log_cache = None;
+        self.mark_log_dirty_from(0);
     }
 
     pub fn clear_text_selection(&mut self) -> bool {
@@ -442,21 +449,23 @@ impl AppState {
                 }
             }
             *slot = line;
-            self.mark_log_changed();
+            self.mark_log_dirty_from(index);
         }
     }
 
     pub fn push_line(&mut self, kind: LogKind, text: impl Into<String>) {
+        let index = self.log.len();
         self.log.push(LogLine::new(kind, text));
-        self.mark_log_changed();
+        self.mark_log_dirty_from(index);
     }
 
     pub fn extend_lines(&mut self, lines: Vec<LogLine>) {
         if lines.is_empty() {
             return;
         }
+        let index = self.log.len();
         self.log.extend(lines);
-        self.mark_log_changed();
+        self.mark_log_dirty_from(index);
     }
 
     pub fn scroll_up(&mut self, lines: usize) {

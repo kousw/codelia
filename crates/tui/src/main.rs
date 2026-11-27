@@ -10,7 +10,7 @@ use crate::app::runtime::{
 };
 use crate::app::view::desired_height;
 use crate::entry::launch_context::launch_context;
-use crate::entry::run_loop::{run_tui_loop, RunLoopTerminal};
+use crate::entry::run_loop::{run_tui_loop, RunLoopTerminal, WakeHub};
 
 use crate::entry::bootstrap::{
     apply_resume_startup, build_initial_app, request_initial_model_list,
@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(scheme) = requested_color_scheme.as_deref() {
         crate::app::theme::apply_color_scheme(scheme);
     }
+    crate::app::markdown::warm_highlight_assets();
     let requested_image_protocol = parse_image_protocol_arg()
         .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
     let sandbox_mode = parse_sandbox_mode_arg()
@@ -64,11 +65,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             command: &runtime.command,
             args: &runtime.args,
         });
+    let wake_hub = WakeHub::new();
     let (mut child, mut child_stdin, rx) = spawn_runtime(
         runtime_launch.as_ref(),
         sandbox_mode
             .as_ref()
             .map(|(flag, mode)| (*flag, mode.as_str())),
+        Some(wake_hub.runtime_notifier()),
     )?;
     let run_result = (|| -> Result<(), Box<dyn std::error::Error>> {
         let mut tx = StdioRuntimeTx::new(&mut child_stdin);
@@ -125,6 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &mut child,
             &mut tx,
             &mut pending_initial_message,
+            wake_hub,
         );
         restore_guard.set_preview_image(app.image_preview.policy.kitty_id);
 

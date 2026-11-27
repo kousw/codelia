@@ -1459,6 +1459,8 @@ mod mouse_tests {
                 log_version: 3,
                 committed: Default::default(),
                 wrapped: (0..8).map(|_| selectable_row()).collect(),
+                line_row_ranges: (0..8).map(|i| i..i + 1).collect(),
+                dirty_from: 8,
             }),
             ..AppState::default()
         }

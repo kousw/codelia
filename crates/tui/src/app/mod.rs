@@ -2,6 +2,8 @@ pub(crate) mod effect;
 pub(crate) mod frame;
 #[cfg(test)]
 mod frame_tests;
+#[cfg(test)]
+mod perf_bench_tests;
 
 pub(crate) mod goal;
 pub(crate) mod handlers;

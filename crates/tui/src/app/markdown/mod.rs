@@ -3,8 +3,8 @@ mod language_aliases;
 use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{Theme, ThemeSet};
-use syntect::parsing::SyntaxSet;
+use syntect::highlighting::{HighlightIterator, HighlightState, Highlighter, Theme, ThemeSet};
+use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
 
 use crate::app::theme::{
     inline_palette, syntect_fallback_theme_name, syntect_theme_name, InlinePalette,
@@ -35,6 +35,19 @@ fn highlight_assets() -> Option<&'static HighlightAssets> {
             Some(HighlightAssets { syntax_set, theme })
         })
         .as_ref()
+}
+
+/// Pre-warms syntect syntax & theme assets on a background thread so the first
+/// fenced code block does not stall the UI thread (~50-150ms).
+pub(crate) fn warm_highlight_assets() {
+    if HIGHLIGHT_ASSETS.get().is_some() {
+        return;
+    }
+    let _ = std::thread::Builder::new()
+        .name("codelia-syntect-warm".to_string())
+        .spawn(|| {
+            let _ = highlight_assets();
+        });
 }
 
 fn push_assistant_span(spans: &mut Vec<LogSpan>, text: &str, fg: Option<LogColor>) {
@@ -261,6 +274,198 @@ fn render_code_block_lines(lines: &[String], language: Option<&str>) -> Vec<LogL
     render_highlighted_code_lines(lines, language).unwrap_or_else(|| render_plain_code_lines(lines))
 }
 
+fn highlight_code_line_with_state(
+    line: &str,
+    state: &mut Option<(ParseState, HighlightState)>,
+) -> LogLine {
+    if line.is_empty() {
+        return LogLine::new(LogKind::AssistantCode, "");
+    }
+    let (Some(assets), Some((parse_state, highlight_state))) = (highlight_assets(), state.as_mut())
+    else {
+        return LogLine::new(LogKind::AssistantCode, line.to_string());
+    };
+    let line_with_newline = format!("{line}\n");
+    let Ok(ops) = parse_state.parse_line(&line_with_newline, &assets.syntax_set) else {
+        return LogLine::new(LogKind::AssistantCode, line.to_string());
+    };
+    let highlighter = Highlighter::new(&assets.theme);
+    let spans = HighlightIterator::new(highlight_state, &ops[..], &line_with_newline, &highlighter)
+        .filter_map(|(style, text)| {
+            let text = text.strip_suffix('\n').unwrap_or(text);
+            if text.is_empty() {
+                return None;
+            }
+            Some(LogSpan::new_with_fg(
+                LogKind::AssistantCode,
+                LogTone::Summary,
+                text,
+                Some(LogColor::rgb(
+                    style.foreground.r,
+                    style.foreground.g,
+                    style.foreground.b,
+                )),
+            ))
+        })
+        .collect::<Vec<_>>();
+    if spans.is_empty() {
+        LogLine::new(LogKind::AssistantCode, line.to_string())
+    } else {
+        LogLine::new_with_spans(spans)
+    }
+}
+
+fn init_code_highlight_state(language: Option<&str>) -> Option<(ParseState, HighlightState)> {
+    let assets = highlight_assets()?;
+    let syntax = syntax_for_language(&assets.syntax_set, language);
+    let highlighter = Highlighter::new(&assets.theme);
+    let highlight_state = HighlightState::new(&highlighter, ScopeStack::new());
+    let parse_state = ParseState::new(syntax);
+    Some((parse_state, highlight_state))
+}
+
+pub(crate) fn render_markdown_single_line(raw: &str) -> LogLine {
+    let leading_spaces_len = raw.bytes().take_while(|byte| *byte == b' ').count();
+    let leading_spaces = &raw[..leading_spaces_len];
+    let left_trimmed = &raw[leading_spaces_len..];
+    let mut line = raw.to_string();
+    let mut is_heading = false;
+    if let Some(rest) = left_trimmed.strip_prefix("> ") {
+        line = format!("{leading_spaces}│ {rest}");
+    } else if let Some(rest) = left_trimmed.strip_prefix("- ") {
+        line = format!("{leading_spaces}• {rest}");
+    } else if let Some(rest) = left_trimmed.strip_prefix("* ") {
+        line = format!("{leading_spaces}• {rest}");
+    } else if left_trimmed.starts_with('#') {
+        let mut idx = 0;
+        for ch in left_trimmed.chars() {
+            if ch == '#' {
+                idx += 1;
+                continue;
+            }
+            break;
+        }
+        let rest = left_trimmed[idx..].trim_start();
+        line = format!("{leading_spaces}{rest}");
+        is_heading = true;
+    }
+
+    let mut spans = parse_inline_markdown_spans(&line);
+    if is_heading {
+        spans = apply_heading_tint(spans);
+    }
+    LogLine::new_with_spans(spans)
+}
+
+/// Incremental Markdown + syntect renderer for streaming assistant output.
+///
+/// Completed `\n`-terminated lines (both prose and fenced code) are parsed and
+/// highlighted once; each subsequent token delta only processes newly completed
+/// lines plus the single trailing incomplete line.
+#[derive(Default)]
+pub(crate) struct IncrementalMarkdownState {
+    committed_bytes: usize,
+    committed_lines: Vec<LogLine>,
+    committed_line_end_bytes: Vec<usize>,
+    in_code_block: bool,
+    code_state: Option<(ParseState, HighlightState)>,
+}
+
+impl std::fmt::Debug for IncrementalMarkdownState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IncrementalMarkdownState")
+            .field("committed_bytes", &self.committed_bytes)
+            .field("committed_lines", &self.committed_lines.len())
+            .field("in_code_block", &self.in_code_block)
+            .finish()
+    }
+}
+
+impl IncrementalMarkdownState {
+    pub(crate) fn clear(&mut self) {
+        self.committed_bytes = 0;
+        self.committed_lines.clear();
+        self.committed_line_end_bytes.clear();
+        self.in_code_block = false;
+        self.code_state = None;
+    }
+
+    pub(crate) fn committed_bytes(&self) -> usize {
+        self.committed_bytes
+    }
+
+    pub(crate) fn committed_lines(&self) -> &[LogLine] {
+        &self.committed_lines
+    }
+
+    pub(crate) fn committed_line_end_bytes(&self) -> &[usize] {
+        &self.committed_line_end_bytes
+    }
+
+    pub(crate) fn in_code_block(&self) -> bool {
+        self.in_code_block
+    }
+
+    /// Advances committed state over any newly completed `\n`-terminated lines
+    /// in `trimmed`, returning `(previous_committed_count, tail_lines)` where
+    /// `tail_lines` has at most 1 line representing the unfinished trailing line
+    /// (or fallback empty line when `trimmed` produced no content lines yet).
+    pub(crate) fn advance(
+        &mut self,
+        trimmed: &str,
+        decorate: impl Fn(LogLine) -> LogLine,
+    ) -> (usize, Vec<LogLine>) {
+        if trimmed.len() < self.committed_bytes || !trimmed.is_char_boundary(self.committed_bytes) {
+            self.clear();
+        }
+        let prev_committed = self.committed_lines.len();
+        while let Some(nl_rel) = trimmed[self.committed_bytes..].find('\n') {
+            let raw_with_cr = &trimmed[self.committed_bytes..self.committed_bytes + nl_rel];
+            let raw = raw_with_cr.trim_end_matches('\r');
+            let line_end_byte = self.committed_bytes + raw.len();
+            let line_trimmed = raw.trim_start();
+            if line_trimmed.starts_with("```") {
+                if self.in_code_block {
+                    self.in_code_block = false;
+                    self.code_state = None;
+                } else {
+                    self.in_code_block = true;
+                    let lang = parse_fence_language(line_trimmed);
+                    self.code_state = init_code_highlight_state(lang.as_deref());
+                }
+            } else if self.in_code_block {
+                let line = highlight_code_line_with_state(raw, &mut self.code_state);
+                self.committed_lines.push(decorate(line));
+                self.committed_line_end_bytes.push(line_end_byte);
+            } else {
+                let line = render_markdown_single_line(raw);
+                self.committed_lines.push(decorate(line));
+                self.committed_line_end_bytes.push(line_end_byte);
+            }
+            self.committed_bytes += nl_rel + 1;
+        }
+
+        let tail = trimmed[self.committed_bytes..].trim_end_matches('\r');
+        let tail_trimmed = tail.trim_start();
+        let mut tail_lines = Vec::with_capacity(1);
+        if tail_trimmed.starts_with("```") {
+            // Opening or closing fence on the final line produces no rendered line.
+        } else if self.in_code_block {
+            let mut peek_state = self.code_state.clone();
+            let line = highlight_code_line_with_state(tail, &mut peek_state);
+            tail_lines.push(decorate(line));
+        } else {
+            tail_lines.push(decorate(render_markdown_single_line(tail)));
+        }
+
+        if self.committed_lines.is_empty() && tail_lines.is_empty() {
+            tail_lines.push(decorate(LogLine::new(LogKind::Assistant, String::new())));
+        }
+
+        (prev_committed, tail_lines)
+    }
+}
+
 pub fn render_markdown_lines(value: &str) -> Vec<LogLine> {
     let mut out = Vec::new();
     let mut in_code_block = false;
@@ -290,36 +495,7 @@ pub fn render_markdown_lines(value: &str) -> Vec<LogLine> {
             continue;
         }
 
-        let leading_spaces_len = raw.bytes().take_while(|byte| *byte == b' ').count();
-        let leading_spaces = &raw[..leading_spaces_len];
-        let left_trimmed = &raw[leading_spaces_len..];
-        let mut line = raw.to_string();
-        let mut is_heading = false;
-        if let Some(rest) = left_trimmed.strip_prefix("> ") {
-            line = format!("{leading_spaces}│ {rest}");
-        } else if let Some(rest) = left_trimmed.strip_prefix("- ") {
-            line = format!("{leading_spaces}• {rest}");
-        } else if let Some(rest) = left_trimmed.strip_prefix("* ") {
-            line = format!("{leading_spaces}• {rest}");
-        } else if left_trimmed.starts_with('#') {
-            let mut idx = 0;
-            for ch in left_trimmed.chars() {
-                if ch == '#' {
-                    idx += 1;
-                    continue;
-                }
-                break;
-            }
-            let rest = left_trimmed[idx..].trim_start();
-            line = format!("{leading_spaces}{rest}");
-            is_heading = true;
-        }
-
-        let mut spans = parse_inline_markdown_spans(&line);
-        if is_heading {
-            spans = apply_heading_tint(spans);
-        }
-        out.push(LogLine::new_with_spans(spans));
+        out.push(render_markdown_single_line(raw));
     }
 
     if in_code_block {

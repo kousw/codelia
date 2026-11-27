@@ -13,12 +13,53 @@ use crate::event_loop::runtime::{drain_runtime_messages, RuntimeReceiver};
 use crate::event_loop::update::{update, ExitAction, LocalMsg, Msg, TerminalInput, UpdateResult};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{backend::Backend, Terminal};
+use std::collections::VecDeque;
 use std::io;
 use std::process::Child;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::thread;
 use std::time::{Duration, Instant};
 
 const DEBUG_PERF_MEMORY_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
+const INPUT_THREAD_POLL_SLICE: Duration = Duration::from_millis(25);
+
+enum WakeEvent {
+    Terminal(io::Result<Event>),
+    Runtime,
+    ClipboardWritten(Result<usize, String>),
+}
+
+/// Unified wakeup channel bridging runtime reader threads, async clipboard
+/// writes, and the terminal input thread so `run_loop` wakes in <1ms on any
+/// arrival instead of stalling up to `EVENT_POLL_TIMEOUT`.
+pub(crate) struct WakeHub {
+    tx: mpsc::Sender<WakeEvent>,
+    rx: mpsc::Receiver<WakeEvent>,
+    runtime_pending: Arc<AtomicBool>,
+}
+
+impl WakeHub {
+    pub(crate) fn new() -> Self {
+        let (tx, rx) = mpsc::channel();
+        Self {
+            tx,
+            rx,
+            runtime_pending: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(crate) fn runtime_notifier(&self) -> Arc<dyn Fn() + Send + Sync> {
+        let tx = self.tx.clone();
+        let pending = Arc::clone(&self.runtime_pending);
+        Arc::new(move || {
+            if !pending.swap(true, Ordering::AcqRel) {
+                let _ = tx.send(WakeEvent::Runtime);
+            }
+        })
+    }
+}
 
 pub(crate) struct RunLoopTerminal<'a> {
     terminal: &'a mut TuiTerminal,
@@ -38,7 +79,9 @@ pub(crate) fn run_tui_loop(
     child: &mut Child,
     tx: &mut dyn RuntimeTx,
     pending_initial_message: &mut Option<String>,
+    wake_hub: WakeHub,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let mut io = ProductionIo::new(child, wake_hub);
     run_loop(
         app,
         terminal_session.terminal,
@@ -46,7 +89,7 @@ pub(crate) fn run_tui_loop(
         rx,
         tx,
         pending_initial_message,
-        &mut ProductionIo { child },
+        &mut io,
     )
 }
 
@@ -56,6 +99,9 @@ trait LoopIo<B: Backend> {
         terminal: &mut Terminal<B>,
         timeout: Duration,
     ) -> io::Result<Option<Event>>;
+    fn poll_local_completions(&mut self) -> Vec<LocalMsg> {
+        Vec::new()
+    }
     fn child_exit(&mut self) -> Option<String>;
     fn child_pid(&self) -> u32;
     fn now(&self) -> Instant;
@@ -77,14 +123,108 @@ trait LoopIo<B: Backend> {
 
 struct ProductionIo<'a> {
     child: &'a mut Child,
+    wake_tx: mpsc::Sender<WakeEvent>,
+    wake_rx: mpsc::Receiver<WakeEvent>,
+    runtime_pending: Arc<AtomicBool>,
+    pending_terminal: VecDeque<io::Result<Event>>,
+    pending_local: VecDeque<LocalMsg>,
+    input_stop: Arc<AtomicBool>,
+    input_thread: Option<thread::JoinHandle<()>>,
+}
+
+impl<'a> ProductionIo<'a> {
+    fn new(child: &'a mut Child, wake_hub: WakeHub) -> Self {
+        let input_stop = Arc::new(AtomicBool::new(false));
+        let stop_flag = Arc::clone(&input_stop);
+        let input_tx = wake_hub.tx.clone();
+        let input_thread = thread::Builder::new()
+            .name("codelia-tui-input".to_string())
+            .spawn(move || {
+                while !stop_flag.load(Ordering::Acquire) {
+                    match event::poll(INPUT_THREAD_POLL_SLICE) {
+                        Ok(true) => {
+                            if input_tx.send(WakeEvent::Terminal(event::read())).is_err() {
+                                break;
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(error) => {
+                            let _ = input_tx.send(WakeEvent::Terminal(Err(error)));
+                            break;
+                        }
+                    }
+                }
+            })
+            .ok();
+        Self {
+            child,
+            wake_tx: wake_hub.tx,
+            wake_rx: wake_hub.rx,
+            runtime_pending: wake_hub.runtime_pending,
+            pending_terminal: VecDeque::new(),
+            pending_local: VecDeque::new(),
+            input_stop,
+            input_thread,
+        }
+    }
+
+    fn drain_ready_wakes(&mut self) {
+        while let Ok(item) = self.wake_rx.try_recv() {
+            match item {
+                WakeEvent::Terminal(ev) => self.pending_terminal.push_back(ev),
+                WakeEvent::Runtime => {
+                    self.runtime_pending.store(false, Ordering::Release);
+                }
+                WakeEvent::ClipboardWritten(result) => {
+                    self.pending_local.push_back(LocalMsg::ClipboardWritten {
+                        result,
+                        now: Instant::now(),
+                    });
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ProductionIo<'_> {
+    fn drop(&mut self) {
+        self.input_stop.store(true, Ordering::Release);
+        if let Some(handle) = self.input_thread.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 impl LoopIo<TerminalBackend> for ProductionIo<'_> {
     fn poll_event(&mut self, _: &mut TuiTerminal, timeout: Duration) -> io::Result<Option<Event>> {
-        if !event::poll(timeout)? {
+        if let Some(event) = self.pending_terminal.pop_front() {
+            return event.map(Some);
+        }
+        if self.runtime_pending.swap(false, Ordering::AcqRel) || !self.pending_local.is_empty() {
             return Ok(None);
         }
-        Ok(Some(event::read()?))
+        match self.wake_rx.recv_timeout(timeout) {
+            Ok(WakeEvent::Terminal(event)) => event.map(Some),
+            Ok(WakeEvent::Runtime) => {
+                self.runtime_pending.store(false, Ordering::Release);
+                Ok(None)
+            }
+            Ok(WakeEvent::ClipboardWritten(result)) => {
+                self.pending_local.push_back(LocalMsg::ClipboardWritten {
+                    result,
+                    now: self.now(),
+                });
+                Ok(None)
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Ok(None)
+            }
+        }
+    }
+
+    fn poll_local_completions(&mut self) -> Vec<LocalMsg> {
+        self.drain_ready_wakes();
+        self.pending_local.drain(..).collect()
     }
 
     fn child_exit(&mut self) -> Option<String> {
@@ -112,13 +252,21 @@ impl LoopIo<TerminalBackend> for ProductionIo<'_> {
         match effect {
             Effect::SetMouseCapture(enabled) => set_mouse_capture(terminal, enabled),
             Effect::WriteClipboard { text } => {
-                let result = write_clipboard_text(&text)
-                    .map(|_| text.chars().count())
-                    .map_err(|error| error.to_string());
-                return Some(LocalMsg::ClipboardWritten {
-                    result,
-                    now: self.now(),
-                });
+                let wake_tx = self.wake_tx.clone();
+                let spawn_result = thread::Builder::new()
+                    .name("codelia-clipboard-write".to_string())
+                    .spawn(move || {
+                        let result = write_clipboard_text(&text)
+                            .map(|_| text.chars().count())
+                            .map_err(|error| error.to_string());
+                        let _ = wake_tx.send(WakeEvent::ClipboardWritten(result));
+                    });
+                if let Err(error) = spawn_result {
+                    return Some(LocalMsg::ClipboardWritten {
+                        result: Err(format!("clipboard worker failed: {error}")),
+                        now: self.now(),
+                    });
+                }
             }
             Effect::StartClipboardImport => {
                 return Some(LocalMsg::ClipboardImportStarted(
@@ -278,6 +426,10 @@ where
                 io,
                 Msg::Local(LocalMsg::ClipboardImported { marker, result }),
             );
+        }
+        for local_msg in io.poll_local_completions() {
+            active_work = true;
+            let _ = state.dispatch(terminal, app, tx, io, Msg::Local(local_msg));
         }
 
         let startup_pending = app.startup_confirmations.is_pending();

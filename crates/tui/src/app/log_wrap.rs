@@ -518,6 +518,91 @@ fn pad_background_line(mut line: LogLine, width: usize) -> LogLine {
     line
 }
 
+fn wrap_single_log_line(
+    line_index: usize,
+    line: &LogLine,
+    width: usize,
+    committed: LogPosition,
+    out: &mut Vec<WrappedLogRow>,
+) {
+    if line.plain_text().is_empty() {
+        out.push(WrappedLogRow {
+            line: line.clone(),
+            selectable_fragments: Vec::new(),
+            soft_wrap_after: false,
+            source_end: LogPosition {
+                line: line_index + 1,
+                grapheme: 0,
+            },
+        });
+        return;
+    }
+    let is_user = line.kind() == LogKind::User;
+    let wrap_width = if is_user {
+        width.saturating_sub(4).max(1)
+    } else {
+        width
+    };
+    let continuation_prefix = if is_user {
+        None
+    } else {
+        diff_continuation_prefix(line).or_else(|| detect_continuation_prefix(&line.plain_text()))
+    };
+
+    // Keep the pending suffix on its own row after a resize, even if a wider
+    // row could otherwise contain both already-inserted and new content.
+    let split_at =
+        (line_index == committed.line && committed.grapheme > 0).then_some(committed.grapheme);
+    let mut wrapped_multi =
+        wrap_styled_line(line, wrap_width, continuation_prefix.as_deref(), split_at);
+    if is_user {
+        wrapped_multi = wrapped_multi
+            .into_iter()
+            .map(|mut wrapped| {
+                let padded = pad_to_width(format!(" {} ", wrapped.line.plain_text()), width);
+                wrapped.line =
+                    LogLine::new_with_spans(vec![LogSpan::new(line.kind(), line.tone(), padded)]);
+                for fragment in &mut wrapped.selectable_fragments {
+                    fragment.cell_start = fragment.cell_start.saturating_add(1);
+                    fragment.cell_end = fragment.cell_end.saturating_add(1);
+                }
+                wrapped
+            })
+            .collect();
+    }
+    let wrapped_count = wrapped_multi.len();
+    out.extend(
+        wrapped_multi
+            .into_iter()
+            .enumerate()
+            .map(|(index, wrapped)| WrappedLogRow {
+                line: pad_background_line(wrapped.line, width),
+                selectable_fragments: wrapped.selectable_fragments,
+                soft_wrap_after: index + 1 < wrapped_count,
+                source_end: if index + 1 == wrapped_count
+                    && line_index == committed.line
+                    && committed.grapheme > 0
+                    && wrapped.grapheme_end == committed.grapheme
+                {
+                    // A live line can momentarily have no pending suffix.
+                    // Keep its partial anchor reusable by subsequent deltas.
+                    committed
+                } else if index + 1 == wrapped_count {
+                    LogPosition {
+                        line: line_index + 1,
+                        grapheme: 0,
+                    }
+                } else {
+                    LogPosition {
+                        line: line_index,
+                        grapheme: wrapped.grapheme_end,
+                    }
+                },
+            }),
+    );
+}
+
+#[cfg(test)]
 fn wrap_log_lines_at(
     lines: &[LogLine],
     width: usize,
@@ -525,85 +610,7 @@ fn wrap_log_lines_at(
 ) -> Vec<WrappedLogRow> {
     let mut out = Vec::new();
     for (line_index, line) in lines.iter().enumerate() {
-        if line.plain_text().is_empty() {
-            out.push(WrappedLogRow {
-                line: line.clone(),
-                selectable_fragments: Vec::new(),
-                soft_wrap_after: false,
-                source_end: LogPosition {
-                    line: line_index + 1,
-                    grapheme: 0,
-                },
-            });
-            continue;
-        }
-        let is_user = line.kind() == LogKind::User;
-        let wrap_width = if is_user {
-            width.saturating_sub(4).max(1)
-        } else {
-            width
-        };
-        let continuation_prefix = if is_user {
-            None
-        } else {
-            diff_continuation_prefix(line)
-                .or_else(|| detect_continuation_prefix(&line.plain_text()))
-        };
-
-        // Keep the pending suffix on its own row after a resize, even if a wider
-        // row could otherwise contain both already-inserted and new content.
-        let split_at =
-            (line_index == committed.line && committed.grapheme > 0).then_some(committed.grapheme);
-        let mut wrapped_multi =
-            wrap_styled_line(line, wrap_width, continuation_prefix.as_deref(), split_at);
-        if is_user {
-            wrapped_multi = wrapped_multi
-                .into_iter()
-                .map(|mut wrapped| {
-                    let padded = pad_to_width(format!(" {} ", wrapped.line.plain_text()), width);
-                    wrapped.line = LogLine::new_with_spans(vec![LogSpan::new(
-                        line.kind(),
-                        line.tone(),
-                        padded,
-                    )]);
-                    for fragment in &mut wrapped.selectable_fragments {
-                        fragment.cell_start = fragment.cell_start.saturating_add(1);
-                        fragment.cell_end = fragment.cell_end.saturating_add(1);
-                    }
-                    wrapped
-                })
-                .collect();
-        }
-        let wrapped_count = wrapped_multi.len();
-        out.extend(
-            wrapped_multi
-                .into_iter()
-                .enumerate()
-                .map(|(index, wrapped)| WrappedLogRow {
-                    line: pad_background_line(wrapped.line, width),
-                    selectable_fragments: wrapped.selectable_fragments,
-                    soft_wrap_after: index + 1 < wrapped_count,
-                    source_end: if index + 1 == wrapped_count
-                        && line_index == committed.line
-                        && committed.grapheme > 0
-                        && wrapped.grapheme_end == committed.grapheme
-                    {
-                        // A live line can momentarily have no pending suffix.
-                        // Keep its partial anchor reusable by subsequent deltas.
-                        committed
-                    } else if index + 1 == wrapped_count {
-                        LogPosition {
-                            line: line_index + 1,
-                            grapheme: 0,
-                        }
-                    } else {
-                        LogPosition {
-                            line: line_index,
-                            grapheme: wrapped.grapheme_end,
-                        }
-                    },
-                }),
-        );
+        wrap_single_log_line(line_index, line, width, committed, &mut out);
     }
     out
 }
@@ -618,30 +625,108 @@ pub(crate) fn cached_wrap_log_lines(app: &mut AppState, width: usize) -> &[Wrapp
     if width == 0 {
         return &[];
     }
-    let cache_hit = matches!(
-        app.wrapped_log_cache.as_ref(),
-        Some(cache) if cache.width == width && cache.log_version == app.log_version
-            && cache.committed == app.render_state.committed
-    );
-    if !cache_hit {
-        let started = Instant::now();
-        let committed = app.render_state.committed;
-        let wrapped = wrap_log_lines_at(&app.log, width, committed);
-        let wrapped_total = wrapped.len();
-        app.wrapped_log_cache = Some(WrappedLogCache {
-            width,
-            log_version: app.log_version,
-            committed,
-            wrapped,
-        });
-        app.record_wrap_cache_miss(started.elapsed(), wrapped_total);
-    } else if let Some(wrapped_total) = app
-        .wrapped_log_cache
-        .as_ref()
-        .map(|cache| cache.wrapped.len())
-    {
-        app.record_wrap_cache_hit(wrapped_total);
+    let committed = app.render_state.committed;
+    let log_len = app.log.len();
+    let log_version = app.log_version;
+
+    enum WrapAction {
+        Hit,
+        Incremental { rebuild_from: usize },
+        Full,
     }
+
+    let action = match app.wrapped_log_cache.as_ref() {
+        Some(cache) if cache.width == width => {
+            if cache.log_version == log_version
+                && cache.committed == committed
+                && cache.dirty_from >= log_len
+                && cache.line_row_ranges.len() == log_len
+            {
+                WrapAction::Hit
+            } else {
+                let mut rebuild_from = cache
+                    .dirty_from
+                    .min(log_len)
+                    .min(cache.line_row_ranges.len());
+                if cache.committed != committed {
+                    // Only lines with a non-zero grapheme split depend on `committed`.
+                    if cache.committed.grapheme > 0 {
+                        rebuild_from = rebuild_from.min(cache.committed.line);
+                    }
+                    if committed.grapheme > 0 {
+                        rebuild_from = rebuild_from.min(committed.line);
+                    }
+                }
+                if rebuild_from == log_len && cache.line_row_ranges.len() == log_len {
+                    WrapAction::Hit
+                } else {
+                    WrapAction::Incremental { rebuild_from }
+                }
+            }
+        }
+        _ => WrapAction::Full,
+    };
+
+    match action {
+        WrapAction::Hit => {
+            let wrapped_total = if let Some(cache) = app.wrapped_log_cache.as_mut() {
+                cache.log_version = log_version;
+                cache.committed = committed;
+                cache.dirty_from = log_len;
+                cache.wrapped.len()
+            } else {
+                0
+            };
+            app.record_wrap_cache_hit(wrapped_total);
+        }
+        WrapAction::Incremental { rebuild_from } => {
+            let started = Instant::now();
+            let wrapped_total = {
+                let cache = app
+                    .wrapped_log_cache
+                    .as_mut()
+                    .expect("incremental wrap requires existing cache");
+                let keep_rows = cache
+                    .line_row_ranges
+                    .get(rebuild_from)
+                    .map_or(cache.wrapped.len(), |range| range.start);
+                cache.wrapped.truncate(keep_rows);
+                cache.line_row_ranges.truncate(rebuild_from);
+                for (offset, line) in app.log[rebuild_from..].iter().enumerate() {
+                    let line_index = rebuild_from + offset;
+                    let row_start = cache.wrapped.len();
+                    wrap_single_log_line(line_index, line, width, committed, &mut cache.wrapped);
+                    cache.line_row_ranges.push(row_start..cache.wrapped.len());
+                }
+                cache.log_version = log_version;
+                cache.committed = committed;
+                cache.dirty_from = log_len;
+                cache.wrapped.len()
+            };
+            app.record_wrap_cache_miss(started.elapsed(), wrapped_total);
+        }
+        WrapAction::Full => {
+            let started = Instant::now();
+            let mut wrapped = Vec::with_capacity(log_len);
+            let mut line_row_ranges = Vec::with_capacity(log_len);
+            for (line_index, line) in app.log.iter().enumerate() {
+                let row_start = wrapped.len();
+                wrap_single_log_line(line_index, line, width, committed, &mut wrapped);
+                line_row_ranges.push(row_start..wrapped.len());
+            }
+            let wrapped_total = wrapped.len();
+            app.wrapped_log_cache = Some(WrappedLogCache {
+                width,
+                log_version,
+                committed,
+                wrapped,
+                line_row_ranges,
+                dirty_from: log_len,
+            });
+            app.record_wrap_cache_miss(started.elapsed(), wrapped_total);
+        }
+    }
+
     app.wrapped_log_cache
         .as_ref()
         .map(|cache| cache.wrapped.as_slice())
@@ -874,11 +959,15 @@ mod tests {
     fn app_with_wrapped_rows(lines: Vec<LogLine>, width: usize) -> AppState {
         let mut app = AppState::default();
         app.log_version = 7;
+        let wrapped = wrap_log_lines(&lines, width);
+        let wrapped_len = wrapped.len();
         app.wrapped_log_cache = Some(WrappedLogCache {
             width,
             log_version: app.log_version,
             committed: Default::default(),
-            wrapped: wrap_log_lines(&lines, width),
+            wrapped,
+            line_row_ranges: (0..wrapped_len).map(|i| i..i + 1).collect(),
+            dirty_from: wrapped_len,
         });
         app
     }
@@ -1204,5 +1293,62 @@ mod tests {
         assert!(wrapped.len() >= 2);
         assert!(wrapped[1].plain_text().starts_with("> "));
         assert!(wrapped[1].spans().iter().any(|span| span.fg.is_some()));
+    }
+
+    #[test]
+    fn incremental_wrap_matches_full_wrap_across_appends_edits_and_commit_moves() {
+        use super::{cached_wrap_log_lines, wrap_log_lines_at};
+        use crate::app::state::render::LogPosition;
+
+        let mut app = AppState::default();
+        app.push_line(LogKind::User, "hello world this is a long user prompt");
+        app.push_line(
+            LogKind::Assistant,
+            "  first assistant line that wraps nicely",
+        );
+        app.push_line(LogKind::AssistantCode, "  let value = compute(1, 2, 3);");
+
+        let assert_eq_full = |app: &mut AppState, width: usize| {
+            let committed = app.render_state.committed;
+            let expected = wrap_log_lines_at(&app.log, width, committed);
+            let actual = cached_wrap_log_lines(app, width);
+            assert_eq!(actual.len(), expected.len());
+            for (a, e) in actual.iter().zip(expected.iter()) {
+                assert_eq!(a.line, e.line);
+                assert_eq!(a.soft_wrap_after, e.soft_wrap_after);
+                assert_eq!(a.source_end, e.source_end);
+            }
+        };
+
+        assert_eq_full(&mut app, 20);
+        // Append new lines (incremental tail)
+        app.push_line(LogKind::Assistant, "  appended line four");
+        assert_eq_full(&mut app, 20);
+
+        // Whole-line commit advance should hit cache without re-wrapping
+        let misses_before = app.perf.wrap_cache_misses;
+        app.render_state.committed = LogPosition {
+            line: 2,
+            grapheme: 0,
+        };
+        assert_eq_full(&mut app, 20);
+        assert_eq!(
+            app.perf.wrap_cache_misses, misses_before,
+            "whole-line committed advance must not trigger re-wrap"
+        );
+
+        // Mid-line grapheme commit advance re-wraps affected line identically
+        app.render_state.committed = LogPosition {
+            line: 3,
+            grapheme: 8,
+        };
+        assert_eq_full(&mut app, 20);
+
+        // Replace an earlier line
+        app.replace_log_line(1, LogLine::new(LogKind::Assistant, "  replaced line 1"));
+        assert_eq_full(&mut app, 20);
+
+        // Width change triggers full rebuild cleanly
+        assert_eq_full(&mut app, 32);
     }
 }

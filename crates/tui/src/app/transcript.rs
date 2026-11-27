@@ -1,6 +1,141 @@
-use crate::app::markdown::render_markdown_lines;
+use crate::app::markdown::{
+    render_markdown_lines, render_markdown_single_line, IncrementalMarkdownState,
+};
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
 use unicode_segmentation::UnicodeSegmentation;
+
+pub(crate) fn decorate_assistant_line(line: LogLine) -> LogLine {
+    let mut spans = vec![LogSpan::new(line.kind(), LogTone::Detail, "  ")];
+    spans.extend(
+        line.spans()
+            .iter()
+            .map(|span| span.with_tone(LogTone::Detail)),
+    );
+    LogLine::new_with_spans(spans)
+}
+
+pub(crate) fn render_single_body_line(raw: &str, reasoning: bool) -> LogLine {
+    if reasoning {
+        LogLine::new_with_tone(
+            LogKind::Reasoning,
+            LogTone::Detail,
+            raw.trim_end_matches('\r'),
+        )
+    } else {
+        decorate_assistant_line(render_markdown_single_line(raw.trim_end_matches('\r')))
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct IncrementalReasoningState {
+    committed_bytes: usize,
+    committed_lines: Vec<LogLine>,
+    committed_line_end_bytes: Vec<usize>,
+}
+
+impl IncrementalReasoningState {
+    pub(crate) fn clear(&mut self) {
+        self.committed_bytes = 0;
+        self.committed_lines.clear();
+        self.committed_line_end_bytes.clear();
+    }
+
+    pub(crate) fn committed_bytes(&self) -> usize {
+        self.committed_bytes
+    }
+
+    pub(crate) fn committed_lines(&self) -> &[LogLine] {
+        &self.committed_lines
+    }
+
+    pub(crate) fn committed_line_end_bytes(&self) -> &[usize] {
+        &self.committed_line_end_bytes
+    }
+
+    pub(crate) fn advance(&mut self, trimmed: &str) -> (usize, Vec<LogLine>) {
+        if trimmed.len() < self.committed_bytes || !trimmed.is_char_boundary(self.committed_bytes) {
+            self.clear();
+        }
+        let prev_committed = self.committed_lines.len();
+        while let Some(nl_rel) = trimmed[self.committed_bytes..].find('\n') {
+            let raw_with_cr = &trimmed[self.committed_bytes..self.committed_bytes + nl_rel];
+            let raw = raw_with_cr.trim_end_matches('\r');
+            let line_end_byte = self.committed_bytes + raw.len();
+            self.committed_lines.push(LogLine::new_with_tone(
+                LogKind::Reasoning,
+                LogTone::Detail,
+                raw,
+            ));
+            self.committed_line_end_bytes.push(line_end_byte);
+            self.committed_bytes += nl_rel + 1;
+        }
+        let tail = trimmed[self.committed_bytes..].trim_end_matches('\r');
+        let tail_lines = vec![LogLine::new_with_tone(
+            LogKind::Reasoning,
+            LogTone::Detail,
+            tail,
+        )];
+        (prev_committed, tail_lines)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum IncrementalBodyCache {
+    Markdown(IncrementalMarkdownState),
+    Reasoning(IncrementalReasoningState),
+}
+
+impl IncrementalBodyCache {
+    pub(crate) fn new(reasoning: bool) -> Self {
+        if reasoning {
+            Self::Reasoning(IncrementalReasoningState::default())
+        } else {
+            Self::Markdown(IncrementalMarkdownState::default())
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        match self {
+            Self::Markdown(state) => state.clear(),
+            Self::Reasoning(state) => state.clear(),
+        }
+    }
+
+    pub(crate) fn committed_bytes(&self) -> usize {
+        match self {
+            Self::Markdown(state) => state.committed_bytes(),
+            Self::Reasoning(state) => state.committed_bytes(),
+        }
+    }
+
+    pub(crate) fn committed_lines(&self) -> &[LogLine] {
+        match self {
+            Self::Markdown(state) => state.committed_lines(),
+            Self::Reasoning(state) => state.committed_lines(),
+        }
+    }
+
+    pub(crate) fn committed_line_end_bytes(&self) -> &[usize] {
+        match self {
+            Self::Markdown(state) => state.committed_line_end_bytes(),
+            Self::Reasoning(state) => state.committed_line_end_bytes(),
+        }
+    }
+
+    pub(crate) fn in_code_block(&self) -> bool {
+        match self {
+            Self::Markdown(state) => state.in_code_block(),
+            Self::Reasoning(_) => false,
+        }
+    }
+
+    pub(crate) fn advance(&mut self, trimmed: &str) -> (usize, Vec<LogLine>) {
+        match self {
+            Self::Markdown(state) => state.advance(trimmed, decorate_assistant_line),
+            Self::Reasoning(state) => state.advance(trimmed),
+        }
+    }
+}
 
 /// One presentation path for live output and canonical assistant events.
 pub(crate) fn render_body(content: &str, reasoning: bool) -> Vec<LogLine> {
@@ -20,15 +155,11 @@ pub(crate) fn render_body(content: &str, reasoning: bool) -> Vec<LogLine> {
             )
         }));
     } else {
-        lines.extend(render_markdown_lines(content).into_iter().map(|line| {
-            let mut spans = vec![LogSpan::new(line.kind(), LogTone::Detail, "  ")];
-            spans.extend(
-                line.spans()
-                    .iter()
-                    .map(|span| span.with_tone(LogTone::Detail)),
-            );
-            LogLine::new_with_spans(spans)
-        }));
+        lines.extend(
+            render_markdown_lines(content)
+                .into_iter()
+                .map(decorate_assistant_line),
+        );
     }
     lines
 }

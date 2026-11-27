@@ -18,6 +18,7 @@ use std::env;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -305,6 +306,7 @@ fn spawn_reader<T: std::io::Read + Send + 'static>(
     reader: T,
     prefix: Option<&'static str>,
     tx: mpsc::Sender<String>,
+    on_line: Option<Arc<dyn Fn() + Send + Sync>>,
 ) {
     thread::spawn(move || {
         let mut reader = BufReader::new(reader);
@@ -327,7 +329,11 @@ fn spawn_reader<T: std::io::Read + Send + 'static>(
                     } else {
                         trimmed.to_string()
                     };
-                    let _ = tx.send(output);
+                    if tx.send(output).is_ok() {
+                        if let Some(notify) = &on_line {
+                            notify();
+                        }
+                    }
                 }
                 Err(_) => break,
             }
@@ -367,6 +373,7 @@ pub(crate) fn resolve_runtime_command(
 pub(crate) fn spawn_runtime(
     launch: Option<&RuntimeLaunchConfig<'_>>,
     sandbox_mode: Option<(&str, &str)>,
+    on_line: Option<Arc<dyn Fn() + Send + Sync>>,
 ) -> RuntimeSpawnResult {
     let (runtime_cmd, mut runtime_args) = resolve_runtime_command(
         launch,
@@ -395,8 +402,8 @@ pub(crate) fn spawn_runtime(
     let child_stdout = child.stdout.take().expect("stdout missing");
     let child_stderr = child.stderr.take().expect("stderr missing");
     let (tx, rx) = mpsc::channel::<String>();
-    spawn_reader(child_stdout, None, tx.clone());
-    spawn_reader(child_stderr, Some("[runtime]"), tx);
+    spawn_reader(child_stdout, None, tx.clone(), on_line.clone());
+    spawn_reader(child_stderr, Some("[runtime]"), tx, on_line);
 
     Ok((child, child_stdin, rx))
 }

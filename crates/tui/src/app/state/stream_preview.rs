@@ -1,4 +1,5 @@
 use crate::app::state::render::LogPosition;
+use crate::app::transcript::IncrementalBodyCache;
 
 #[derive(Debug)]
 pub(crate) enum StreamUpdate {
@@ -27,6 +28,17 @@ pub(crate) struct StreamSegment {
     pub row_indices: Vec<usize>,
     pub stable_end: Option<LogPosition>,
     pub canonical_prefix_consumed: bool,
+    pub render_cache: IncrementalBodyCache,
+    /// Number of rendered body lines (including leading `Space` at offset 0)
+    /// already written to `AppState::log` from immutable committed cache lines.
+    pub synced_committed_rows: usize,
+}
+
+impl StreamSegment {
+    pub(crate) fn reset_render_cache(&mut self) {
+        self.render_cache.clear();
+        self.synced_committed_rows = 0;
+    }
 }
 
 impl StreamPreview {
@@ -105,6 +117,8 @@ impl StreamPreview {
                 row_indices: Vec::new(),
                 stable_end: None,
                 canonical_prefix_consumed: false,
+                render_cache: IncrementalBodyCache::new(reasoning),
+                synced_committed_rows: 0,
             });
         }
         true
@@ -129,6 +143,7 @@ impl StreamPreview {
             if !remaining.trim().is_empty() {
                 segment.content = remaining.to_string();
                 segment.canonical_prefix_consumed = true;
+                segment.reset_render_cache();
                 return true;
             }
         }

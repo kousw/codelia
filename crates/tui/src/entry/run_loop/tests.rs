@@ -435,3 +435,31 @@ fn owned_selection_copy_requests_clipboard_write_and_applies_result() {
         assert!(tx.sent.is_empty());
     }
 }
+
+#[test]
+fn wake_hub_coalesces_runtime_notifications_and_wakes_immediately() {
+    let hub = WakeHub::new();
+    let notifier = hub.runtime_notifier();
+
+    // Multiple runtime lines before poll coalesce to a single WakeEvent::Runtime.
+    notifier();
+    notifier();
+    notifier();
+    assert!(matches!(hub.rx.try_recv(), Ok(WakeEvent::Runtime)));
+    assert!(hub.rx.try_recv().is_err());
+
+    // Clearing pending allows the next arrival to wake immediately.
+    hub.runtime_pending.store(false, Ordering::Release);
+    let started = Instant::now();
+    let bg_notifier = Arc::clone(&notifier);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(5));
+        bg_notifier();
+    });
+    let woken = hub.rx.recv_timeout(Duration::from_millis(500));
+    assert!(matches!(woken, Ok(WakeEvent::Runtime)));
+    assert!(
+        started.elapsed() < Duration::from_millis(100),
+        "runtime arrival must wake well before the 500ms timeout"
+    );
+}
