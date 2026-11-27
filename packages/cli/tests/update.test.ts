@@ -190,14 +190,14 @@ describe("self-update", () => {
 			await resolveUpdateSettings({
 				configFile,
 				interactive: true,
-				env: { CODELIA_AUTO_UPDATE: "off", CODELIA_UPDATE_CHANNEL: "next" },
+				env: { CODELIA_AUTO_UPDATE: "off" },
 			}),
 		).toEqual({
 			mode: "off",
 			savedMode: "notify",
 			modeSource: "environment",
 			offerModeChoice: false,
-			channel: "next",
+			channel: "beta",
 			warnings: [],
 		});
 
@@ -347,15 +347,8 @@ describe("self-update", () => {
 			update: { channel: "next", mode: "auto" },
 		});
 		expect(
-			await command(["--tui-status"], { CODELIA_UPDATE_CHANNEL: "latest" }),
-		).toBe(0);
-		expect(JSON.parse(output.at(-1) ?? "")).toMatchObject({
-			channel: "latest",
-			candidate: null,
-		});
-		expect(
 			await command(["--tui-status"], {
-				CODELIA_UPDATE_REGISTRY: "https://registry.example",
+				npm_config_registry: "https://registry.example",
 			}),
 		).toBe(0);
 		expect(JSON.parse(output.at(-1) ?? "")).toMatchObject({

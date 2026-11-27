@@ -470,7 +470,7 @@ describe("runtime run.steer RPC", () => {
 					"../../protocol/tests/fixtures/steer-cancel.jsonl",
 					import.meta.url,
 				);
-				if (process.env.CODELIA_UPDATE_STEER_FIXTURE === "1") {
+				if (process.env.CODELIA_TEST_UPDATE_STEER_FIXTURE === "1") {
 					await fs.writeFile(
 						fixture,
 						trace.map((message) => JSON.stringify(message)).join("\n") + "\n",

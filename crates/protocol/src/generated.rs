@@ -3311,8 +3311,82 @@ pub struct InitializeResultTui {
     pub auto_review_issue: Option<AutoReviewIssue>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub theme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub color_scheme: Option<InitializeResultTuiColorScheme>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub image_protocol: Option<InitializeResultTuiImageProtocol>,
 }
 impl_object_serde!(InitializeResultTui);
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum InitializeResultTuiColorScheme {
+    Dark,
+    Light,
+    Unknown(String),
+}
+impl InitializeResultTuiColorScheme {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for InitializeResultTuiColorScheme {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "dark" => Self::Dark,
+            "light" => Self::Light,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<InitializeResultTuiColorScheme> for String {
+    fn from(value: InitializeResultTuiColorScheme) -> Self {
+        match value {
+            InitializeResultTuiColorScheme::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum InitializeResultTuiImageProtocol {
+    Halfblocks,
+    Kitty,
+    Unknown(String),
+}
+impl InitializeResultTuiImageProtocol {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Halfblocks => "halfblocks",
+            Self::Kitty => "kitty",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for InitializeResultTuiImageProtocol {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "halfblocks" => Self::Halfblocks,
+            "kitty" => Self::Kitty,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<InitializeResultTuiImageProtocol> for String {
+    fn from(value: InitializeResultTuiImageProtocol) -> Self {
+        match value {
+            InitializeResultTuiImageProtocol::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]

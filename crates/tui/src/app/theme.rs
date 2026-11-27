@@ -1,4 +1,6 @@
-use crate::app::state::{parse_theme_name, LogColor, ThemeName};
+#[cfg(test)]
+use crate::app::state::parse_theme_name;
+use crate::app::state::{LogColor, ThemeName};
 use ratatui::style::{Color, Modifier};
 use std::sync::{Mutex, OnceLock};
 
@@ -60,7 +62,7 @@ enum ThemeKind {
 
 static THEME_DEFINITION: OnceLock<Mutex<ThemeDefinition>> = OnceLock::new();
 static CURRENT_THEME_NAME: OnceLock<Mutex<ThemeName>> = OnceLock::new();
-static COLOR_SCHEME: OnceLock<ColorScheme> = OnceLock::new();
+static COLOR_SCHEME: OnceLock<Mutex<ColorScheme>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ColorScheme {
@@ -77,10 +79,41 @@ impl ColorScheme {
     }
 }
 
+fn initial_color_scheme() -> ColorScheme {
+    #[cfg(test)]
+    {
+        ColorScheme::from_setting(
+            std::env::var("CODELIA_TEST_TUI_COLOR_SCHEME")
+                .ok()
+                .as_deref(),
+        )
+    }
+    #[cfg(not(test))]
+    {
+        ColorScheme::Dark
+    }
+}
+
+fn color_scheme_mutex() -> &'static Mutex<ColorScheme> {
+    COLOR_SCHEME.get_or_init(|| Mutex::new(initial_color_scheme()))
+}
+
 fn color_scheme() -> ColorScheme {
-    *COLOR_SCHEME.get_or_init(|| {
-        ColorScheme::from_setting(std::env::var("CODELIA_TUI_COLOR_SCHEME").ok().as_deref())
-    })
+    color_scheme_mutex()
+        .lock()
+        .map(|value| *value)
+        .unwrap_or(ColorScheme::Dark)
+}
+
+pub(crate) fn apply_color_scheme(value: &str) {
+    let next = ColorScheme::from_setting(Some(value));
+    if let Ok(mut current) = color_scheme_mutex().lock() {
+        *current = next;
+    }
+    let name = current_theme_name();
+    if let Ok(mut definition) = theme_definition_mutex().lock() {
+        *definition = build_theme_for_scheme(name, next);
+    }
 }
 
 fn theme_kind_for_name(name: ThemeName) -> ThemeKind {
@@ -98,22 +131,8 @@ fn theme_kind_for_name(name: ThemeName) -> ThemeKind {
     }
 }
 
-fn selected_theme_name_from_env() -> ThemeName {
-    if let Ok(selected) = std::env::var("CODELIA_TUI_THEME") {
-        if let Some(parsed) = parse_theme_name(&selected) {
-            return parsed;
-        }
-    }
-    if let Ok(selected) = std::env::var("CODELIA_TUI_MARKDOWN_THEME") {
-        if let Some(parsed) = parse_theme_name(&selected) {
-            return parsed;
-        }
-    }
-    ThemeName::Codelia
-}
-
 fn current_theme_name() -> ThemeName {
-    let lock = CURRENT_THEME_NAME.get_or_init(|| Mutex::new(selected_theme_name_from_env()));
+    let lock = CURRENT_THEME_NAME.get_or_init(|| Mutex::new(ThemeName::Codelia));
     lock.lock()
         .map(|value| *value)
         .unwrap_or(ThemeName::Codelia)
@@ -330,7 +349,7 @@ fn theme_definition_mutex() -> &'static Mutex<ThemeDefinition> {
 
 pub(crate) fn apply_theme_name(name: ThemeName) {
     if let Ok(mut current) = CURRENT_THEME_NAME
-        .get_or_init(|| Mutex::new(selected_theme_name_from_env()))
+        .get_or_init(|| Mutex::new(ThemeName::Codelia))
         .lock()
     {
         *current = name;

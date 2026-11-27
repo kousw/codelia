@@ -33,7 +33,7 @@ export function buildQualificationRequest(
 			LOCALAPPDATA: scratch,
 			TEMP: scratch,
 			TMP: scratch,
-			...(peer ? { CODELIA_QUALIFICATION_PEER: peer } : {}),
+			...(peer ? { CODELIA_TEST_QUALIFICATION_PEER: peer } : {}),
 		},
 		inheritDefaultEnvironment: false,
 		workingDirectory: at("workspace"),

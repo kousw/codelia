@@ -160,8 +160,21 @@ fn apply_initialize_result(app: &mut AppState, result: &InitializeResult) {
     }
 
     if let Some(tui) = &result.tui {
+        if !app.cli_color_scheme_override {
+            if let Some(scheme) = tui.color_scheme.as_ref() {
+                crate::app::theme::apply_color_scheme(scheme.as_str());
+            }
+        }
         if let Some(theme_name) = tui.theme.as_deref() {
             let _ = apply_theme_from_name(theme_name);
+        }
+        if !app.cli_image_protocol_override {
+            if let Some(protocol) = tui.image_protocol.as_ref() {
+                app.image_preview.policy = crate::app::image_preview::PreviewPolicy::from_request(
+                    Some(protocol.as_str()),
+                    app.terminal_uses_alternate_screen,
+                );
+            }
         }
         let reviewer_state = tui.auto_review.as_ref().map(|state| state.as_str());
         let reviewer_issue = tui.auto_review_issue.as_ref().map(|issue| issue.as_str());

@@ -53,8 +53,7 @@ type BrowserLaunch = {
 	};
 };
 
-const clientId = (): string =>
-	process.env.CODELIA_OPENAI_OAUTH_CLIENT_ID ?? DEFAULT_CLIENT_ID;
+const clientId = (): string => DEFAULT_CLIENT_ID;
 
 const oauthPort = (): number =>
 	readPositiveIntEnv("CODELIA_OPENAI_OAUTH_PORT", DEFAULT_PORT);

@@ -29,7 +29,7 @@ import { RuntimeState } from "../src/runtime-state";
 const enabled =
 	process.platform === "darwin" &&
 	process.env.INTEGRATION === "1" &&
-	process.env.CODELIA_AUTO_REVIEW_CODEX_LIVE === "1";
+	process.env.CODELIA_TEST_AUTO_REVIEW_CODEX_LIVE === "1";
 
 test.skipIf(!enabled).each(["command matrix", "incidental writes"] as const)(
 	"live Codex OAuth: %s",
@@ -246,10 +246,7 @@ test.skipIf(!enabled).each(["command matrix", "incidental writes"] as const)(
 				const manualCases: string[] = [];
 				for (const [intent, source] of [
 					["テストを回して", "pytest -q"],
-					[
-						"この実装をレビューして",
-						"bun run test",
-					],
+					["この実装をレビューして", "bun run test"],
 				]) {
 					const priorPrompts = prompts.length;
 					const result = await execute(start(intent, source), source);

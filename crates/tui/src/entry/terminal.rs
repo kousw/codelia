@@ -36,6 +36,10 @@ impl TerminalRestoreGuard {
         self.preview_image_id = image_id;
         self
     }
+
+    pub(crate) fn set_preview_image(&mut self, image_id: Option<u32>) {
+        self.preview_image_id = image_id;
+    }
 }
 
 impl Drop for TerminalRestoreGuard {
@@ -61,30 +65,11 @@ impl Drop for TerminalRestoreGuard {
 
 pub(crate) fn image_preview_policy(
     mode: ResolvedTerminalMode,
+    requested_protocol: Option<&str>,
 ) -> crate::app::image_preview::PreviewPolicy {
-    let request = std::env::var("CODELIA_TUI_IMAGE_PROTOCOL").ok();
-    let font = if request.as_deref() == Some("kitty") {
-        // window_size uses the OS, never an stdin-reading terminal query.
-        crossterm::terminal::window_size().ok().and_then(|size| {
-            if size.columns == 0 || size.rows == 0 {
-                return None;
-            }
-            Some(ratatui_image::FontSize::new(
-                size.width / size.columns,
-                size.height / size.rows,
-            ))
-        })
-    } else {
-        None
-    };
-    crate::app::image_preview::PreviewPolicy::resolve(
-        request.as_deref(),
+    crate::app::image_preview::PreviewPolicy::from_request(
+        requested_protocol,
         mode.uses_alternate_screen(),
-        std::env::var_os("TMUX").is_some()
-            || std::env::var("TERM")
-                .is_ok_and(|term| term.starts_with("tmux") || term.starts_with("screen"))
-            || std::env::var("TERM_PROGRAM").is_ok_and(|term| term == "tmux"),
-        font,
     )
 }
 

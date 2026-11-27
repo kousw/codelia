@@ -16,6 +16,7 @@ describe("@codelia/config", () => {
 			experimental: "global",
 			permissions: "project",
 			mcp: "project",
+			agents: "project",
 			skills: "project",
 			execution_environment: "project",
 			search: "project",

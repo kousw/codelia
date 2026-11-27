@@ -1,5 +1,6 @@
 use std::env;
 
+use crate::app::util::debug::debug_config;
 use crate::entry::terminal_mode::RequestedTerminalMode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,18 +67,22 @@ pub(crate) fn print_basic_help() {
     println!("  --initial-message <text>         Queue initial prompt");
     println!("  --initial-user-message <text>    Alias of --initial-message");
     println!("  --tui-mode <mode>                Terminal mode: auto (default), inline, alternate");
+    println!(
+        "  --color-scheme <dark|light>      Terminal palette scheme (overrides tui.color_scheme)"
+    );
+    println!(
+        "  --image-protocol <mode>          Image preview protocol: halfblocks (default), kitty"
+    );
     println!("  --debug-perf[=true|false]        Enable perf panel");
     println!("  --sandbox-mode <mode>            readonly, workspace-write, or full-access");
 }
 
 pub(crate) fn parse_terminal_mode() -> Result<RequestedTerminalMode, String> {
-    let env_value = env::var("CODELIA_TUI_MODE").ok();
-    parse_terminal_mode_from_args(env::args().skip(1), env_value.as_deref())
+    parse_terminal_mode_from_args(env::args().skip(1))
 }
 
 pub(crate) fn parse_terminal_mode_from_args(
     args: impl IntoIterator<Item = impl AsRef<str>>,
-    env_value: Option<&str>,
 ) -> Result<RequestedTerminalMode, String> {
     let mut args = args
         .into_iter()
@@ -101,13 +106,15 @@ pub(crate) fn parse_terminal_mode_from_args(
         }
     }
 
-    if let Some(selected) = selected {
-        return Ok(selected);
-    }
-    match env_value {
-        Some(value) => parse_terminal_mode_value(value, "CODELIA_TUI_MODE"),
-        None => Ok(RequestedTerminalMode::default()),
-    }
+    Ok(selected.unwrap_or_default())
+}
+
+pub(crate) fn parse_color_scheme_arg() -> Result<Option<String>, String> {
+    parse_mode_value(env::args().skip(1), "--color-scheme", "dark|light")
+}
+
+pub(crate) fn parse_image_protocol_arg() -> Result<Option<String>, String> {
+    parse_mode_value(env::args().skip(1), "--image-protocol", "halfblocks|kitty")
 }
 
 fn parse_terminal_mode_value(value: &str, source: &str) -> Result<RequestedTerminalMode, String> {
@@ -166,24 +173,12 @@ pub(crate) fn parse_sandbox_mode_arg() -> Result<Option<(&'static str, String)>,
 pub(crate) fn parse_sandbox_mode_arg_from_args(
     args: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> Result<Option<(&'static str, String)>, String> {
-    let args: Vec<String> = args
-        .into_iter()
-        .map(|arg| arg.as_ref().to_owned())
-        .collect();
-    if let Some(value) = parse_mode_value(
-        args.iter(),
+    Ok(parse_mode_value(
+        args,
         "--sandbox-mode",
         "readonly|workspace-write|full-access",
-    )? {
-        return Ok(Some(("--sandbox-mode", value)));
-    }
-    Ok(parse_approval_mode_from_args(args)?.map(|value| ("--approval-mode", value)))
-}
-
-pub(crate) fn parse_approval_mode_from_args(
-    args: impl IntoIterator<Item = impl AsRef<str>>,
-) -> Result<Option<String>, String> {
-    parse_mode_value(args, "--approval-mode", "minimal|trusted|full-access")
+    )?
+    .map(|value| ("--sandbox-mode", value)))
 }
 
 fn parse_mode_value(
@@ -196,8 +191,14 @@ fn parse_mode_value(
         let arg = arg.as_ref();
         if matches!(
             arg,
-            "--initial-message" | "--initial-user-message" | "--tui-mode"
-        ) {
+            "--initial-message"
+                | "--initial-user-message"
+                | "--tui-mode"
+                | "--color-scheme"
+                | "--image-protocol"
+                | "--sandbox-mode"
+        ) && arg != flag
+        {
             let _ = args.next();
             continue;
         }
@@ -277,24 +278,16 @@ pub(crate) fn cli_flag_enabled(flag: &str) -> bool {
     cli_flag_enabled_from_args(flag, env::args().skip(1))
 }
 
-fn env_truthy(key: &str) -> bool {
-    std::env::var(key)
-        .ok()
-        .as_deref()
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
 pub(crate) fn debug_print_enabled() -> bool {
-    cli_flag_enabled("--debug") || env_truthy("CODELIA_DEBUG")
+    cli_flag_enabled("--debug") || debug_config().debug
 }
 
 pub(crate) fn debug_perf_enabled() -> bool {
-    cli_flag_enabled("--debug-perf") || env_truthy("CODELIA_DEBUG_PERF")
+    cli_flag_enabled("--debug-perf") || debug_config().perf
 }
 
 pub(crate) fn diagnostics_enabled() -> bool {
-    cli_flag_enabled("--diagnostics") || env_truthy("CODELIA_DIAGNOSTICS")
+    cli_flag_enabled("--diagnostics") || debug_config().diagnostics
 }
 
 #[cfg(test)]
@@ -305,36 +298,23 @@ mod tests {
     #[test]
     fn terminal_mode_supports_split_equals_and_case_insensitive_values() {
         assert_eq!(
-            parse_terminal_mode_from_args(["--tui-mode", "inline"], None),
+            parse_terminal_mode_from_args(["--tui-mode", "inline"]),
             Ok(RequestedTerminalMode::Inline)
         );
         assert_eq!(
-            parse_terminal_mode_from_args(["--tui-mode=ALTERNATE"], None),
+            parse_terminal_mode_from_args(["--tui-mode=ALTERNATE"]),
             Ok(RequestedTerminalMode::Alternate)
         );
         assert_eq!(
-            parse_terminal_mode_from_args(["--debug"], None),
+            parse_terminal_mode_from_args(["--debug"]),
             Ok(RequestedTerminalMode::Auto)
         );
     }
 
     #[test]
-    fn terminal_mode_prefers_cli_over_environment() {
-        assert_eq!(
-            parse_terminal_mode_from_args(["--tui-mode=inline"], Some("alternate")),
-            Ok(RequestedTerminalMode::Inline)
-        );
-        assert_eq!(
-            parse_terminal_mode_from_args(["--debug"], Some("alternate")),
-            Ok(RequestedTerminalMode::Alternate)
-        );
-    }
-
-    #[test]
     fn terminal_mode_rejects_missing_and_unknown_values() {
-        assert!(parse_terminal_mode_from_args(["--tui-mode"], None).is_err());
-        assert!(parse_terminal_mode_from_args(["--tui-mode", "--debug"], None).is_err());
-        assert!(parse_terminal_mode_from_args(["--tui-mode=fullscreen"], None).is_err());
-        assert!(parse_terminal_mode_from_args(["--debug"], Some("regular")).is_err());
+        assert!(parse_terminal_mode_from_args(["--tui-mode"]).is_err());
+        assert!(parse_terminal_mode_from_args(["--tui-mode", "--debug"]).is_err());
+        assert!(parse_terminal_mode_from_args(["--tui-mode=fullscreen"]).is_err());
     }
 }

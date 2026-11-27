@@ -359,7 +359,7 @@ describe.skipIf(process.platform === "win32")(
 
 const liveLinuxMxc =
 	process.platform === "linux" &&
-	process.env.CODELIA_APPROVAL_LINUX_MXC_LIVE === "1";
+	process.env.CODELIA_TEST_APPROVAL_LINUX_MXC_LIVE === "1";
 
 const linuxMxcFixtureScript = `
 const fs = require("node:fs");

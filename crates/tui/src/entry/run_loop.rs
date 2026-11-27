@@ -46,10 +46,7 @@ pub(crate) fn run_tui_loop(
         rx,
         tx,
         pending_initial_message,
-        &mut ProductionIo {
-            child,
-            key_debug: std::env::var("CODELIA_TUI_KEY_DEBUG").ok().as_deref() == Some("1"),
-        },
+        &mut ProductionIo { child },
     )
 }
 
@@ -80,7 +77,6 @@ trait LoopIo<B: Backend> {
 
 struct ProductionIo<'a> {
     child: &'a mut Child,
-    key_debug: bool,
 }
 
 impl LoopIo<TerminalBackend> for ProductionIo<'_> {
@@ -88,18 +84,7 @@ impl LoopIo<TerminalBackend> for ProductionIo<'_> {
         if !event::poll(timeout)? {
             return Ok(None);
         }
-        let event = event::read()?;
-        if self.key_debug {
-            if let Event::Key(key) = &event {
-                if key.kind == KeyEventKind::Press {
-                    eprintln!(
-                        "key: code={:?} mods={:?} kind={:?}",
-                        key.code, key.modifiers, key.kind
-                    );
-                }
-            }
-        }
-        Ok(Some(event))
+        Ok(Some(event::read()?))
     }
 
     fn child_exit(&mut self) -> Option<String> {
@@ -345,6 +330,20 @@ where
         }
 
         if let Some(event) = io.poll_event(terminal, EVENT_POLL_TIMEOUT)? {
+            if crate::app::util::debug::debug_config().keys {
+                if let Event::Key(key) = &event {
+                    if key.kind == KeyEventKind::Press {
+                        let line = format!(
+                            "key: code={:?} mods={:?} kind={:?}",
+                            key.code, key.modifiers, key.kind
+                        );
+                        if !crate::app::util::debug::append_debug_file_line("tui-keys.log", &line) {
+                            app.push_line(crate::app::state::LogKind::Status, line);
+                            state.needs_redraw = true;
+                        }
+                    }
+                }
+            }
             let update_choice_size_matches = !matches!(
                 &event, Event::Key(key) if key.kind == KeyEventKind::Press && key.code == KeyCode::Enter
             ) || app.image_preview.is_open()

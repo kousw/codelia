@@ -21,6 +21,28 @@ impl Default for PreviewPolicy {
 }
 
 impl PreviewPolicy {
+    pub fn from_request(request: Option<&str>, alternate: bool) -> Self {
+        let font = if request == Some("kitty") {
+            // window_size uses the OS, never an stdin-reading terminal query.
+            crossterm::terminal::window_size().ok().and_then(|size| {
+                if size.columns == 0 || size.rows == 0 {
+                    return None;
+                }
+                Some(FontSize::new(
+                    size.width / size.columns,
+                    size.height / size.rows,
+                ))
+            })
+        } else {
+            None
+        };
+        let tmux = std::env::var_os("TMUX").is_some()
+            || std::env::var("TERM")
+                .is_ok_and(|term| term.starts_with("tmux") || term.starts_with("screen"))
+            || std::env::var("TERM_PROGRAM").is_ok_and(|term| term == "tmux");
+        Self::resolve(request, alternate, tmux, font)
+    }
+
     pub fn resolve(
         request: Option<&str>,
         alternate: bool,
@@ -46,7 +68,7 @@ impl PreviewPolicy {
                 },
                 None => fallback("no safe pixel cell size from OS; Kitty disabled"),
             },
-            Some(_) => fallback("unknown CODELIA_TUI_IMAGE_PROTOCOL; use halfblocks or kitty"),
+            Some(_) => fallback("unknown image protocol; use halfblocks or kitty"),
         }
     }
 

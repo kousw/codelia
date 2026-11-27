@@ -59,8 +59,9 @@ pub(crate) fn parse_launch_context_from_args(
             "--initial-message"
                 | "--initial-user-message"
                 | "--tui-mode"
+                | "--color-scheme"
+                | "--image-protocol"
                 | "--sandbox-mode"
-                | "--approval-mode"
         ) {
             let _ = iter.next();
             continue;

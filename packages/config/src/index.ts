@@ -135,14 +135,25 @@ export type SearchConfig = {
 	};
 };
 
+export type TuiColorScheme = "dark" | "light";
+export type TuiImageProtocol = "halfblocks" | "kitty";
+
 export type TuiConfig = {
 	theme?: string;
+	color_scheme?: TuiColorScheme;
+	image_protocol?: TuiImageProtocol;
 };
 
 export type AuthStorageMode = "auto" | "keyring" | "file";
+export type OAuthBrowserMode = "auto" | "manual";
 
 export type AuthConfig = {
 	storage?: AuthStorageMode;
+	oauth_browser?: OAuthBrowserMode;
+};
+
+export type AgentsFileConfig = {
+	enabled?: boolean;
 };
 
 export type UpdateMode = "auto" | "notify" | "off";
@@ -174,6 +185,7 @@ export type CodeliaConfig = {
 	experimental?: ExperimentalConfig;
 	permissions?: PermissionsConfig;
 	mcp?: McpConfig;
+	agents?: AgentsFileConfig;
 	skills?: SkillsConfig;
 	execution_environment?: ExecutionEnvironmentConfig;
 	search?: SearchConfig;
@@ -196,6 +208,7 @@ export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
 	experimental: "global",
 	permissions: "project",
 	mcp: "project",
+	agents: "project",
 	skills: "project",
 	execution_environment: "project",
 	search: "project",
@@ -657,14 +670,64 @@ const parseAuthConfig = (
 	source: string,
 ): AuthConfig | undefined => {
 	if (!isRecord(value)) return undefined;
-	const storage = value.storage;
-	if (storage === undefined) return undefined;
-	if (storage === "auto" || storage === "keyring" || storage === "file") {
-		return { storage };
+	const result: AuthConfig = {};
+	if (value.storage !== undefined) {
+		const storage = value.storage;
+		if (storage === "auto" || storage === "keyring" || storage === "file") {
+			result.storage = storage;
+		} else {
+			throw new Error(
+				`${source}: auth.storage must be "auto", "keyring", or "file"`,
+			);
+		}
 	}
-	throw new Error(
-		`${source}: auth.storage must be "auto", "keyring", or "file"`,
-	);
+	if (value.oauth_browser !== undefined) {
+		const browser = value.oauth_browser;
+		if (browser === "auto" || browser === "manual") {
+			result.oauth_browser = browser;
+		} else {
+			throw new Error(
+				`${source}: auth.oauth_browser must be "auto" or "manual"`,
+			);
+		}
+	}
+	return Object.keys(result).length > 0 ? result : undefined;
+};
+
+const parseTuiConfig = (
+	value: unknown,
+	source: string,
+): TuiConfig | undefined => {
+	if (!isRecord(value)) return undefined;
+	const result: TuiConfig = {};
+	const theme = pickString(value.theme);
+	if (theme) result.theme = theme;
+	if (value.color_scheme !== undefined) {
+		if (value.color_scheme === "dark" || value.color_scheme === "light") {
+			result.color_scheme = value.color_scheme;
+		} else {
+			throw new Error(`${source}: tui.color_scheme must be "dark" or "light"`);
+		}
+	}
+	if (value.image_protocol !== undefined) {
+		if (
+			value.image_protocol === "halfblocks" ||
+			value.image_protocol === "kitty"
+		) {
+			result.image_protocol = value.image_protocol;
+		} else {
+			throw new Error(
+				`${source}: tui.image_protocol must be "halfblocks" or "kitty"`,
+			);
+		}
+	}
+	return Object.keys(result).length > 0 ? result : undefined;
+};
+
+const parseAgentsConfig = (value: unknown): AgentsFileConfig | undefined => {
+	if (!isRecord(value)) return undefined;
+	const enabled = pickBoolean(value.enabled);
+	return enabled !== undefined ? { enabled } : undefined;
 };
 
 const parseUpdateConfig = (
@@ -721,19 +784,14 @@ export const parseConfig = (
 			? permissions
 			: undefined;
 	const mcp = parseMcpConfig(value.mcp);
+	const agents = parseAgentsConfig(value.agents);
 	const skills = parseSkillsConfig(value.skills);
 	const executionEnvironment = parseExecutionEnvironmentConfig(
 		value.execution_environment,
 	);
 	const experimental = parseExperimentalConfig(value.experimental);
 	const search = parseSearchConfig(value.search);
-	const tui = isRecord(value.tui)
-		? {
-				...(pickString(value.tui.theme)
-					? { theme: pickString(value.tui.theme) }
-					: {}),
-			}
-		: undefined;
+	const tui = parseTuiConfig(value.tui, sourceLabel);
 	const result: CodeliaConfig = { version, model };
 	if (auth) result.auth = auth;
 	if (value.providers !== undefined)
@@ -749,6 +807,9 @@ export const parseConfig = (
 	if (mcp) {
 		result.mcp = mcp;
 	}
+	if (agents) {
+		result.agents = agents;
+	}
 	if (skills) {
 		result.skills = skills;
 	}
@@ -761,7 +822,7 @@ export const parseConfig = (
 	if (search) {
 		result.search = search;
 	}
-	if (tui && Object.keys(tui).length > 0) {
+	if (tui) {
 		result.tui = tui;
 	}
 	if (update) result.update = update;
@@ -777,6 +838,7 @@ type ConfigLayer = {
 	experimental?: ExperimentalConfig;
 	permissions?: PermissionsConfig;
 	mcp?: McpConfig;
+	agents?: AgentsFileConfig;
 	skills?: SkillsConfig;
 	execution_environment?: ExecutionEnvironmentConfig;
 	search?: SearchConfig;
@@ -852,6 +914,9 @@ export class ConfigRegistry {
 						...layer.mcp.servers,
 					},
 				};
+			}
+			if (layer?.agents) {
+				merged.agents = { ...(merged.agents ?? {}), ...layer.agents };
 			}
 			if (layer?.skills) {
 				const nextSkills = layer.skills;

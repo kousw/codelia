@@ -118,7 +118,11 @@ export const resolveEnvironmentExecutionEnvironmentConfig = async (
 export const resolveEnvironmentTuiConfig = async (
 	state: RuntimeState,
 	workingDir?: string,
-): Promise<{ theme?: string }> => {
+): Promise<{
+	theme?: string;
+	color_scheme?: "dark" | "light";
+	image_protocol?: "halfblocks" | "kitty";
+}> => {
 	if (state.effectiveEnvironment.config.source === "host") {
 		const provider = state.effectiveEnvironment.adapters.configProvider;
 		if (!provider?.resolveTuiConfig) {

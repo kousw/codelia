@@ -292,7 +292,7 @@ fn inline_native_scrollback_ansi_capture() {
         }
     }
     // Optional emulator smoke output; regular unit tests need no npm dependency.
-    if let Some(path) = std::env::var_os("CODELIA_TUI_CAPTURE_PATH") {
+    if let Some(path) = std::env::var_os("CODELIA_TEST_TUI_CAPTURE_PATH") {
         std::fs::write(path, serde_json::to_vec(&captures).unwrap()).unwrap();
     }
 }

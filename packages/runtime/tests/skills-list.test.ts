@@ -100,10 +100,10 @@ describe("skills.list rpc", () => {
 			const resolver = await SkillsResolver.create({
 				workingDir: repoDir,
 				config: baseConfig,
+				markers: [".git"],
 				env: {
 					...process.env,
 					HOME: homeDir,
-					CODELIA_AGENTS_MARKERS: ".git",
 				},
 			});
 			const state = new RuntimeState();

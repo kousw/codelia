@@ -14,8 +14,6 @@ export const TOP_LEVEL_HELP_TEXT = [
 	"",
 	"Runtime options:",
 	"  --sandbox-mode <readonly|workspace-write|full-access>",
-	"  --approval-mode <minimal|trusted|full-access> (legacy)",
-	"    trusted retains project allow rules. To disable OS isolation, use --sandbox-mode full-access.",
 	"",
 	"TUI options (passed through):",
 	"  -r, --resume [session_id]",
@@ -24,6 +22,8 @@ export const TOP_LEVEL_HELP_TEXT = [
 	"  --initial-message <text>",
 	"  --initial-user-message <text>",
 	"  --tui-mode <auto|inline|alternate>",
+	"  --color-scheme <dark|light>",
+	"  --image-protocol <halfblocks|kitty>",
 	"  --debug-perf[=true|false]",
 	"  --sandbox-mode <readonly|workspace-write|full-access>",
 	"",
@@ -144,9 +144,6 @@ const resolveRuntimeMode = (
 	return undefined;
 };
 
-export const resolvePromptModeApproval = (args: string[]) =>
-	resolveRuntimeMode(args, "--approval-mode", "minimal|trusted|full-access");
-
 export const resolvePromptModeSandbox = (args: string[]) =>
 	resolveRuntimeMode(
 		args,
@@ -158,7 +155,7 @@ export const hasHarborShellApprovalFlag = (args: string[]): boolean => {
 	for (let index = 0; index < args.length; index++) {
 		const arg = args[index];
 		if (arg === "--") break;
-		if (["-p", "--prompt", "--sandbox-mode", "--approval-mode"].includes(arg)) {
+		if (["-p", "--prompt", "--sandbox-mode"].includes(arg)) {
 			index++;
 			continue;
 		}

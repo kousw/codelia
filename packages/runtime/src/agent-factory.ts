@@ -19,7 +19,11 @@ import {
 import { shouldAutoOpenOAuthBrowser } from "./auth/oauth-utils";
 import { openBrowser } from "./auth/openai-oauth";
 import { builtinApiKeyBase } from "./auth/provider-api-base";
-import { resolveImageGenerationConfig } from "./config";
+import {
+	resolveAgentsEnabled,
+	resolveAuthOAuthBrowser,
+	resolveImageGenerationConfig,
+} from "./config";
 import { createDecisionTool } from "./decisions/tool";
 import { resolveEffectiveModelConfig } from "./effective-model";
 import { isTuiLocalEnvironment } from "./environment";
@@ -98,12 +102,6 @@ import { createConversationTools } from "./tools/conversation";
 import { createToolSessionContextKey } from "./tools/session-context";
 import { createSubagentTaskTools } from "./tools/task";
 
-const envTruthy = (value?: string): boolean => {
-	if (!value) return false;
-	const normalized = value.trim().toLowerCase();
-	return normalized === "1" || normalized === "true";
-};
-
 const sleep = (ms: number): Promise<void> =>
 	new Promise((resolve) => {
 		setTimeout(resolve, ms);
@@ -132,13 +130,19 @@ export const requestMcpOAuthTokens = async (
 	errorMessage: string,
 	signal?: AbortSignal,
 ): Promise<McpOAuthTokens | null> => {
+	const configuredBrowser =
+		state.effectiveEnvironment.config.source === "disabled"
+			? undefined
+			: await resolveAuthOAuthBrowser(
+					state.runtimeWorkingDir ?? undefined,
+				).catch(() => undefined);
 	const gateway: McpOAuthPromptGateway = {
 		runId: state.activeRunId ?? undefined,
 		supportsPrompt: !!state.uiCapabilities?.supports_prompt,
 		waitForConfirmSupport: () => waitForUiConfirmSupport(state, 5_000, signal),
 		confirm: (params) => requestUiConfirm(state, params, signal),
 		prompt: (params) => requestUiPrompt(state, params, signal),
-		shouldAutoOpenBrowser: shouldAutoOpenOAuthBrowser,
+		shouldAutoOpenBrowser: () => shouldAutoOpenOAuthBrowser(configuredBrowser),
 		openBrowser,
 		log,
 	};
@@ -237,11 +241,15 @@ export const createAgentFactory = (
 				environment.context.projectInstructions === "from-workspace" &&
 				workspaceRoot
 			) {
+				const agentsEnabled =
+					environment.config.source === "disabled"
+						? true
+						: await resolveAgentsEnabled(workspaceRoot).catch(() => true);
 				agentsResolver =
 					state.agentsResolver ??
 					(await AgentsResolver.create(
 						workspaceRoot,
-						undefined,
+						{ enabled: agentsEnabled },
 						undefined,
 						reader,
 					));
@@ -582,9 +590,6 @@ export const createAgentFactory = (
 							providers: modelConfig.providers,
 						})
 					: buildConfiguredModelRegistry(modelConfig.providers);
-			const totalBudgetTrimEnabled = envTruthy(
-				process.env.CODELIA_TOOL_OUTPUT_TOTAL_TRIM,
-			);
 			const builtinTools = new Set([...baseLocalTools, ...imageTools]);
 			if (
 				localSearchTool &&
@@ -751,7 +756,7 @@ export const createAgentFactory = (
 				systemPrompt: effectiveSystemPrompt,
 				modelRegistry: modelRegistry ?? DEFAULT_MODEL_REGISTRY,
 				toolOutputCache: {
-					totalBudgetTrim: totalBudgetTrimEnabled,
+					totalBudgetTrim: false,
 				},
 				services: {
 					toolOutputCacheStore,

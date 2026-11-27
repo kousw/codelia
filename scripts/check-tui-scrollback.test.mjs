@@ -3,12 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { loadTerminal, verifyCapture } from "./check-tui-scrollback.mjs";
 
-const capturePath = process.env.CODELIA_TUI_CAPTURE_PATH;
+const capturePath = process.env.CODELIA_TEST_TUI_CAPTURE_PATH;
 assert.ok(
 	capturePath,
-	"Set CODELIA_TUI_CAPTURE_PATH to the production ANSI fixture",
+	"Set CODELIA_TEST_TUI_CAPTURE_PATH to the production ANSI fixture",
 );
-const Terminal = loadTerminal(process.env.CODELIA_TUI_EMULATOR_DIR);
+const Terminal = loadTerminal(process.env.CODELIA_TEST_TUI_EMULATOR_DIR);
 const captures = JSON.parse(await readFile(capturePath, "utf8"));
 assert.ok(captures.length > 0);
 

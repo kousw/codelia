@@ -20,7 +20,7 @@ import { startShellTask } from "../src/tasks/shell-executor";
 const live =
 	process.platform === "darwin" &&
 	process.arch === "arm64" &&
-	process.env.CODELIA_APPROVAL_MXC_LIVE === "1";
+	process.env.CODELIA_TEST_APPROVAL_MXC_LIVE === "1";
 
 const fixture = async (
 	testCase: (protection: ShellProtection) => Promise<void>,

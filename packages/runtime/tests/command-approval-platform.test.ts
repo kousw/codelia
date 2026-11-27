@@ -203,7 +203,7 @@ const result = {
 process.stdout.write(JSON.stringify(result));
 `;
 
-test.skipIf(process.env.CODELIA_APPROVAL_LINUX_LIVE !== "1")(
+test.skipIf(process.env.CODELIA_TEST_APPROVAL_LINUX_LIVE !== "1")(
 	"rootless Linux worker enforces live workspace and Git scopes, private scratch, isolated network and cancellation",
 	async () => {
 		expect(process.platform).toBe("linux");

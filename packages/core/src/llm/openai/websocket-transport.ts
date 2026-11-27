@@ -1,3 +1,4 @@
+import { hasDebugTopic } from "@codelia/logger";
 import type OpenAI from "openai";
 import type {
 	Response,
@@ -75,18 +76,7 @@ const resolveTimeoutMs = (
 	return Math.floor(value);
 };
 
-const envTruthy = (value?: string): boolean => {
-	if (!value) return false;
-	const normalized = value.trim().toLowerCase();
-	return (
-		normalized === "1" ||
-		normalized === "true" ||
-		normalized === "yes" ||
-		normalized === "on"
-	);
-};
-
-const WS_EVENT_TRACE_ENABLED = envTruthy(process.env.CODELIA_DEBUG);
+const WS_EVENT_TRACE_ENABLED = hasDebugTopic("ws");
 const WS_EVENT_TRACE_PROGRESS_LOG_INTERVAL_MS = 5_000;
 
 type WsEventTraceState = {

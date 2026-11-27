@@ -50,11 +50,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const oauthPort = (): number =>
 	readPositiveIntEnv("CODELIA_MCP_OAUTH_PORT", DEFAULT_MCP_OAUTH_PORT);
 
-const oauthWaitTimeoutMs = (): number =>
-	readPositiveIntEnv(
-		"CODELIA_MCP_OAUTH_TIMEOUT_MS",
-		DEFAULT_MCP_OAUTH_WAIT_TIMEOUT_MS,
-	);
+const oauthWaitTimeoutMs = (): number => DEFAULT_MCP_OAUTH_WAIT_TIMEOUT_MS;
 
 const buildAuthorizeUrl = (
 	authorizationUrl: string,

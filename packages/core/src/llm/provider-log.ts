@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { getDebugDir, hasDebugTopic } from "@codelia/logger";
 
 export type ProviderLogSettings = {
 	enabled: boolean;
@@ -8,15 +9,9 @@ export type ProviderLogSettings = {
 
 export type ProviderLogDirection = "request" | "response";
 
-const envTruthy = (value?: string): boolean => {
-	if (!value) return false;
-	const normalized = value.trim().toLowerCase();
-	return normalized === "1" || normalized === "true";
-};
-
 export const getProviderLogSettings = (): ProviderLogSettings => {
-	const enabled = envTruthy(process.env.CODELIA_PROVIDER_LOG);
-	const dumpDirEnv = process.env.CODELIA_PROVIDER_LOG_DIR?.trim();
+	const enabled = hasDebugTopic("provider-log");
+	const dumpDirEnv = getDebugDir();
 	const dumpDir = enabled
 		? dumpDirEnv && dumpDirEnv.length > 0
 			? dumpDirEnv

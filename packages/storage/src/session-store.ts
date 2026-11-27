@@ -6,6 +6,7 @@ import type {
 	SessionStore,
 	StoragePaths,
 } from "@codelia/core";
+import { hasDebugTopic } from "@codelia/logger";
 import { resolveStoragePaths } from "./paths";
 import { getProcessIdentity } from "./process-identity";
 import {
@@ -54,9 +55,7 @@ export class SessionStoreWriterImpl implements SessionStore {
 			`${this.runId}.jsonl`,
 		);
 		this.usageFilePath = usageLogPath(paths, datePath, this.runId);
-		const dump =
-			options.dump ??
-			/^(1|true)$/i.test(process.env.CODELIA_SESSION_DUMP ?? "");
+		const dump = options.dump ?? hasDebugTopic("session-dump");
 		if (dump)
 			this.diagnosticFilePath = path.join(
 				paths.sessionsDir,

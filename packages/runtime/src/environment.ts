@@ -79,7 +79,11 @@ export type RuntimeConfigProvider = {
 	resolveExecutionEnvironmentConfig?: (
 		workingDir?: string,
 	) => Promise<ResolvedExecutionEnvironmentConfig>;
-	resolveTuiConfig?: (workingDir?: string) => Promise<{ theme?: string }>;
+	resolveTuiConfig?: (workingDir?: string) => Promise<{
+		theme?: string;
+		color_scheme?: "dark" | "light";
+		image_protocol?: "halfblocks" | "kitty";
+	}>;
 	updateModel?: (
 		workingDir: string | undefined,
 		model: {

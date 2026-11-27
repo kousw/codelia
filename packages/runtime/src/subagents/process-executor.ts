@@ -136,12 +136,11 @@ const prepareProcess = (
 						cwd: input.workspace_root,
 						detached: process.platform !== "win32",
 						stdio: ["pipe", "pipe", "pipe", "pipe"],
-						// Provider logging can write raw credentials/payloads outside the child contract.
+						// Debug/provider logging can write raw credentials/payloads outside the child contract.
 						env: {
 							...process.env,
-							CODELIA_PROVIDER_LOG: "0",
-							CODELIA_DEBUG: "0",
-							CODELIA_DIAGNOSTICS: "0",
+							CODELIA_DEBUG: "",
+							CODELIA_DEBUG_DIR: "",
 						},
 					},
 				);

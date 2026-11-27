@@ -125,19 +125,7 @@ export const resolveUpdateSettings = async (
 		);
 	}
 
-	let channel: string | null = fromConfig.channel ?? null;
-	if (env.CODELIA_UPDATE_CHANNEL !== undefined) {
-		const trimmed = env.CODELIA_UPDATE_CHANNEL.trim();
-		if (trimmed.length === 0) {
-			channel = null;
-		} else if (isValidUpdateChannel(trimmed)) {
-			channel = trimmed;
-		} else {
-			warnings.push(
-				`Ignoring invalid CODELIA_UPDATE_CHANNEL=${env.CODELIA_UPDATE_CHANNEL}.`,
-			);
-		}
-	}
+	const channel: string | null = fromConfig.channel ?? null;
 
 	const savedMode = fromConfig.mode ?? "notify";
 	// Never run automatic background checks or installs in CI or non-interactive runs.

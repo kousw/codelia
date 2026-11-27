@@ -464,14 +464,22 @@ export const createRuntimeHandlers = ({
 		const parsed = parseRequestParams("initialize", raw);
 		if (!parsed.ok) return sendError(id, parsed.error);
 		const params = parsed.params;
-		let resolvedTheme: string | undefined;
+		let resolvedTui:
+			| {
+					theme?: string;
+					color_scheme?: "dark" | "light";
+					image_protocol?: "halfblocks" | "kitty";
+			  }
+			| undefined;
 		const environment = state.effectiveEnvironment;
 		if (isTuiLocalEnvironment(environment)) {
 			try {
 				const workingDir =
 					state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
-				resolvedTheme = (await resolveEnvironmentTuiConfig(state, workingDir))
-					.theme;
+				const loaded = await resolveEnvironmentTuiConfig(state, workingDir);
+				if (loaded.theme || loaded.color_scheme || loaded.image_protocol) {
+					resolvedTui = loaded;
+				}
 			} catch (error) {
 				log(`initialize tui config load failed: ${String(error)}`);
 			}
@@ -568,8 +576,8 @@ export const createRuntimeHandlers = ({
 				supports_text_delta: true,
 			},
 			...(localHost ? { local_host: localHost } : {}),
-			...(localHost || resolvedTheme
-				? { tui: { theme: resolvedTheme, ...localHost } }
+			...(localHost || resolvedTui
+				? { tui: { ...resolvedTui, ...localHost } }
 				: {}),
 		};
 		sendRequestResult("initialize", id, result);

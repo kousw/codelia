@@ -31,8 +31,7 @@ export const normalizeRegistryUrl = (raw: string | undefined): string => {
 
 export const resolveRegistryUrl = (
 	env: NodeJS.ProcessEnv = process.env,
-): string =>
-	normalizeRegistryUrl(env.CODELIA_UPDATE_REGISTRY ?? env.npm_config_registry);
+): string => normalizeRegistryUrl(env.npm_config_registry);
 
 export const computeRegistryId = (registryUrl: string): string =>
 	createHash("sha256").update(registryUrl).digest("hex");

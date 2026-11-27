@@ -7,11 +7,11 @@ import { createRuntimeModel } from "../src/model-factory";
 // environment only (inject them with Infisical); auth is passed explicitly, so
 // nothing is read from or written to ~/.codelia.
 //
-//   INTEGRATION=1 CODELIA_STREAM_DELTA_LIVE=1 infisical run --env=dev -- \
+//   INTEGRATION=1 CODELIA_TEST_STREAM_DELTA_LIVE=1 infisical run --env=dev -- \
 //     bun test packages/runtime/tests/stream-deltas-live.test.ts
 //
-// Optional: CODELIA_STREAM_DELTA_LIVE_PROVIDERS=anthropic,google limits providers;
-// CODELIA_STREAM_DELTA_LIVE_MODEL_<PROVIDER>=<model> overrides a provider default.
+// Optional: CODELIA_TEST_STREAM_DELTA_LIVE_PROVIDERS=anthropic,google limits providers;
+// CODELIA_TEST_STREAM_DELTA_LIVE_MODEL_<PROVIDER>=<model> overrides a provider default.
 
 type LiveProvider =
 	| "openai"
@@ -44,8 +44,8 @@ const PROVIDERS: Array<{
 
 const live =
 	process.env.INTEGRATION === "1" &&
-	process.env.CODELIA_STREAM_DELTA_LIVE === "1";
-const selected = (process.env.CODELIA_STREAM_DELTA_LIVE_PROVIDERS ?? "")
+	process.env.CODELIA_TEST_STREAM_DELTA_LIVE === "1";
+const selected = (process.env.CODELIA_TEST_STREAM_DELTA_LIVE_PROVIDERS ?? "")
 	.split(",")
 	.map((value) => value.trim())
 	.filter(Boolean);
@@ -227,7 +227,7 @@ describe("live provisional deltas (chargeable)", () => {
 			async () => {
 				const model =
 					process.env[
-						`CODELIA_STREAM_DELTA_LIVE_MODEL_${entry.provider.toUpperCase()}`
+						`CODELIA_TEST_STREAM_DELTA_LIVE_MODEL_${entry.provider.toUpperCase()}`
 					] ?? entry.model;
 				const { llm } = await createRuntimeModel({
 					provider: entry.provider,

@@ -55,7 +55,7 @@ jobs:
       - name: Test
         run: cargo test --locked --manifest-path crates/tui/Cargo.toml
       - name: Test light color scheme
-        run: CODELIA_TUI_COLOR_SCHEME=light cargo test --locked --manifest-path crates/tui/Cargo.toml
+        run: CODELIA_TEST_TUI_COLOR_SCHEME=light cargo test --locked --manifest-path crates/tui/Cargo.toml
       - name: Image preview PTY regression checks
         run: |
           python3 scripts/check-tui-image-preview_test.py
@@ -65,10 +65,10 @@ jobs:
           node-version: "22"
       - name: Native scrollback and verifier regression tests
         env:
-          CODELIA_TUI_EMULATOR_DIR: ${{ runner.temp }}/codelia-tui-emulator
-          CODELIA_TUI_CAPTURE_PATH: ${{ runner.temp }}/codelia-tui-capture.json
+          CODELIA_TEST_TUI_EMULATOR_DIR: ${{ runner.temp }}/codelia-tui-emulator
+          CODELIA_TEST_TUI_CAPTURE_PATH: ${{ runner.temp }}/codelia-tui-capture.json
         run: |
-          npm install --prefix "$CODELIA_TUI_EMULATOR_DIR" --ignore-scripts --no-audit --no-fund --package-lock=false @xterm/headless@6.0.0
+          npm install --prefix "$CODELIA_TEST_TUI_EMULATOR_DIR" --ignore-scripts --no-audit --no-fund --package-lock=false @xterm/headless@6.0.0
           cargo test --locked --manifest-path crates/tui/Cargo.toml inline_native_scrollback_ansi_capture
           node --test scripts/check-tui-scrollback.test.mjs
 
@@ -113,7 +113,7 @@ jobs:
             cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml --target aarch64-unknown-linux-gnu
       - name: Linux MXC Bubblewrap native sandbox acceptance
         env:
-          CODELIA_APPROVAL_LINUX_MXC_LIVE: "1"
+          CODELIA_TEST_APPROVAL_LINUX_MXC_LIVE: "1"
         run: |
           crates/mxc-launcher/target/release/codelia-mxc-launcher --probe-v3 /usr/bin/bwrap
           bun test --timeout 60000 packages/runtime/tests/linux-mxc-backend.test.ts
@@ -121,7 +121,7 @@ jobs:
           bun test --timeout 30000 -t 'Linux home symlinks' packages/runtime/tests/home-dot-protection.test.ts
       - name: Linux gVisor fallback sandbox acceptance
         env:
-          CODELIA_APPROVAL_LINUX_LIVE: "1"
+          CODELIA_TEST_APPROVAL_LINUX_LIVE: "1"
         run: |
           bun test packages/runtime/tests/command-approval-platform.test.ts
           bun test --timeout 60000 packages/runtime/tests/sandbox-git-writes.test.ts

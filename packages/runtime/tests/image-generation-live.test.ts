@@ -68,16 +68,17 @@ test("live checker accepts the real normalized tool-result contract without netw
 
 // A separate opt-in is required because this check sends exactly one paid request.
 const enabled =
-	process.env.INTEGRATION === "1" && process.env.CODELIA_IMAGE_LIVE === "1";
+	process.env.INTEGRATION === "1" &&
+	process.env.CODELIA_TEST_IMAGE_LIVE === "1";
 test.skipIf(!enabled)(
 	"live selected image API -> immutable artifact -> model image input (chargeable)",
 	async () => {
-		const provider = process.env.CODELIA_IMAGE_PROVIDER ?? "openai";
-		const model = process.env.CODELIA_IMAGE_MODEL;
-		const endpoint = process.env.CODELIA_IMAGE_ENDPOINT;
+		const provider = process.env.CODELIA_TEST_IMAGE_PROVIDER ?? "openai";
+		const model = process.env.CODELIA_TEST_IMAGE_MODEL;
+		const endpoint = process.env.CODELIA_TEST_IMAGE_ENDPOINT;
 		if (!model)
 			throw new Error(
-				"Set CODELIA_IMAGE_MODEL explicitly; no model or billing fallback is permitted.",
+				"Set CODELIA_TEST_IMAGE_MODEL explicitly; no model or billing fallback is permitted.",
 			);
 		const config = parseImageGenerationConfig(
 			provider === "codex"

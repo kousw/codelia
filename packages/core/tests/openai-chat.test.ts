@@ -458,8 +458,8 @@ describe("ChatOpenAI websocket mode", () => {
 	});
 
 	test("logs http stream events when provider logging is enabled", async () => {
-		const originalProviderLog = process.env.CODELIA_PROVIDER_LOG;
-		process.env.CODELIA_PROVIDER_LOG = "1";
+		const originalDebug = process.env.CODELIA_DEBUG;
+		process.env.CODELIA_DEBUG = "provider-log";
 		const errorLogs: string[] = [];
 		const originalConsoleError = console.error;
 		console.error = (...args: unknown[]) => {
@@ -563,17 +563,17 @@ describe("ChatOpenAI websocket mode", () => {
 			]);
 		} finally {
 			console.error = originalConsoleError;
-			if (originalProviderLog === undefined) {
-				delete process.env.CODELIA_PROVIDER_LOG;
+			if (originalDebug === undefined) {
+				delete process.env.CODELIA_DEBUG;
 			} else {
-				process.env.CODELIA_PROVIDER_LOG = originalProviderLog;
+				process.env.CODELIA_DEBUG = originalDebug;
 			}
 		}
 	});
 
 	test("logs first unhandled response event type when provider logging is enabled", async () => {
-		const originalProviderLog = process.env.CODELIA_PROVIDER_LOG;
-		process.env.CODELIA_PROVIDER_LOG = "1";
+		const originalDebug = process.env.CODELIA_DEBUG;
+		process.env.CODELIA_DEBUG = "provider-log";
 		const errorLogs: string[] = [];
 		const originalConsoleError = console.error;
 		console.error = (...args: unknown[]) => {
@@ -624,18 +624,16 @@ describe("ChatOpenAI websocket mode", () => {
 			).toBe(true);
 		} finally {
 			console.error = originalConsoleError;
-			if (originalProviderLog === undefined) {
-				delete process.env.CODELIA_PROVIDER_LOG;
+			if (originalDebug === undefined) {
+				delete process.env.CODELIA_DEBUG;
 			} else {
-				process.env.CODELIA_PROVIDER_LOG = originalProviderLog;
+				process.env.CODELIA_DEBUG = originalDebug;
 			}
 		}
 	});
 
 	test("logs first unhandled response event type when debug is enabled", async () => {
-		const originalProviderLog = process.env.CODELIA_PROVIDER_LOG;
 		const originalDebug = process.env.CODELIA_DEBUG;
-		delete process.env.CODELIA_PROVIDER_LOG;
 		process.env.CODELIA_DEBUG = "1";
 		const errorLogs: string[] = [];
 		const originalConsoleError = console.error;
@@ -687,11 +685,6 @@ describe("ChatOpenAI websocket mode", () => {
 			).toBe(true);
 		} finally {
 			console.error = originalConsoleError;
-			if (originalProviderLog === undefined) {
-				delete process.env.CODELIA_PROVIDER_LOG;
-			} else {
-				process.env.CODELIA_PROVIDER_LOG = originalProviderLog;
-			}
 			if (originalDebug === undefined) {
 				delete process.env.CODELIA_DEBUG;
 			} else {

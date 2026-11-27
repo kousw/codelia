@@ -46,10 +46,11 @@ describe("agents_resolve tool", () => {
 		await writeText(targetPath, "export const value = 1;\n");
 
 		try {
-			const resolver = await AgentsResolver.create(repoDir, undefined, {
-				...process.env,
-				CODELIA_AGENTS_MARKERS: ".git",
-			});
+			const resolver = await AgentsResolver.create(
+				repoDir,
+				{ root: { markers: [".git"] } },
+				process.env,
+			);
 			const sandbox = await SandboxContext.create(repoDir);
 			const tool = createAgentsResolveTool(
 				createSandboxKey(sandbox),

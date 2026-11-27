@@ -71,10 +71,10 @@ describe("skill tools", () => {
 			const resolver = await SkillsResolver.create({
 				workingDir: repoDir,
 				config: baseConfig,
+				markers: [".git"],
 				env: {
 					...process.env,
 					HOME: homeDir,
-					CODELIA_AGENTS_MARKERS: ".git",
 				},
 			});
 			const tool = createSkillSearchTool(createSkillsResolverKey(resolver));
@@ -115,10 +115,10 @@ describe("skill tools", () => {
 			const resolver = await SkillsResolver.create({
 				workingDir: repoDir,
 				config: baseConfig,
+				markers: [".git"],
 				env: {
 					...process.env,
 					HOME: homeDir,
-					CODELIA_AGENTS_MARKERS: ".git",
 				},
 			});
 			const tool = createSkillLoadTool(createSkillsResolverKey(resolver));

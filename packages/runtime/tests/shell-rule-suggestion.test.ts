@@ -561,7 +561,7 @@ const liveSuggestionCases = [
 test
 	.skipIf(
 		process.env.INTEGRATION !== "1" ||
-			process.env.CODELIA_RULE_SUGGESTION_CODEX_LIVE !== "1",
+			process.env.CODELIA_TEST_RULE_SUGGESTION_CODEX_LIVE !== "1",
 	)
 	.each(liveSuggestionCases)(
 	"live Codex OAuth keeps the operation boundary for $label",

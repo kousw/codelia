@@ -61,9 +61,10 @@ const hasSshSession = (env: NodeJS.ProcessEnv): boolean =>
 	!!env.SSH_CONNECTION || !!env.SSH_CLIENT || !!env.SSH_TTY;
 
 export const resolveOAuthBrowserMode = (
+	configuredMode?: OAuthBrowserMode,
 	env: NodeJS.ProcessEnv = process.env,
 ): OAuthBrowserMode => {
-	const configured = readBrowserMode(env.CODELIA_OAUTH_BROWSER);
+	const configured = readBrowserMode(configuredMode);
 	if (configured) {
 		return configured;
 	}
@@ -71,8 +72,9 @@ export const resolveOAuthBrowserMode = (
 };
 
 export const shouldAutoOpenOAuthBrowser = (
+	configuredMode?: OAuthBrowserMode,
 	env: NodeJS.ProcessEnv = process.env,
-): boolean => resolveOAuthBrowserMode(env) === "auto";
+): boolean => resolveOAuthBrowserMode(configuredMode, env) === "auto";
 
 const parseCallbackParams = (input: string): URLSearchParams => {
 	const trimmed = input.trim();

@@ -350,7 +350,7 @@ test.skipIf(process.platform === "win32")(
 				const before = await readFile(projectsFile, "utf8");
 				for (const [options, reason] of [
 					[{ args: ["--sandbox-mode=full-access"] }, "cli_override"],
-					[{ env: { CODELIA_APPROVAL_MODE: "minimal" } }, "env_override"],
+					[{ env: { CODELIA_SANDBOX_MODE: "readonly" } }, "env_override"],
 					[{ sdk: true }, "sdk_managed"],
 				] as const) {
 					const fixed = await client(primary, options);

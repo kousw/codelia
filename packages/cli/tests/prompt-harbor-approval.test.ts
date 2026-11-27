@@ -71,15 +71,6 @@ test.each([
 		allow: false,
 	},
 	{
-		name: "legacy full-access",
-		marker: true,
-		args: ["--approval-mode", "full-access", "--harbor-shell-approval"],
-		requested: null,
-		reported: "workspace-write",
-		capability: false,
-		allow: false,
-	},
-	{
 		name: "Harbor readonly",
 		marker: true,
 		args: ["--sandbox-mode", "readonly", "--harbor-shell-approval"],

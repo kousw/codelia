@@ -66,10 +66,10 @@ describe("SkillsResolver", () => {
 			const resolver = await SkillsResolver.create({
 				workingDir: cwdDir,
 				config: createConfig(),
+				markers: [".git"],
 				env: {
 					...process.env,
 					HOME: homeDir,
-					CODELIA_AGENTS_MARKERS: ".git",
 				},
 			});
 			const catalog = await resolver.getCatalog();
@@ -100,10 +100,10 @@ describe("SkillsResolver", () => {
 			const resolver = await SkillsResolver.create({
 				workingDir: repoDir,
 				config: createConfig(),
+				markers: [".git"],
 				env: {
 					...process.env,
 					HOME: homeDir,
-					CODELIA_AGENTS_MARKERS: ".git",
 				},
 			});
 			const search = await resolver.search({
@@ -147,10 +147,10 @@ describe("SkillsResolver", () => {
 			const resolver = await SkillsResolver.create({
 				workingDir: repoDir,
 				config: createConfig(),
+				markers: [".git"],
 				env: {
 					...process.env,
 					HOME: homeDir,
-					CODELIA_AGENTS_MARKERS: ".git",
 				},
 			});
 			const result = await resolver.load({ name: "dup" });
@@ -177,10 +177,10 @@ describe("SkillsResolver", () => {
 			const resolver = await SkillsResolver.create({
 				workingDir: repoDir,
 				config: createConfig(),
+				markers: [".git"],
 				env: {
 					...process.env,
 					HOME: homeDir,
-					CODELIA_AGENTS_MARKERS: ".git",
 				},
 			});
 			const initial = await resolver.buildInitialContext();

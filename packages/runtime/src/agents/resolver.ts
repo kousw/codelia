@@ -53,31 +53,6 @@ const toTrimmed = (value?: string): string | undefined => {
 	return trimmed.length > 0 ? trimmed : undefined;
 };
 
-const parseBoolean = (value?: string): boolean | undefined => {
-	const normalized = toTrimmed(value)?.toLowerCase();
-	if (!normalized) return undefined;
-	if (normalized === "1" || normalized === "true") return true;
-	if (normalized === "0" || normalized === "false") return false;
-	return undefined;
-};
-
-const parsePositiveInt = (value?: string): number | undefined => {
-	const normalized = toTrimmed(value);
-	if (!normalized) return undefined;
-	const parsed = Number.parseInt(normalized, 10);
-	return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-};
-
-const parseMarkers = (value?: string): string[] | undefined => {
-	const normalized = toTrimmed(value);
-	if (!normalized) return undefined;
-	const markers = normalized
-		.split(",")
-		.map((entry) => entry.trim())
-		.filter((entry) => entry.length > 0);
-	return markers.length > 0 ? markers : undefined;
-};
-
 const exists = async (targetPath: string): Promise<boolean> => {
 	try {
 		await fs.access(targetPath);
@@ -168,37 +143,12 @@ const mergeConfig = (
 	config?: AgentsConfig,
 	env: NodeJS.ProcessEnv = process.env,
 ): ResolvedAgentsConfig => {
-	const envConfig = AgentsConfigSchema.parse({
-		enabled: parseBoolean(env.CODELIA_AGENTS_ENABLED),
-		root: {
-			projectRootOverride: toTrimmed(env.CODELIA_AGENTS_ROOT),
-			markers: parseMarkers(env.CODELIA_AGENTS_MARKERS),
-		},
-		initial: {
-			maxFiles: parsePositiveInt(env.CODELIA_AGENTS_INITIAL_MAX_FILES),
-			maxBytes: parsePositiveInt(env.CODELIA_AGENTS_INITIAL_MAX_BYTES),
-		},
-		resolver: {
-			enabled: parseBoolean(env.CODELIA_AGENTS_RESOLVER_ENABLED),
-			maxFilesPerResolve: parsePositiveInt(
-				env.CODELIA_AGENTS_MAX_FILES_PER_RESOLVE,
-			),
-		},
-	});
+	const rootOverride = toTrimmed(env.CODELIA_AGENTS_ROOT);
 	const merged = AgentsConfigSchema.parse({
 		...(config ?? {}),
-		...envConfig,
 		root: {
 			...(config?.root ?? {}),
-			...(envConfig.root ?? {}),
-		},
-		initial: {
-			...(config?.initial ?? {}),
-			...(envConfig.initial ?? {}),
-		},
-		resolver: {
-			...(config?.resolver ?? {}),
-			...(envConfig.resolver ?? {}),
+			...(rootOverride ? { projectRootOverride: rootOverride } : {}),
 		},
 	});
 

@@ -349,8 +349,8 @@ test.skipIf(process.platform === "win32")(
 );
 
 const linuxDrivers = [
-	...(process.env.CODELIA_APPROVAL_LINUX_LIVE === "1" ? ["gVisor"] : []),
-	...(process.env.CODELIA_APPROVAL_LINUX_MXC_LIVE === "1" ? ["MXC"] : []),
+	...(process.env.CODELIA_TEST_APPROVAL_LINUX_LIVE === "1" ? ["gVisor"] : []),
+	...(process.env.CODELIA_TEST_APPROVAL_LINUX_MXC_LIVE === "1" ? ["MXC"] : []),
 ];
 test
 	.skipIf(process.platform !== "linux" || linuxDrivers.length === 0)
@@ -396,7 +396,7 @@ exit 0`),
 
 const drivers = [
 	"Seatbelt",
-	...(process.env.CODELIA_APPROVAL_MXC_LIVE === "1" ? ["MXC"] : []),
+	...(process.env.CODELIA_TEST_APPROVAL_MXC_LIVE === "1" ? ["MXC"] : []),
 ];
 test.skipIf(process.platform !== "darwin").each(drivers)(
 	"%s enforces home exclusion by default and allows an explicitly approved dot write root",

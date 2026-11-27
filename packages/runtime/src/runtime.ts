@@ -1,3 +1,4 @@
+import { hasDebugTopic } from "@codelia/logger";
 import {
 	cleanupRunLogs,
 	isTrustedGlobalConfigLocationSync,
@@ -11,7 +12,7 @@ import {
 } from "./agent-factory";
 import { AgentsResolver } from "./agents";
 import { createRuntimeAttachmentService } from "./attachments/local";
-import { resolveConfigPath } from "./config";
+import { resolveAgentsEnabled, resolveConfigPath } from "./config";
 import { isProcessEnabled, type RuntimeOptions } from "./environment";
 import { log } from "./logger";
 import { McpManager } from "./mcp";
@@ -32,12 +33,6 @@ import {
 	VolatileSessionStateStore,
 } from "./volatile-stores";
 
-const envTruthy = (value?: string): boolean => {
-	if (!value) return false;
-	const normalized = value.trim().toLowerCase();
-	return normalized === "1" || normalized === "true";
-};
-
 export const startRuntime = async (
 	options: RuntimeOptions = {},
 ): Promise<void> => {
@@ -49,7 +44,7 @@ export const startRuntime = async (
 		log(
 			"Legacy approval_mode full-access uses workspace-write. Specify --sandbox-mode full-access to disable OS isolation and keep command approval.",
 		);
-	state.diagnosticsEnabled = envTruthy(process.env.CODELIA_DIAGNOSTICS);
+	state.diagnosticsEnabled = hasDebugTopic("diagnostics");
 	const workingDir = environment.workspace.root;
 	if (workingDir) {
 		state.runtimeWorkingDir = workingDir;
@@ -64,9 +59,13 @@ export const startRuntime = async (
 		workingDir
 	) {
 		try {
+			const agentsEnabled =
+				environment.config.source === "disabled"
+					? true
+					: await resolveAgentsEnabled(workingDir).catch(() => true);
 			state.agentsResolver = await AgentsResolver.create(
 				workingDir,
-				undefined,
+				{ enabled: agentsEnabled },
 				undefined,
 				await runtimeResourceReader(state, workingDir),
 			);

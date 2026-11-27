@@ -1,5 +1,5 @@
 import type { ResponsesProviderConfig } from "@codelia/config";
-import { readEnvValue } from "../config";
+import { readEnvValue, resolveAuthOAuthBrowser } from "../config";
 import {
 	requestUiConfirm,
 	requestUiPick,
@@ -321,7 +321,11 @@ export class AuthResolver {
 		if (!supportsPick || !supportsPrompt) {
 			throw new Error("UI does not support auth prompts");
 		}
-		const prefersDeviceCode = resolveOAuthBrowserMode() === "manual";
+		const configuredBrowser = await resolveAuthOAuthBrowser(
+			this.state.runtimeWorkingDir ?? undefined,
+		).catch(() => undefined);
+		const prefersDeviceCode =
+			resolveOAuthBrowserMode(configuredBrowser) === "manual";
 		const pick = await requestUiPick(this.state, {
 			title: "How would you like to connect OpenAI?",
 			items: prefersDeviceCode
@@ -386,7 +390,10 @@ export class AuthResolver {
 			throw new Error("UI does not support device code confirmation");
 		}
 		const session = await createOpenAiDeviceCodeSession();
-		const shouldAutoOpen = shouldAutoOpenOAuthBrowser();
+		const configuredBrowser = await resolveAuthOAuthBrowser(
+			this.state.runtimeWorkingDir ?? undefined,
+		).catch(() => undefined);
+		const shouldAutoOpen = shouldAutoOpenOAuthBrowser(configuredBrowser);
 		const confirm = await requestUiConfirm(this.state, {
 			title: "OpenAI device code",
 			message: [
@@ -430,7 +437,10 @@ export class AuthResolver {
 		if (!supportsConfirm) {
 			throw new Error("UI does not support OAuth confirmation");
 		}
-		const shouldAutoOpen = shouldAutoOpenOAuthBrowser();
+		const configuredBrowser = await resolveAuthOAuthBrowser(
+			this.state.runtimeWorkingDir ?? undefined,
+		).catch(() => undefined);
+		const shouldAutoOpen = shouldAutoOpenOAuthBrowser(configuredBrowser);
 		const canPasteCallback = !shouldAutoOpen && supportsPrompt;
 		const session = await createOAuthSession({
 			callbackMode: canPasteCallback ? "paste" : "server",

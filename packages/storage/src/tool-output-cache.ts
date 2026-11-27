@@ -49,14 +49,6 @@ const normalizeLimit = (
 	return Math.trunc(value);
 };
 
-const parsePositiveIntEnv = (key: string): number | undefined => {
-	const raw = process.env[key];
-	if (!raw) return undefined;
-	const parsed = Number.parseInt(raw, 10);
-	if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
-	return parsed;
-};
-
 const clipLongLine = (line: string, maxLineLength: number): string => {
 	if (line.length <= maxLineLength) return line;
 	const graphemes = splitGraphemes(line);
@@ -150,18 +142,15 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 		const paths = options.paths ?? resolveStoragePaths();
 		this.baseDir = paths.toolOutputCacheDir;
 		this.maxLineLength = normalizeLimit(
-			options.limits?.maxLineLength ??
-				parsePositiveIntEnv("CODELIA_TOOL_OUTPUT_CACHE_MAX_LINE_LENGTH"),
+			options.limits?.maxLineLength,
 			DEFAULT_MAX_LINE_LENGTH,
 		);
 		this.maxReadBytes = normalizeLimit(
-			options.limits?.maxReadBytes ??
-				parsePositiveIntEnv("CODELIA_TOOL_OUTPUT_CACHE_MAX_READ_BYTES"),
+			options.limits?.maxReadBytes,
 			DEFAULT_MAX_READ_BYTES,
 		);
 		this.maxGrepBytes = normalizeLimit(
-			options.limits?.maxGrepBytes ??
-				parsePositiveIntEnv("CODELIA_TOOL_OUTPUT_CACHE_MAX_GREP_BYTES"),
+			options.limits?.maxGrepBytes,
 			DEFAULT_MAX_GREP_BYTES,
 		);
 	}

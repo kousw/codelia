@@ -176,8 +176,9 @@ const TUI_VALUE_FLAGS = new Set([
 	"--initial-message",
 	"--initial-user-message",
 	"--tui-mode",
+	"--color-scheme",
+	"--image-protocol",
 	"--sandbox-mode",
-	"--approval-mode",
 ]);
 
 const isLaunchContextOption = (arg: string): boolean =>

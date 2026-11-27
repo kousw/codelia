@@ -41,13 +41,14 @@ if (direct && mode === "controls") {
 	const read = (name) => {
 		if (readFileSync(name, "utf8") !== sentinel) throw new Error("bad fixture");
 	};
-	const [peer, peerPort] = (process.env.CODELIA_QUALIFICATION_PEER ?? "").split(
-		":",
-	);
+	const [peer, peerPort] = (
+		process.env.CODELIA_TEST_QUALIFICATION_PEER ?? ""
+	).split(":");
 	report({
 		argv,
 		cwdMatches: process.cwd().toLowerCase() === workspace.toLowerCase(),
-		hostSentinelInherited: process.env.CODELIA_MXC_HOST_SENTINEL !== undefined,
+		hostSentinelInherited:
+			process.env.CODELIA_TEST_MXC_HOST_SENTINEL !== undefined,
 		workspaceWrite: access(() =>
 			writeFileSync(path.join(workspace, "output"), sentinel),
 		),

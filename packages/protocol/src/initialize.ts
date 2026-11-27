@@ -45,6 +45,8 @@ export const InitializeResultSchema = z
 		local_host: InitializeLocalHostSchema.optional(),
 		tui: InitializeLocalHostSchema.extend({
 			theme: z.string().optional(),
+			color_scheme: z.enum(["dark", "light"]).optional(),
+			image_protocol: z.enum(["halfblocks", "kitty"]).optional(),
 		}).optional(),
 	})
 	.meta({ id: "InitializeResult" });

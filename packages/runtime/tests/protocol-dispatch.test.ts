@@ -293,10 +293,10 @@ describe("runtime -> UI dialogs", () => {
 });
 
 describe("outgoing assertions", () => {
-	test("CODELIA_PROTOCOL_ASSERT checks payloads without changing them", () => {
-		const previous = process.env.CODELIA_PROTOCOL_ASSERT;
+	test("CODELIA_TEST_PROTOCOL_ASSERT checks payloads without changing them", () => {
+		const previous = process.env.CODELIA_TEST_PROTOCOL_ASSERT;
 		try {
-			process.env.CODELIA_PROTOCOL_ASSERT = "1";
+			process.env.CODELIA_TEST_PROTOCOL_ASSERT = "1";
 			const params = { run_id: "run-1", status: "running" as const };
 			expect(notificationMessage("run.status", params).params).toBe(params);
 			expect(() =>
@@ -305,7 +305,7 @@ describe("outgoing assertions", () => {
 					status: "paused" as never,
 				}),
 			).toThrow("protocol assertion failed for run.status params");
-			delete process.env.CODELIA_PROTOCOL_ASSERT;
+			delete process.env.CODELIA_TEST_PROTOCOL_ASSERT;
 			expect(() =>
 				notificationMessage("run.status", {
 					run_id: "run-1",
@@ -313,8 +313,9 @@ describe("outgoing assertions", () => {
 				}),
 			).not.toThrow();
 		} finally {
-			if (previous === undefined) delete process.env.CODELIA_PROTOCOL_ASSERT;
-			else process.env.CODELIA_PROTOCOL_ASSERT = previous;
+			if (previous === undefined)
+				delete process.env.CODELIA_TEST_PROTOCOL_ASSERT;
+			else process.env.CODELIA_TEST_PROTOCOL_ASSERT = previous;
 		}
 	});
 });

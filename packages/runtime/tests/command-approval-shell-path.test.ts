@@ -369,9 +369,12 @@ test.skipIf(process.platform === "win32")(
 
 const live =
 	process.platform === "darwin" &&
-	process.env.CODELIA_APPROVAL_MAC_LIVE === "1";
+	process.env.CODELIA_TEST_APPROVAL_MAC_LIVE === "1";
 const drivers = ["direct", "full-access"];
-if (process.arch === "arm64" && process.env.CODELIA_APPROVAL_MXC_LIVE === "1")
+if (
+	process.arch === "arm64" &&
+	process.env.CODELIA_TEST_APPROVAL_MXC_LIVE === "1"
+)
 	drivers.push("mxc");
 
 test.skipIf(!live).each(drivers)(

@@ -44,10 +44,9 @@ describe("AgentsResolver", () => {
 		try {
 			const resolver = await AgentsResolver.create(
 				cwdDir,
-				undefined,
+				{ root: { markers: [".codelia", ".git", ".jj"] } },
 				createEnv({
 					CODELIA_AGENTS_ROOT: undefined,
-					CODELIA_AGENTS_MARKERS: ".codelia,.git,.jj",
 				}),
 			);
 			const initial = resolver.buildInitialContext();
@@ -82,8 +81,8 @@ describe("AgentsResolver", () => {
 		try {
 			const resolver = await AgentsResolver.create(
 				cwdDir,
-				undefined,
-				createEnv({ CODELIA_AGENTS_MARKERS: ".git" }),
+				{ root: { markers: [".git"] } },
+				createEnv({}),
 			);
 			const first = await resolver.resolveForPath(targetFile);
 			expect(first).toHaveLength(1);
@@ -112,8 +111,8 @@ describe("AgentsResolver", () => {
 		try {
 			const resolver = await AgentsResolver.create(
 				cwdDir,
-				undefined,
-				createEnv({ CODELIA_AGENTS_MARKERS: ".git" }),
+				{ root: { markers: [".git"] } },
+				createEnv({}),
 			);
 			expect(await resolver.resolveForPath(targetFile)).toHaveLength(0);
 

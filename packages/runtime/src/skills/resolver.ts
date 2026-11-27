@@ -62,16 +62,6 @@ const toTrimmed = (value?: string): string | undefined => {
 	return trimmed ? trimmed : undefined;
 };
 
-const parseMarkers = (value?: string): string[] | undefined => {
-	const normalized = toTrimmed(value);
-	if (!normalized) return undefined;
-	const markers = normalized
-		.split(",")
-		.map((entry) => entry.trim())
-		.filter((entry) => entry.length > 0);
-	return markers.length > 0 ? markers : undefined;
-};
-
 const exists = async (targetPath: string): Promise<boolean> => {
 	try {
 		await fs.access(targetPath);
@@ -190,6 +180,7 @@ type SkillsResolverOptions = {
 	workingDir: string;
 	config: ResolvedSkillsConfig;
 	env?: NodeJS.ProcessEnv;
+	markers?: string[];
 	reader?: ResourceReader;
 };
 
@@ -220,7 +211,7 @@ export class SkillsResolver {
 		const env = options.env ?? process.env;
 		const workingDir = path.resolve(options.workingDir);
 		const rootOverride = toTrimmed(env.CODELIA_AGENTS_ROOT);
-		const markers = parseMarkers(env.CODELIA_AGENTS_MARKERS) ?? DEFAULT_MARKERS;
+		const markers = options.markers?.length ? options.markers : DEFAULT_MARKERS;
 		const rootDir = rootOverride
 			? path.resolve(rootOverride)
 			: await findRootByMarkers(workingDir, markers, options.reader);

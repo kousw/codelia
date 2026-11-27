@@ -6,25 +6,8 @@ import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 import { appendReadMetadata } from "./content-hash";
 
 const DEFAULT_READ_LIMIT = 2000;
-const DEFAULT_MAX_LINE_LENGTH = 1_000;
-const DEFAULT_MAX_BYTES = 64 * 1024;
-
-const parsePositiveIntEnv = (key: string, fallback: number): number => {
-	const raw = process.env[key];
-	if (!raw) return fallback;
-	const parsed = Number.parseInt(raw, 10);
-	if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-	return parsed;
-};
-
-const MAX_LINE_LENGTH = parsePositiveIntEnv(
-	"CODELIA_READ_MAX_LINE_LENGTH",
-	DEFAULT_MAX_LINE_LENGTH,
-);
-const MAX_BYTES = parsePositiveIntEnv(
-	"CODELIA_READ_MAX_BYTES",
-	DEFAULT_MAX_BYTES,
-);
+const MAX_LINE_LENGTH = 1_000;
+const MAX_BYTES = 64 * 1024;
 
 const clipLongLine = (line: string): string => {
 	if (line.length <= MAX_LINE_LENGTH) {

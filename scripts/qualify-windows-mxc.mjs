@@ -225,7 +225,7 @@ async function qualify() {
 	if (!ubr) throw new QualificationError("missing_os_revision");
 	result.host.updateBuildRevision = Number(ubr[1]);
 
-	const peer = process.env.CODELIA_QUALIFICATION_PEER;
+	const peer = process.env.CODELIA_TEST_QUALIFICATION_PEER;
 	const [peerIp, peerPort, extra] = (peer ?? "").split(":");
 	if (
 		peer &&
@@ -238,7 +238,7 @@ async function qualify() {
 		throw new QualificationError("invalid_controlled_peer");
 	const root = await mkdtemp(path.join(os.tmpdir(), "codelia-mxc-"));
 	const servers = [];
-	const previous = process.env.CODELIA_MXC_HOST_SENTINEL;
+	const previous = process.env.CODELIA_TEST_MXC_HOST_SENTINEL;
 	try {
 		const at = (...parts) => path.join(root, ...parts);
 		for (const dir of [
@@ -277,7 +277,7 @@ async function qualify() {
 		for (const target of targets)
 			if ((await tryConnection(target)) !== "connected")
 				throw new QualificationError("host_positive_control_failed");
-		process.env.CODELIA_MXC_HOST_SENTINEL = "fixture";
+		process.env.CODELIA_TEST_MXC_HOST_SENTINEL = "fixture";
 
 		function requireProbe(input, label) {
 			const probe = sdk.probe(input);
@@ -397,8 +397,9 @@ async function qualify() {
 		}
 		result.status = passed ? "observed_subset_passed" : "failed";
 	} finally {
-		if (previous === undefined) delete process.env.CODELIA_MXC_HOST_SENTINEL;
-		else process.env.CODELIA_MXC_HOST_SENTINEL = previous;
+		if (previous === undefined)
+			delete process.env.CODELIA_TEST_MXC_HOST_SENTINEL;
+		else process.env.CODELIA_TEST_MXC_HOST_SENTINEL = previous;
 		await Promise.all(servers.map(close));
 		await rm(root, { recursive: true, force: true, maxRetries: 3 });
 	}

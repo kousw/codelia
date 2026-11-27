@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
 	hasHarborShellApprovalFlag,
-	resolvePromptModeApproval,
 	resolvePromptModeSandbox,
 	resolvePromptText,
 	resolveTopLevelAction,
@@ -54,22 +53,6 @@ describe("prompt option parsing", () => {
 		expect(resolvePromptText(["--prompt=yo"])).toBe("yo");
 	});
 
-	test("keeps approval-mode optional in prompt mode", () => {
-		expect(resolvePromptModeApproval(["-p", "hello"])).toBeUndefined();
-		expect(
-			resolvePromptModeApproval(["-p", "hello", "--approval-mode", "trusted"]),
-		).toBe("trusted");
-	});
-
-	test("rejects malformed approval-mode value forms", () => {
-		expect(() =>
-			resolvePromptModeApproval(["-p", "hello", "--approval-mode"]),
-		).toThrow("--approval-mode requires a value");
-		expect(() =>
-			resolvePromptModeApproval(["-p", "hello", "--approval-mode="]),
-		).toThrow("--approval-mode requires a value");
-	});
-
 	test("validates non-empty prompt", () => {
 		expect(validatePromptText("hello")).toBe("hello");
 		expect(() => validatePromptText("   ")).toThrow(
@@ -88,7 +71,7 @@ describe("TOP_LEVEL_HELP_TEXT", () => {
 		expect(TOP_LEVEL_HELP_TEXT).toContain("/auto-approve [status|off]");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--diagnostics");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--tui-mode");
-		expect(TOP_LEVEL_HELP_TEXT).toContain("--approval-mode");
+		expect(TOP_LEVEL_HELP_TEXT).toContain("--sandbox-mode");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("mcp");
 	});
 });
@@ -111,6 +94,6 @@ test("Harbor shell approval must be a deliberate prompt-client argument", () => 
 	expect(hasHarborShellApprovalFlag(["-p", flag])).toBe(false);
 	expect(hasHarborShellApprovalFlag(["-p", "hello", "--", flag])).toBe(false);
 	expect(
-		hasHarborShellApprovalFlag(["-p", "hello", "--approval-mode", flag]),
+		hasHarborShellApprovalFlag(["-p", "hello", "--sandbox-mode", flag]),
 	).toBe(false);
 });

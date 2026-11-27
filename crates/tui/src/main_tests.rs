@@ -1,8 +1,8 @@
 use crate::app::runtime::RpcResponse;
 use crate::app::{AppState, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
 use crate::entry::cli::{
-    cli_flag_enabled_from_args, parse_approval_mode_from_args, parse_basic_cli_mode_from_args,
-    parse_initial_message_from_args, parse_resume_mode_from_args, parse_sandbox_mode_arg_from_args,
+    cli_flag_enabled_from_args, parse_basic_cli_mode_from_args, parse_initial_message_from_args,
+    parse_resume_mode_from_args, parse_sandbox_mode_arg_from_args,
     resolve_version_label_from_versions, BasicCliMode, ResumeMode,
 };
 use crate::event_loop::runtime::{
@@ -85,25 +85,6 @@ fn parse_initial_message_ignores_empty() {
         parse_initial_message_from_args(["--initial-message", "   "]),
         None
     );
-}
-
-#[test]
-fn parse_approval_mode_supports_split_and_equals_forms() {
-    assert_eq!(
-        parse_approval_mode_from_args(["--approval-mode", "trusted"]),
-        Ok(Some("trusted".to_string()))
-    );
-    assert_eq!(
-        parse_approval_mode_from_args(["--approval-mode=full-access"]),
-        Ok(Some("full-access".to_string()))
-    );
-    assert_eq!(parse_approval_mode_from_args(["--debug"]), Ok(None));
-}
-
-#[test]
-fn parse_approval_mode_rejects_missing_values() {
-    assert!(parse_approval_mode_from_args(["--approval-mode"]).is_err());
-    assert!(parse_approval_mode_from_args(["--approval-mode="]).is_err());
 }
 
 #[test]
@@ -304,14 +285,14 @@ fn apply_lane_list_result_adds_new_lane_row() {
 }
 
 #[test]
-fn sandbox_mode_flag_takes_precedence_over_legacy_mode() {
+fn sandbox_mode_flag_parses_split_and_skips_other_flag_values() {
     assert_eq!(
-        parse_sandbox_mode_arg_from_args(["--approval-mode=trusted", "--sandbox-mode", "readonly"]),
+        parse_sandbox_mode_arg_from_args(["--sandbox-mode", "readonly"]),
         Ok(Some(("--sandbox-mode", "readonly".into()))),
     );
     assert_eq!(
-        parse_sandbox_mode_arg_from_args(["--approval-mode", "trusted"]),
-        Ok(Some(("--approval-mode", "trusted".into()))),
+        parse_sandbox_mode_arg_from_args(["--sandbox-mode=workspace-write"]),
+        Ok(Some(("--sandbox-mode", "workspace-write".into()))),
     );
     assert_eq!(
         parse_sandbox_mode_arg_from_args(["--initial-message", "--sandbox-mode=full-access"]),

@@ -45,17 +45,29 @@ const schemaFor = (
 	return spec.result;
 };
 
+let cachedProtocolAssertRaw: string | undefined;
+let cachedProtocolAssertEnabled = false;
+
+const isProtocolAssertEnabled = (): boolean => {
+	const raw = process.env.CODELIA_TEST_PROTOCOL_ASSERT;
+	if (raw !== cachedProtocolAssertRaw) {
+		cachedProtocolAssertRaw = raw;
+		cachedProtocolAssertEnabled = raw === "1";
+	}
+	return cachedProtocolAssertEnabled;
+};
+
 /**
  * Outgoing payloads are sent unchanged. They are checked against the catalog
- * only when CODELIA_PROTOCOL_ASSERT=1 (tests), so production never gains a new
- * failure mode.
+ * only when CODELIA_TEST_PROTOCOL_ASSERT=1 (tests), so production never gains a
+ * new failure mode.
  */
 const assertOutgoing = (
 	method: keyof typeof protocolMethods,
 	slot: "params" | "result",
 	value: unknown,
 ): void => {
-	if (process.env.CODELIA_PROTOCOL_ASSERT !== "1") return;
+	if (!isProtocolAssertEnabled()) return;
 	const result = schemaFor(method, slot).safeParse(value);
 	if (!result.success)
 		throw new Error(

@@ -129,14 +129,14 @@ pub(crate) fn build_initial_app(
     if app.debug_perf_enabled {
         app.push_line(
             LogKind::Status,
-            "Debug perf panel enabled (`--debug-perf` or CODELIA_DEBUG_PERF=1)",
+            "Debug perf panel enabled (`--debug-perf` or CODELIA_DEBUG=perf)",
         );
         app.push_line(LogKind::Space, "");
     }
     if diagnostics {
         app.push_line(
             LogKind::Status,
-            "Run diagnostics enabled (`--diagnostics` or CODELIA_DIAGNOSTICS=1)",
+            "Run diagnostics enabled (`--diagnostics` or CODELIA_DEBUG=diagnostics)",
         );
         app.push_line(LogKind::Space, "");
     }

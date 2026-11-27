@@ -6,10 +6,13 @@ import type {
 	ConfigWriteScope,
 	ExecutionEnvironmentConfig,
 	McpServerConfig,
+	OAuthBrowserMode,
 	PermissionsConfig,
 	SearchConfig,
 	SkillsConfig,
 	SubagentConfig,
+	TuiColorScheme,
+	TuiImageProtocol,
 } from "@codelia/config";
 import {
 	CONFIG_GROUP_DEFAULT_WRITE_SCOPE,
@@ -179,12 +182,36 @@ export const resolveTuiConfig = async (
 	workingDir?: string,
 ): Promise<{
 	theme?: string;
+	color_scheme?: TuiColorScheme;
+	image_protocol?: TuiImageProtocol;
 }> => {
 	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
 	const effective = configRegistry.resolve([globalConfig, projectConfig]);
 	return {
-		theme: effective.tui?.theme,
+		...(effective.tui?.theme ? { theme: effective.tui.theme } : {}),
+		...(effective.tui?.color_scheme
+			? { color_scheme: effective.tui.color_scheme }
+			: {}),
+		...(effective.tui?.image_protocol
+			? { image_protocol: effective.tui.image_protocol }
+			: {}),
 	};
+};
+
+export const resolveAgentsEnabled = async (
+	workingDir?: string,
+): Promise<boolean> => {
+	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
+	const effective = configRegistry.resolve([globalConfig, projectConfig]);
+	return effective.agents?.enabled ?? true;
+};
+
+export const resolveAuthOAuthBrowser = async (
+	workingDir?: string,
+): Promise<OAuthBrowserMode | undefined> => {
+	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
+	const effective = configRegistry.resolve([globalConfig, projectConfig]);
+	return effective.auth?.oauth_browser;
 };
 
 export const resolvePermissionsConfig = async (
@@ -520,8 +547,10 @@ const hasDefinedGroup = (
 			);
 		case "tui":
 			return (
-				typeof value?.tui?.theme === "string" &&
-				value.tui.theme.trim().length > 0
+				(typeof value?.tui?.theme === "string" &&
+					value.tui.theme.trim().length > 0) ||
+				value?.tui?.color_scheme !== undefined ||
+				value?.tui?.image_protocol !== undefined
 			);
 		default:
 			return false;

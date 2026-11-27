@@ -2,7 +2,7 @@
 
 // Outgoing protocol messages are checked against the catalog schemas.
 // See dev-docs/specs/protocol-codegen.md section 8.
-process.env.CODELIA_PROTOCOL_ASSERT ??= "1";
+process.env.CODELIA_TEST_PROTOCOL_ASSERT ??= "1";
 
 // Live Keychain coverage constructs its own client behind CODELIA_TEST_LIVE_KEYCHAIN=1.
 process.env.CODELIA_AUTH_STORAGE = "file";

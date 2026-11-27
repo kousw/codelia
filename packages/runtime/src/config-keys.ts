@@ -62,6 +62,25 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
 	},
 	{ key: "tui.theme", type: "string", fallback: null, writeVia: "theme.set" },
 	{
+		key: "tui.color_scheme",
+		type: "enum",
+		enum: ["dark", "light"],
+		fallback: "dark",
+	},
+	{
+		key: "tui.image_protocol",
+		type: "enum",
+		enum: ["halfblocks", "kitty"],
+		fallback: "halfblocks",
+	},
+	{
+		key: "auth.oauth_browser",
+		type: "enum",
+		enum: ["auto", "manual"],
+		fallback: null,
+	},
+	{ key: "agents.enabled", type: "boolean", fallback: true },
+	{
 		key: "subagent.max_concurrent",
 		type: "integer",
 		min: 1,

@@ -25,6 +25,7 @@
 	},
 	"dependencies": {
 		"@codelia/core": "0.1.91",
+		"@codelia/logger": "0.1.91",
 		"@codelia/shared-types": "0.1.91",
 		"better-sqlite3": "^12.6.2",
 		"image-size": "^2.0.2",

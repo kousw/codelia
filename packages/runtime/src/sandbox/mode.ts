@@ -64,22 +64,12 @@ export const resolveRuntimeSandboxMode = async (
 	const modeFlag = readFlag(args, "--sandbox-mode");
 	if (modeFlag !== undefined)
 		return parseMode(modeFlag, "--sandbox-mode", "cli", false);
-	const legacyFlag = readFlag(args, "--approval-mode");
-	if (legacyFlag !== undefined)
-		return parseMode(legacyFlag, "--approval-mode", "cli", true);
 	if (env.CODELIA_SANDBOX_MODE !== undefined)
 		return parseMode(
 			env.CODELIA_SANDBOX_MODE,
 			"CODELIA_SANDBOX_MODE",
 			"env",
 			false,
-		);
-	if (env.CODELIA_APPROVAL_MODE !== undefined)
-		return parseMode(
-			env.CODELIA_APPROVAL_MODE,
-			"CODELIA_APPROVAL_MODE",
-			"env",
-			true,
 		);
 
 	const store = input.store ?? new ProjectsPolicyStore();

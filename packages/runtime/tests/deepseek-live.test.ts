@@ -5,7 +5,7 @@ import { createRuntimeModel } from "../src/model-factory";
 const apiKey = process.env.DEEPSEEK_API_KEY;
 const live =
 	process.env.INTEGRATION === "1" &&
-	process.env.CODELIA_DEEPSEEK_LIVE === "1" &&
+	process.env.CODELIA_TEST_DEEPSEEK_LIVE === "1" &&
 	!!apiKey;
 
 for (const model of ["deepseek-flash", "deepseek-v4-pro"]) {

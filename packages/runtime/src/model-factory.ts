@@ -22,6 +22,7 @@ import {
 	ZAI_DEFAULT_MODEL,
 	ZAI_REASONING_EFFORT_MODELS,
 } from "@codelia/core";
+import { isDebugEnabled } from "@codelia/logger";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import { StoragePathServiceImpl } from "@codelia/storage";
 import {
@@ -76,12 +77,6 @@ const requireApiKeyAuth = (provider: string, auth: ProviderAuth): string => {
 	return auth.api_key;
 };
 
-const envTruthy = (value?: string): boolean => {
-	if (!value) return false;
-	const normalized = value.trim().toLowerCase();
-	return normalized === "1" || normalized === "true";
-};
-
 const buildOpenAiClientOptions = (
 	getOpenAiAccessToken: RuntimeModelFactoryInput["getOpenAiAccessToken"],
 	auth: ProviderAuth,
@@ -91,7 +86,7 @@ const buildOpenAiClientOptions = (
 		return { apiKey: auth.api_key };
 	}
 	let accountId = auth.oauth.account_id;
-	const enableDebugHttp = envTruthy(process.env.CODELIA_DEBUG);
+	const enableDebugHttp = isDebugEnabled();
 	const apiKey = async () => {
 		if (!getOpenAiAccessToken) {
 			throw new Error("OpenAI OAuth token refresh is unavailable");

@@ -499,13 +499,13 @@ describe("Git write scope", () => {
 
 const liveMac =
 	process.platform === "darwin" &&
-	process.env.CODELIA_APPROVAL_MAC_LIVE === "1";
+	process.env.CODELIA_TEST_APPROVAL_MAC_LIVE === "1";
 const liveLinux =
 	process.platform === "linux" &&
-	process.env.CODELIA_APPROVAL_LINUX_LIVE === "1";
+	process.env.CODELIA_TEST_APPROVAL_LINUX_LIVE === "1";
 const liveLinuxMxc =
 	process.platform === "linux" &&
-	process.env.CODELIA_APPROVAL_LINUX_MXC_LIVE === "1";
+	process.env.CODELIA_TEST_APPROVAL_LINUX_MXC_LIVE === "1";
 
 const runConfined = async (
 	backend: ProtectedShellBackend,

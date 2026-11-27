@@ -17,8 +17,9 @@ use crate::entry::bootstrap::{
 };
 use crate::entry::cli::{
     debug_perf_enabled, debug_print_enabled, diagnostics_enabled, parse_basic_cli_mode,
-    parse_initial_message, parse_resume_mode, parse_sandbox_mode_arg, parse_terminal_mode,
-    print_basic_help, resolve_version_label, BasicCliMode,
+    parse_color_scheme_arg, parse_image_protocol_arg, parse_initial_message, parse_resume_mode,
+    parse_sandbox_mode_arg, parse_terminal_mode, print_basic_help, resolve_version_label,
+    BasicCliMode,
 };
 use crate::entry::terminal::{
     restore_inline_cursor, set_mouse_capture, setup_terminal, TerminalRestoreGuard,
@@ -47,14 +48,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let debug_print = debug_print_enabled();
     let debug_perf = debug_perf_enabled();
     let diagnostics = diagnostics_enabled();
+    let requested_color_scheme = parse_color_scheme_arg()
+        .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
+    if let Some(scheme) = requested_color_scheme.as_deref() {
+        crate::app::theme::apply_color_scheme(scheme);
+    }
+    let requested_image_protocol = parse_image_protocol_arg()
+        .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
     let sandbox_mode = parse_sandbox_mode_arg()
         .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
-    if debug_print {
-        eprintln!(
-            "terminal mode: requested={} resolved={} reason={}",
-            terminal_selection.requested, terminal_selection.resolved, terminal_selection.reason
-        );
-    }
     let runtime_launch = launch_context()
         .runtime
         .as_ref()
@@ -79,9 +81,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             diagnostics,
             pending_initial_message.as_deref(),
         );
+        if debug_print {
+            app.push_line(
+                crate::app::state::LogKind::Status,
+                format!(
+                    "terminal mode: requested={} resolved={} reason={}",
+                    terminal_selection.requested,
+                    terminal_selection.resolved,
+                    terminal_selection.reason
+                ),
+            );
+        }
+        app.terminal_uses_alternate_screen = terminal_mode.uses_alternate_screen();
+        app.cli_color_scheme_override = requested_color_scheme.is_some();
+        app.cli_image_protocol_override = requested_image_protocol.is_some();
         app.rpc_pending
             .insert(initialize_id, PendingRpc::Initialize);
-        app.image_preview.policy = crate::entry::terminal::image_preview_policy(terminal_mode);
+        app.image_preview.policy = crate::entry::terminal::image_preview_policy(
+            terminal_mode,
+            requested_image_protocol.as_deref(),
+        );
         let inline_height = if terminal_mode.uses_inline_scrollback() {
             let (terminal_width, terminal_height) = crossterm::terminal::size()?;
             desired_height(&mut app, terminal_width, terminal_height)
@@ -91,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             1
         };
-        let _restore_guard = TerminalRestoreGuard::new(terminal_mode)
+        let mut restore_guard = TerminalRestoreGuard::new(terminal_mode)
             .with_preview_image(app.image_preview.policy.kitty_id);
         let mut terminal = setup_terminal(terminal_mode, inline_height)?;
         app.mouse_capture_enabled = terminal_mode.default_mouse_capture();
@@ -107,6 +126,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &mut tx,
             &mut pending_initial_message,
         );
+        restore_guard.set_preview_image(app.image_preview.policy.kitty_id);
 
         if terminal_mode.uses_inline_scrollback() {
             restore_inline_cursor(&mut terminal);

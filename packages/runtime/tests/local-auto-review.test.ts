@@ -345,7 +345,7 @@ test.skipIf(typeof process.geteuid !== "function").each(["openai", "google"])(
 			let seededAgentRule = false;
 			const backend =
 				process.platform === "darwin" &&
-				process.env.CODELIA_APPROVAL_MAC_LIVE === "1"
+				process.env.CODELIA_TEST_APPROVAL_MAC_LIVE === "1"
 					? new MacSeatbeltBackend()
 					: fixtureShellBackend;
 			state.setRuntimeEnvironment({

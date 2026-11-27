@@ -125,8 +125,7 @@ class Session:
             if key.startswith("CODELIA_") or key in ("TMUX", "KITTY_WINDOW_ID", "ITERM_SESSION_ID", "NO_COLOR"):
                 env.pop(key)
         env.update(TERM="xterm-256color", TERM_PROGRAM="", COLORTERM="truecolor", CODELIA_RUNTIME_CMD=sys.executable,
-                   CODELIA_RUNTIME_ARGS=shlex.join([str(Path(__file__).resolve()), "--runtime", str(self.control), str(self.received)]),
-                   CODELIA_TUI_IMAGE_PROTOCOL=protocol)
+                   CODELIA_RUNTIME_ARGS=shlex.join([str(Path(__file__).resolve()), "--runtime", str(self.control), str(self.received)]))
         if tmux:
             env["TMUX"] = "codelia-test-no-server"
 
@@ -135,7 +134,7 @@ class Session:
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
         try:
-            self.process = subprocess.Popen([sys.executable, "-c", KEEPER, str(binary), "--tui-mode", mode],
+            self.process = subprocess.Popen([sys.executable, "-c", KEEPER, str(binary), "--tui-mode", mode, "--image-protocol", protocol],
                                             stdin=self.slave, stdout=self.slave, stderr=self.slave,
                                             env=env, preexec_fn=setup)
         except BaseException:

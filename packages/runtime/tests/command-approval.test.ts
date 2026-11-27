@@ -134,7 +134,7 @@ describe("approval routing", () => {
 		}
 		expect([evidence, reviews, prompts]).toEqual([0, 0, 0]);
 		samples.sort((a, b) => a - b);
-		if (process.env.CODELIA_APPROVAL_MEASURE === "1")
+		if (process.env.CODELIA_TEST_APPROVAL_MEASURE === "1")
 			console.log("approval-only ms", { p50: samples[99], p95: samples[189] });
 	});
 

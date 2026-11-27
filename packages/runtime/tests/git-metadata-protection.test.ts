@@ -37,7 +37,7 @@ import { createWriteTool } from "../src/tools/write";
 
 const darwinLive =
 	process.platform === "darwin" &&
-	process.env.CODELIA_APPROVAL_MAC_LIVE === "1";
+	process.env.CODELIA_TEST_APPROVAL_MAC_LIVE === "1";
 
 async function withGitFixture<T>(
 	run: (fixture: {

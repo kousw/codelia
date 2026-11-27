@@ -1,6 +1,7 @@
 use crate::app::state::render::LogPosition;
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone, SelectableFragment};
 use crate::app::theme::ui_colors;
+use crate::app::util::debug::debug_config;
 use crate::app::util::text::detect_continuation_prefix;
 use crate::app::{AppState, SelectionProjectionId, SelectionRange, WrappedLogCache, WrappedLogRow};
 use ratatui::style::{Color, Modifier, Style};
@@ -14,10 +15,10 @@ use unicode_width::UnicodeWidthStr;
 static TRUECOLOR_SUPPORT: OnceLock<bool> = OnceLock::new();
 
 fn supports_truecolor() -> bool {
-    if std::env::var("CODELIA_FORCE_ANSI_SYNTAX").ok().as_deref() == Some("1") {
-        return false;
-    }
     *TRUECOLOR_SUPPORT.get_or_init(|| {
+        if debug_config().ansi_syntax {
+            return false;
+        }
         let colorterm = std::env::var("COLORTERM")
             .unwrap_or_default()
             .to_ascii_lowercase();

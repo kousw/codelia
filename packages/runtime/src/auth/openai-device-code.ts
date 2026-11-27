@@ -22,14 +22,9 @@ export type OpenAiDeviceCodeSession = {
 	complete: (signal?: AbortSignal) => Promise<OpenAiTokenResponse>;
 };
 
-const clientId = (): string =>
-	process.env.CODELIA_OPENAI_OAUTH_CLIENT_ID ?? DEFAULT_CLIENT_ID;
+const clientId = (): string => DEFAULT_CLIENT_ID;
 
-const deviceCodeTimeoutMs = (): number =>
-	readPositiveIntEnv(
-		"CODELIA_OPENAI_DEVICE_CODE_TIMEOUT_MS",
-		DEFAULT_TIMEOUT_MS,
-	);
+const deviceCodeTimeoutMs = (): number => DEFAULT_TIMEOUT_MS;
 
 const cancelledError = (): Error => new Error("device code login cancelled");
 

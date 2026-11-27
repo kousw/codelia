@@ -251,11 +251,11 @@ test("explicit dump mode saves full payloads in a separate diagnostic file", asy
 	);
 });
 
-test("the dump environment option is opt-in and can be overridden by the host", async () => {
+test("the dump debug topic is opt-in and can be overridden by the host", async () => {
 	const f = await fixture();
-	const previous = process.env.CODELIA_SESSION_DUMP;
+	const previous = process.env.CODELIA_DEBUG;
 	try {
-		delete process.env.CODELIA_SESSION_DUMP;
+		delete process.env.CODELIA_DEBUG;
 		expect(
 			new SessionStoreWriterImpl({
 				paths: f.paths,
@@ -263,7 +263,7 @@ test("the dump environment option is opt-in and can be overridden by the host", 
 				startedAt: OLD,
 			}).diagnosticFilePath,
 		).toBeUndefined();
-		process.env.CODELIA_SESSION_DUMP = "1";
+		process.env.CODELIA_DEBUG = "session-dump";
 		expect(
 			new SessionStoreWriterImpl({
 				paths: f.paths,
@@ -280,8 +280,8 @@ test("the dump environment option is opt-in and can be overridden by the host", 
 			}).diagnosticFilePath,
 		).toBeUndefined();
 	} finally {
-		if (previous === undefined) delete process.env.CODELIA_SESSION_DUMP;
-		else process.env.CODELIA_SESSION_DUMP = previous;
+		if (previous === undefined) delete process.env.CODELIA_DEBUG;
+		else process.env.CODELIA_DEBUG = previous;
 	}
 });
 

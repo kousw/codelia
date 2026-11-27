@@ -1,3 +1,4 @@
+import { hasDebugTopic, isDebugEnabled } from "@codelia/logger";
 import type {
 	Response,
 	ResponseOutputItem,
@@ -11,12 +12,6 @@ import {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;
-
-const envTruthy = (value?: string): boolean => {
-	if (!value) return false;
-	const normalized = value.trim().toLowerCase();
-	return normalized === "1" || normalized === "true";
-};
 
 const loggedUnhandledResponseEventTypes = new Set<string>();
 
@@ -489,10 +484,7 @@ export class OpenAiResponseAccumulator {
 	}
 
 	private logUnhandledResponseEvent(event: ResponseStreamEvent): void {
-		if (
-			!envTruthy(process.env.CODELIA_PROVIDER_LOG) &&
-			!envTruthy(process.env.CODELIA_DEBUG)
-		) {
+		if (!hasDebugTopic("provider-log") && !isDebugEnabled()) {
 			return;
 		}
 		if (!event.type.startsWith("response.")) {

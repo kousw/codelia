@@ -1,5 +1,6 @@
 pub(crate) mod attachments;
 pub(crate) mod clipboard;
+pub(crate) mod debug;
 pub(crate) mod image;
 pub(crate) mod perf;
 pub(crate) mod text;

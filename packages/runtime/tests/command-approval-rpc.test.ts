@@ -376,7 +376,7 @@ test("real read, status and saved shell RPCs avoid review evidence and reload po
 		).toBeUndefined();
 		expect(launches).toBe(24);
 		process.stdout.write = output;
-		if (process.env.CODELIA_APPROVAL_MEASURE === "1")
+		if (process.env.CODELIA_TEST_APPROVAL_MEASURE === "1")
 			console.log("RPC elapsed ms", {
 				coldMs,
 				read: summary(categories.read),

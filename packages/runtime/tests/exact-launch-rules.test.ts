@@ -402,7 +402,7 @@ test.skipIf(process.platform === "win32")(
 test
 	.skipIf(
 		process.platform !== "darwin" ||
-			process.env.CODELIA_APPROVAL_MAC_LIVE !== "1",
+			process.env.CODELIA_TEST_APPROVAL_MAC_LIVE !== "1",
 	)
 	.each(["exact", "prefix"] as const)(
 	"native Seatbelt reuses a saved %s rule from a fresh project store",
@@ -573,7 +573,7 @@ function saveLegacyTypecheck(
 
 test.skipIf(
 	process.platform !== "darwin" ||
-		process.env.CODELIA_APPROVAL_MAC_LIVE !== "1",
+		process.env.CODELIA_TEST_APPROVAL_MAC_LIVE !== "1",
 )(
 	"native Seatbelt dispatch accepts an existing v1 Bun typecheck rule on its original target",
 	async () => {

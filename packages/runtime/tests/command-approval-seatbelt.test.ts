@@ -62,10 +62,13 @@ test("Seatbelt pins writable ancestors of both kinds of protected resource", () 
 
 const enabled =
 	process.platform === "darwin" &&
-	process.env.CODELIA_APPROVAL_MAC_LIVE === "1";
+	process.env.CODELIA_TEST_APPROVAL_MAC_LIVE === "1";
 
 const seatbeltBackends = ["direct"];
-if (process.arch === "arm64" && process.env.CODELIA_APPROVAL_MXC_LIVE === "1")
+if (
+	process.arch === "arm64" &&
+	process.env.CODELIA_TEST_APPROVAL_MXC_LIVE === "1"
+)
 	seatbeltBackends.push("MXC");
 
 test.skipIf(!enabled).each(seatbeltBackends)(
@@ -127,7 +130,7 @@ test.skipIf(!enabled).each(seatbeltBackends)(
 					'if /bin/bash --noprofile --norc -c "cat protected-alias/data"; then exit 42; fi',
 					`if /usr/bin/nc -G 1 -z 127.0.0.1 ${address.port}; then exit 43; fi`,
 					`if /usr/bin/nc -U "${socketPath}" </dev/null; then exit 44; fi`,
-					`test -z "\${CODELIA_APPROVAL_MAC_LIVE:-}"`,
+					`test -z "\${CODELIA_TEST_APPROVAL_MAC_LIVE:-}"`,
 					'if /bin/ln alias/data "$TMPDIR/linked"; then printf no > "$TMPDIR/linked"; fi',
 				].join("\n"),
 				base,

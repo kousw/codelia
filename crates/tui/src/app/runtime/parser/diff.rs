@@ -1,5 +1,6 @@
 use crate::app::markdown::highlight_code_line;
 use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
+use crate::app::util::debug::debug_config;
 use similar::{ChangeTag, TextDiff};
 use std::path::Path;
 
@@ -11,19 +12,12 @@ pub(super) const DIFF_NUMBER_FG: LogColor = LogColor::rgb(143, 161, 179);
 pub(super) const DIFF_ADDED_MARKER_FG: LogColor = LogColor::rgb(163, 190, 140);
 pub(super) const DIFF_REMOVED_MARKER_FG: LogColor = LogColor::rgb(191, 97, 106);
 
-fn env_flag(name: &str) -> bool {
-    matches!(
-        std::env::var(name).ok().as_deref(),
-        Some("1" | "true" | "TRUE" | "True" | "yes" | "YES" | "on" | "ON")
-    )
-}
-
 fn append_permission_preview_debug_line(
     lines: &mut Vec<LogLine>,
     resolved_language: Option<&str>,
     file_path: Option<&str>,
 ) {
-    if !env_flag("CODELIA_DEBUG_DIFF_HIGHLIGHT") {
+    if !debug_config().diff {
         return;
     }
     let diff_rows = lines

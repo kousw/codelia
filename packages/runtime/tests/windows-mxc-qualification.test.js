@@ -192,8 +192,8 @@ test("portable unprotected controls reach the synthetic listener and files", asy
 				cwd: path.join(root, "workspace"),
 				env: {
 					...process.env,
-					CODELIA_QUALIFICATION_PEER: "",
-					CODELIA_MXC_HOST_SENTINEL: "test",
+					CODELIA_TEST_QUALIFICATION_PEER: "",
+					CODELIA_TEST_MXC_HOST_SENTINEL: "test",
 				},
 			},
 		);

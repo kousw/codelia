@@ -376,8 +376,8 @@ for (const backend of ["seatbelt", "mxc"] as const) {
 	const enabled =
 		backend === "mxc"
 			? process.arch === "arm64" &&
-				process.env.CODELIA_APPROVAL_MXC_LIVE === "1"
-			: process.env.CODELIA_APPROVAL_MAC_LIVE === "1";
+				process.env.CODELIA_TEST_APPROVAL_MXC_LIVE === "1"
+			: process.env.CODELIA_TEST_APPROVAL_MAC_LIVE === "1";
 	test.skipIf(process.platform !== "darwin" || !enabled)(
 		`confined Auto approve executes normal commands under native ${backend}`,
 		() => withShell(new MacSeatbeltBackend(backend), expectOrdinaryLaunches),

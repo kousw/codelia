@@ -267,8 +267,8 @@ describe("ChatZai", () => {
 		console.error = (...args: unknown[]) => {
 			stderrLines.push(args.map(String).join(" "));
 		};
-		setEnv("CODELIA_PROVIDER_LOG", "1");
-		setEnv("CODELIA_PROVIDER_LOG_DIR", dumpDir);
+		setEnv("CODELIA_DEBUG", "provider-log");
+		setEnv("CODELIA_DEBUG_DIR", dumpDir);
 		const fetchImpl = buildMockFetch(async () => {
 			return new Response(
 				sse([

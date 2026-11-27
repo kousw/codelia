@@ -211,7 +211,6 @@ const harborUiResponse = (
 
 type PromptRunOptions = {
 	prompt: string;
-	approvalMode?: string;
 	sandboxMode?: string;
 	harborShellApproval?: boolean;
 };
@@ -281,9 +280,6 @@ export const runPromptMode = async (
 	}
 	if (options.sandboxMode) {
 		runtimeArgs.push("--sandbox-mode", options.sandboxMode);
-	}
-	if (options.approvalMode) {
-		runtimeArgs.push("--approval-mode", options.approvalMode);
 	}
 
 	const child = spawn(runtimeCmd, runtimeArgs, {

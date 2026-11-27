@@ -73,25 +73,16 @@ test("trusted user policy translates legacy values and honors explicit sandbox s
 			legacy: "trusted",
 		});
 		expect(
-			await selection([], { CODELIA_APPROVAL_MODE: "full-access" }),
+			await selection([], { CODELIA_SANDBOX_MODE: "full-access" }),
 		).toEqual({
-			value: "workspace-write",
+			value: "full-access",
 			source: "env",
-			legacy: "full-access",
 		});
 		expect(
-			await selection(
-				["--approval-mode=trusted", "--sandbox-mode", "readonly"],
-				{
-					CODELIA_SANDBOX_MODE: "full-access",
-				},
-			),
+			await selection(["--sandbox-mode", "readonly"], {
+				CODELIA_SANDBOX_MODE: "full-access",
+			}),
 		).toEqual({ value: "readonly", source: "cli" });
-		expect(await selection(["--approval-mode", "minimal"])).toEqual({
-			value: "readonly",
-			source: "cli",
-			legacy: "minimal",
-		});
 		await expect(selection(["--sandbox-mode="])).rejects.toThrow(
 			"Invalid --sandbox-mode",
 		);

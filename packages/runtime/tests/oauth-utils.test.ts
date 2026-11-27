@@ -66,26 +66,21 @@ describe("oauth utils", () => {
 	});
 
 	test("oauth browser mode defaults to manual over ssh", () => {
-		expect(resolveOAuthBrowserMode({ SSH_CONNECTION: "1 2 3 4" })).toBe(
-			"manual",
-		);
-		expect(shouldAutoOpenOAuthBrowser({ SSH_CONNECTION: "1 2 3 4" })).toBe(
-			false,
-		);
+		expect(
+			resolveOAuthBrowserMode(undefined, { SSH_CONNECTION: "1 2 3 4" }),
+		).toBe("manual");
+		expect(
+			shouldAutoOpenOAuthBrowser(undefined, { SSH_CONNECTION: "1 2 3 4" }),
+		).toBe(false);
 	});
 
-	test("oauth browser mode lets env override ssh detection", () => {
+	test("oauth browser mode lets configured mode override ssh detection", () => {
 		expect(
-			resolveOAuthBrowserMode({
-				CODELIA_OAUTH_BROWSER: "auto",
+			resolveOAuthBrowserMode("auto", {
 				SSH_CONNECTION: "1 2 3 4",
 			}),
 		).toBe("auto");
-		expect(
-			resolveOAuthBrowserMode({
-				CODELIA_OAUTH_BROWSER: "manual",
-			}),
-		).toBe("manual");
+		expect(resolveOAuthBrowserMode("manual", {})).toBe("manual");
 	});
 
 	test("readOAuthCallbackCode accepts full callback URLs and query strings", () => {

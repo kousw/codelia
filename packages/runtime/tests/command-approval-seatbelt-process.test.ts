@@ -12,9 +12,12 @@ import {
 
 const enabled =
 	process.platform === "darwin" &&
-	process.env.CODELIA_APPROVAL_MAC_LIVE === "1";
+	process.env.CODELIA_TEST_APPROVAL_MAC_LIVE === "1";
 const backends = ["direct"];
-if (process.arch === "arm64" && process.env.CODELIA_APPROVAL_MXC_LIVE === "1")
+if (
+	process.arch === "arm64" &&
+	process.env.CODELIA_TEST_APPROVAL_MXC_LIVE === "1"
+)
 	backends.push("MXC");
 
 // The queried PIDs are this worker and its own spawned child. Return booleans
