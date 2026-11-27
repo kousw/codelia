@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/core",
-	"version": "0.1.90",
+	"version": "0.1.91",
 	"license": "MIT",
 	"type": "module",
 	"files": [
@@ -26,8 +26,8 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.110.0",
-		"@codelia/config": "0.1.90",
-		"@codelia/shared-types": "0.1.90",
+		"@codelia/config": "0.1.91",
+		"@codelia/shared-types": "0.1.91",
 		"@google/genai": "2.32.0",
 		"image-size": "^2.0.2",
 		"json-schema": "^0.4.0",

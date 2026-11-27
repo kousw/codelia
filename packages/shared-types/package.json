@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/shared-types",
-	"version": "0.1.90",
+	"version": "0.1.91",
 	"license": "MIT",
 	"type": "module",
 	"files": [
