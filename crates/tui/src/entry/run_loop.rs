@@ -145,16 +145,18 @@ struct LoopState {
     pending_mouse_capture: Option<Effect>,
     update_choice_size: Option<ratatui::layout::Size>,
     last_memory_sample_at: Instant,
+    was_debug_perf_enabled: bool,
 }
 
 impl LoopState {
-    fn new(now: Instant) -> Self {
+    fn new(now: Instant, debug_perf_enabled: bool) -> Self {
         Self {
             needs_redraw: true,
             exit: ExitAction::None,
             pending_mouse_capture: None,
             update_choice_size: None,
             last_memory_sample_at: now - DEBUG_PERF_MEMORY_SAMPLE_INTERVAL,
+            was_debug_perf_enabled: debug_perf_enabled,
         }
     }
 
@@ -193,7 +195,10 @@ impl LoopState {
         io: &mut I,
         effect: Effect,
     ) {
-        if let Some(completion) = io.execute(terminal, app, effect) {
+        let started = io.now();
+        let completion = io.execute(terminal, app, effect);
+        app.perf.record_effect(io.now().duration_since(started));
+        if let Some(completion) = completion {
             let nested = update(app, Msg::Local(completion), tx);
             debug_assert!(nested.effects.is_empty());
             if nested.exit != ExitAction::None {
@@ -229,15 +234,19 @@ where
     B::Error: 'static,
 {
     app.last_ctrl_c_at = None;
-    let mut state = LoopState::new(io.now());
+    let mut state = LoopState::new(io.now(), app.debug_perf_enabled);
 
     loop {
-        state.needs_redraw |= drain_runtime_messages(app, rx, tx, |app, msg, tx| {
+        let active_started = io.now();
+        let mut active_work = false;
+        let drained = drain_runtime_messages(app, rx, tx, |app, msg, tx| {
             let result = update(app, Msg::Runtime(msg), tx);
             let redraw = result.needs_redraw;
             let _ = state.apply(terminal, app, tx, io, result);
             redraw
         });
+        state.needs_redraw |= drained;
+        active_work |= drained;
         let _ = state.dispatch(
             terminal,
             app,
@@ -302,6 +311,7 @@ where
         }
 
         if state.needs_redraw {
+            active_work = true;
             let frame_started = io.now();
             let size_before = if !app.overlays.runtime_dialogs.is_any_open()
                 && matches!(app.overlays.local_panel, Some(LocalPanel::UpdatePicker(_)))
@@ -320,16 +330,26 @@ where
             app.record_perf_frame(io.now().duration_since(frame_started), outcome.draw_elapsed);
             if activate_pending_confirm_dialog(app) {
                 state.needs_redraw = true;
+                app.perf
+                    .record_tick(io.now().duration_since(active_started));
                 continue;
             }
             state.needs_redraw = outcome.request_redraw;
             app.assert_render_invariants();
         }
+        if active_work {
+            app.perf
+                .record_tick(io.now().duration_since(active_started));
+        }
         if state.exit == ExitAction::DrawThenExit {
             break;
         }
 
+        let mut post_poll_work = false;
+        let mut post_poll_started = io.now();
         if let Some(event) = io.poll_event(terminal, EVENT_POLL_TIMEOUT)? {
+            post_poll_started = io.now();
+            post_poll_work = true;
             if crate::app::util::debug::debug_config().keys {
                 if let Event::Key(key) = &event {
                     if key.kind == KeyEventKind::Press {
@@ -364,6 +384,8 @@ where
                 break;
             }
             if skip_post_input_tick {
+                app.perf
+                    .record_tick(io.now().duration_since(post_poll_started));
                 continue;
             }
         }
@@ -379,6 +401,10 @@ where
                 startup_pending,
             },
         );
+        if app.debug_perf_enabled && !state.was_debug_perf_enabled {
+            state.last_memory_sample_at = now - DEBUG_PERF_MEMORY_SAMPLE_INTERVAL;
+        }
+        state.was_debug_perf_enabled = app.debug_perf_enabled;
         if app.debug_perf_enabled
             && now.duration_since(state.last_memory_sample_at) >= DEBUG_PERF_MEMORY_SAMPLE_INTERVAL
         {
@@ -391,6 +417,10 @@ where
                 io,
                 Msg::Local(LocalMsg::MemorySample(sample)),
             );
+        }
+        if post_poll_work {
+            app.perf
+                .record_tick(io.now().duration_since(post_poll_started));
         }
     }
 

@@ -99,17 +99,31 @@ export const executeToolCall = async ({
 		} satisfies ToolExecution;
 	}
 
+	let approvalWaitMs: number | undefined;
 	if (canExecuteTool) {
+		const approvalStartedAt = performance.now();
 		try {
 			const decision = await canExecuteTool(
 				toolCall,
 				toolCall.function.arguments,
 				createToolContext(signal),
 			);
+			approvalWaitMs = Math.max(
+				0,
+				Math.round(performance.now() - approvalStartedAt),
+			);
 			if (decision.decision === "deny") {
-				return permissionDeniedResult(toolCall, decision);
+				return {
+					...permissionDeniedResult(toolCall, decision),
+					approvalWaitMs,
+					execDurationMs: 0,
+				};
 			}
 		} catch (error) {
+			approvalWaitMs = Math.max(
+				0,
+				Math.round(performance.now() - approvalStartedAt),
+			);
 			return {
 				message: {
 					role: "tool",
@@ -120,14 +134,21 @@ export const executeToolCall = async ({
 					}`,
 					is_error: true,
 				} satisfies ToolMessage,
+				approvalWaitMs,
+				execDurationMs: 0,
 			} satisfies ToolExecution;
 		}
 	}
 
+	const execStartedAt = performance.now();
 	try {
 		const result = await tool.executeRaw(
 			toolCall.function.arguments,
 			createToolContext(signal),
+		);
+		const execDurationMs = Math.max(
+			0,
+			Math.round(performance.now() - execStartedAt),
 		);
 
 		const displayContent =
@@ -142,10 +163,20 @@ export const executeToolCall = async ({
 				content: toolResultToContent(result),
 				...(displayContent ? { display_content: displayContent } : {}),
 			} satisfies ToolMessage,
+			...(approvalWaitMs !== undefined ? { approvalWaitMs } : {}),
+			execDurationMs,
 		} satisfies ToolExecution;
 	} catch (error) {
+		const execDurationMs = Math.max(
+			0,
+			Math.round(performance.now() - execStartedAt),
+		);
 		if (error instanceof ToolPermissionDenied)
-			return permissionDeniedResult(toolCall, error.decision);
+			return {
+				...permissionDeniedResult(toolCall, error.decision),
+				...(approvalWaitMs !== undefined ? { approvalWaitMs } : {}),
+				execDurationMs,
+			};
 		if (error instanceof TaskComplete) {
 			return {
 				message: {
@@ -156,6 +187,8 @@ export const executeToolCall = async ({
 				} satisfies ToolMessage,
 				done: true,
 				finalMessage: error.finalMessage,
+				...(approvalWaitMs !== undefined ? { approvalWaitMs } : {}),
+				execDurationMs,
 			} satisfies ToolExecution;
 		}
 		return {
@@ -166,6 +199,8 @@ export const executeToolCall = async ({
 				content: `Error: ${error instanceof Error ? error.message : String(error)}`,
 				is_error: true,
 			} satisfies ToolMessage,
+			...(approvalWaitMs !== undefined ? { approvalWaitMs } : {}),
+			execDurationMs,
 		} satisfies ToolExecution;
 	}
 };

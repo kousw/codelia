@@ -1,7 +1,10 @@
 use super::errors::RunErrorPresentation;
 use crate::app::state::stream_preview::StreamUpdate;
 use crate::app::state::LogLine;
-use crate::protocol::{GoalOffer, GoalSnapshot};
+use crate::protocol::{
+    CompactionCompleteEvent, GoalOffer, GoalSnapshot, RunMetricsNotify, RunSummaryNotify,
+    StepCompleteEvent,
+};
 use serde_json::Value;
 
 #[derive(Debug)]
@@ -57,7 +60,8 @@ pub(crate) enum RunControlMsg {
     Context {
         left_percent: Option<u8>,
     },
-    Metrics(LlmMetricsUpdate),
+    Metrics(Box<RunMetricsNotify>),
+    Summary(Box<RunSummaryNotify>),
     Goal(GoalNotification),
 }
 
@@ -92,6 +96,7 @@ pub(crate) enum AgentMsg {
     ReplayProgress(ReplayProgressEvent),
     ToolCallStart {
         tool_call_id: String,
+        tool: String,
         lines: Vec<LogLine>,
     },
     ToolCallResult {
@@ -99,6 +104,7 @@ pub(crate) enum AgentMsg {
         lines: Vec<LogLine>,
         replay_progress: Option<ReplayProgressEvent>,
     },
+    StepComplete(Box<StepCompleteEvent>),
     PermissionPreview {
         update: Option<PermissionPreviewUpdate>,
         lines: Vec<LogLine>,
@@ -110,6 +116,7 @@ pub(crate) enum AgentMsg {
     Compaction {
         phase: CompactionPhase,
         lines: Vec<LogLine>,
+        completed: Option<Box<CompactionCompleteEvent>>,
     },
     SteerApplied {
         steer_id: String,
@@ -134,11 +141,6 @@ pub enum ReplayProgressEvent {
         tool_call_id: String,
         is_error: bool,
     },
-}
-
-pub struct LlmMetricsUpdate {
-    pub run_id: String,
-    pub output_tokens_per_second: Option<f64>,
 }
 
 pub struct ToolCallResultUpdate {

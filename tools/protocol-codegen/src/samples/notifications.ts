@@ -1,26 +1,45 @@
 // Runtime -> UI notifications and dialog requests (Phase 3).
 import { group, invalid, type Sample, typed } from "./helpers";
 
-const usageSummary = {
+const telemetrySummary = {
 	total_calls: 2,
 	total_tokens: 300,
 	total_input_tokens: 200,
 	total_output_tokens: 100,
+	total_output_reasoning_tokens: 10,
 	total_cached_input_tokens: 50,
 	total_cache_creation_tokens: 0,
+	total_input_image_tokens: 0,
+	cache_hit_calls: 1,
+	cache_miss_calls: 1,
+	cache_unknown_calls: 0,
 	total_cost_usd: 0.01,
+	retry_count: 0,
+	retry_wait_ms: 0,
+	tool_calls: 1,
+	tool_errors: 0,
+	tool_exec_ms: 42,
+	tool_approval_wait_ms: 0,
+	compaction_count: 0,
+	compaction_duration_ms: 0,
 	by_model: {
 		"gpt-6.1-sol": {
 			calls: 2,
 			input_tokens: 200,
 			output_tokens: 100,
+			output_reasoning_tokens: 10,
 			cached_input_tokens: 50,
 			cache_creation_tokens: 0,
+			input_image_tokens: 0,
+			cache_hit_calls: 1,
+			cache_miss_calls: 1,
+			cache_unknown_calls: 0,
 			total_tokens: 300,
+			cost_usd: 0.01,
 		},
 	},
 };
-const llmCall = {
+const richRunMetrics = {
 	run_id: "run-1",
 	seq: 1,
 	provider: "openai",
@@ -43,6 +62,9 @@ const llmCall = {
 		cache_read_ratio: 0.2,
 	},
 	cost_usd: 0.004,
+	cost_basis: "api_list",
+	retry_count: 0,
+	retry_wait_ms: 0,
 };
 const snapshot = {
 	session_id: "session-1",
@@ -55,22 +77,21 @@ export const notificationSamples: Sample[] = [
 		typed("percent", { run_id: "run-1", context_left_percent: 72 }),
 		invalid("missing percent", { run_id: "run-1" }),
 	]),
-	...group("runtime_to_ui_notification", "run.diagnostics", [
-		typed("llm call", { run_id: "run-1", kind: "llm_call", call: llmCall }),
-		typed("run summary", {
+	...group("runtime_to_ui_notification", "run.metrics", [
+		typed("rich telemetry", richRunMetrics),
+		invalid("missing seq", { run_id: "run-1", output_tokens_per_second: 12 }),
+	]),
+	...group("runtime_to_ui_notification", "run.summary", [
+		typed("terminal summary", {
 			run_id: "run-1",
-			kind: "run_summary",
-			summary: usageSummary,
+			duration_ms: 1200,
+			run: telemetrySummary,
+			session: telemetrySummary,
 		}),
-		invalid(
-			"unknown diagnostics kind",
-			{ run_id: "run-1", kind: "tool_call" },
-			"unknown",
-		),
-		invalid("llm call without cache", {
+		invalid("missing session summary", {
 			run_id: "run-1",
-			kind: "llm_call",
-			call: { ...llmCall, cache: undefined },
+			duration_ms: 1200,
+			run: telemetrySummary,
 		}),
 	]),
 	...group("runtime_to_ui_notification", "run.context.usage", [

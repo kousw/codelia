@@ -15,9 +15,11 @@ import type {
 	RpcNotification,
 	RpcRequest,
 	RpcResponse,
-	RunDiagnosticsNotify,
+	RunMetricsNotify,
 	RunStartResult,
 	RunStatusNotify,
+	RunSummaryNotify,
+	TelemetryGetResult,
 } from "@codelia/protocol";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { refreshAccessToken } from "../src/auth/openai-oauth";
@@ -173,8 +175,8 @@ const createStores = (
 	},
 });
 
-describe("run.diagnostics notifications", () => {
-	test("returns session log path from run.start when the run event store exposes it", async () => {
+describe("always-on run telemetry and telemetry.get", () => {
+	test("returns session log path and emits always-on structured run.metrics and run.summary without persisting telemetry records", async () => {
 		const llm = new MockChatModel();
 		const agent = new CoreAgent({ llm, tools: [] }) as unknown as Agent;
 		const records: SessionRecord[] = [];
@@ -210,16 +212,41 @@ describe("run.diagnostics notifications", () => {
 			expect(result?.session_log_path).toBe("/tmp/codelia-session.jsonl");
 			await capture.waitForRunStatus(result?.run_id ?? "", "completed");
 			const metrics = capture.messages.filter(
-				(msg) => isRpcNotification(msg) && msg.method === "run.metrics",
+				(msg): msg is RpcNotification =>
+					isRpcNotification(msg) && msg.method === "run.metrics",
 			);
 			expect(metrics).toHaveLength(1);
-			expect((metrics[0] as RpcNotification).params).toMatchObject({
-				seq: 1,
-				output_tokens_per_second: 10,
-			});
+			const call = metrics[0].params as RunMetricsNotify;
+			expect(call.seq).toBe(1);
+			expect(call.output_tokens_per_second).toBe(10);
+			expect(call.cache?.hit_state).toBe("hit");
+			expect(call.cache?.cache_read_tokens).toBe(60);
+			expect(call.usage?.input_cached_tokens).toBe(60);
+			expect(call.provider_meta_summary).toContain("transport=http_stream");
+			expect(call.provider_meta_summary).toContain("websocket_mode=off");
+			expect(call.provider_meta_summary).toContain("reasoning_requested=xhigh");
+			expect(call.provider_meta_summary).toContain("reasoning_applied=high");
+			expect(call.cost_usd).toBeNull();
+			expect(call.cost_basis).toBe("unavailable");
+
+			const summaries = capture.messages.filter(
+				(msg): msg is RpcNotification =>
+					isRpcNotification(msg) && msg.method === "run.summary",
+			);
+			expect(summaries).toHaveLength(1);
+			const summaryParams = summaries[0].params as RunSummaryNotify;
+			expect(summaryParams.run.total_calls).toBe(1);
+			expect(summaryParams.run.total_cached_input_tokens).toBe(60);
+			expect(summaryParams.run.total_tokens).toBe(140);
+			expect(summaryParams.run.cache_hit_calls).toBe(1);
+			expect(summaryParams.run.cache_miss_calls).toBe(0);
+			expect(summaryParams.session.total_calls).toBe(1);
+
 			expect(
-				capture.messages.some(
-					(msg) => isRpcNotification(msg) && msg.method === "run.diagnostics",
+				records.some(
+					(record) =>
+						(record as { type: string }).type === "run.metrics" ||
+						(record as { type: string }).type === "run.summary",
 				),
 			).toBe(false);
 			const persistedResponse = records.find(
@@ -237,7 +264,7 @@ describe("run.diagnostics notifications", () => {
 		}
 	});
 
-	test("emits diagnostics when the client opts in via initialize without the environment switch", async () => {
+	test("telemetry.get returns session totals that survive invalidateAgentCache and runtime perf snapshot", async () => {
 		const llm = new MockChatModel();
 		const agent = new CoreAgent({ llm, tools: [] }) as unknown as Agent;
 		const records: SessionRecord[] = [];
@@ -245,7 +272,8 @@ describe("run.diagnostics notifications", () => {
 		capture.start();
 		try {
 			const state = new RuntimeState();
-			expect(state.diagnosticsEnabled).toBe(false);
+			state.telemetry.recordStartupPhase("sandbox_mode", 4);
+			state.telemetry.setAgentInitPhases([{ name: "mcp_tools", duration_ms: 12 }]);
 			const handlers = createRuntimeHandlers({
 				state,
 				getAgent: async () => agent,
@@ -255,129 +283,53 @@ describe("run.diagnostics notifications", () => {
 
 			handlers.processMessage({
 				jsonrpc: "2.0",
-				id: "init-opt-in",
+				id: "init-telemetry",
 				method: "initialize",
-				params: {
-					client: { name: "test", version: "1" },
-					ui_capabilities: { supports_run_diagnostics: true },
-				},
+				params: { client: { name: "test", version: "1" } },
 			} satisfies RpcRequest);
-			await capture.waitForResponse("init-opt-in");
+			const initResp = await capture.waitForResponse("init-telemetry");
+			expect(
+				(initResp.result as { server_capabilities?: { supports_telemetry?: boolean } })
+					?.server_capabilities?.supports_telemetry,
+			).toBe(true);
 
 			handlers.processMessage({
 				jsonrpc: "2.0",
-				id: "run-opt-in",
+				id: "run-telemetry-1",
 				method: "run.start",
-				params: {
-					input: { type: "text", text: "hello" },
-				},
+				params: { input: { type: "text", text: "hello" } },
 			} satisfies RpcRequest);
+			const runResp = await capture.waitForResponse("run-telemetry-1");
+			const runResult = runResp.result as RunStartResult;
+			await capture.waitForRunStatus(runResult.run_id, "completed");
 
-			const response = await capture.waitForResponse("run-opt-in");
-			const result = response.result as RunStartResult | undefined;
-			await capture.waitForRunStatus(result?.run_id ?? "", "completed");
-		} finally {
-			capture.stop();
-		}
-		expect(
-			capture.messages.some(
-				(msg) => isRpcNotification(msg) && msg.method === "run.diagnostics",
-			),
-		).toBe(true);
-		expect(
-			records.some((record) => (record.type as string) === "run.diagnostics"),
-		).toBe(false);
-	});
-
-	test("emits per-call cache diagnostics and run summary without persisting diagnostics records", async () => {
-		const llm = new MockChatModel();
-		const agent = new CoreAgent({ llm, tools: [] }) as unknown as Agent;
-		const records: SessionRecord[] = [];
-		const capture = createStdoutCapture();
-		capture.start();
-		try {
-			const state = new RuntimeState();
-			state.diagnosticsEnabled = true;
-			const stores = createStores(records);
-			const handlers = createRuntimeHandlers({
-				state,
-				getAgent: async () => agent,
-				log: () => {},
-				...stores,
-			});
+			// Simulate model.set / config.set invalidating the cached agent mid-session.
+			state.invalidateAgentCache();
 
 			handlers.processMessage({
 				jsonrpc: "2.0",
-				id: "run-1",
-				method: "run.start",
-				params: {
-					input: { type: "text", text: "hello" },
-				},
+				id: "telemetry-pull",
+				method: "telemetry.get",
+				params: {},
 			} satisfies RpcRequest);
-
-			const response = await capture.waitForResponse("run-1");
-			if (response.error) {
-				throw new Error(`run.start failed: ${response.error.message}`);
-			}
-			const result = response.result as RunStartResult | undefined;
-			if (!result?.run_id) {
-				throw new Error("run.start did not return run_id");
-			}
-			await capture.waitForRunStatus(result.run_id, "completed");
+			const telResp = await capture.waitForResponse("telemetry-pull");
+			expect(telResp.error).toBeUndefined();
+			const snap = telResp.result as TelemetryGetResult;
+			expect(snap.session_id).toBe(runResult.session_id);
+			expect(snap.active_run_id).toBeNull();
+			expect(snap.session_summary.total_calls).toBe(1);
+			expect(snap.session_summary.total_cached_input_tokens).toBe(60);
+			expect(snap.recent_calls).toHaveLength(1);
+			expect(snap.runtime.startup_phases).toEqual([
+				{ name: "sandbox_mode", duration_ms: 4 },
+			]);
+			expect(snap.runtime.agent_init_phases).toEqual([
+				{ name: "mcp_tools", duration_ms: 12 },
+			]);
+			expect(snap.runtime.memory.rss_bytes).toBeGreaterThan(0);
 		} finally {
 			capture.stop();
 		}
-
-		const diagnostics = capture.messages.filter(
-			(msg): msg is RpcNotification =>
-				isRpcNotification(msg) && msg.method === "run.diagnostics",
-		);
-		expect(diagnostics.length).toBeGreaterThanOrEqual(2);
-		const llmCall = diagnostics.find(
-			(msg) =>
-				(msg.params as RunDiagnosticsNotify | undefined)?.kind === "llm_call",
-		);
-		expect(llmCall).toBeDefined();
-		const llmCallParams = llmCall?.params as RunDiagnosticsNotify;
-		if (llmCallParams.kind !== "llm_call") {
-			throw new Error("expected llm_call diagnostics");
-		}
-		expect(llmCallParams.call.output_tokens_per_second).toBe(10);
-		expect(llmCallParams.call.cache.hit_state).toBe("hit");
-		expect(llmCallParams.call.cache.cache_read_tokens).toBe(60);
-		expect(llmCallParams.call.usage?.input_cached_tokens).toBe(60);
-		expect(llmCallParams.call.provider_meta_summary).toContain(
-			"transport=http_stream",
-		);
-		expect(llmCallParams.call.provider_meta_summary).toContain(
-			"websocket_mode=off",
-		);
-		expect(llmCallParams.call.provider_meta_summary).toContain(
-			"reasoning_requested=xhigh",
-		);
-		expect(llmCallParams.call.provider_meta_summary).toContain(
-			"reasoning_applied=high",
-		);
-
-		const summary = diagnostics.find(
-			(msg) =>
-				(msg.params as RunDiagnosticsNotify | undefined)?.kind ===
-				"run_summary",
-		);
-		expect(summary).toBeDefined();
-		const summaryParams = summary?.params as RunDiagnosticsNotify;
-		if (summaryParams.kind !== "run_summary") {
-			throw new Error("expected run_summary diagnostics");
-		}
-		expect(summaryParams.summary.total_calls).toBe(1);
-		expect(summaryParams.summary.total_cached_input_tokens).toBe(60);
-		expect(summaryParams.summary.total_tokens).toBe(140);
-
-		expect(
-			records.some(
-				(record) => (record as { type: string }).type === "run.diagnostics",
-			),
-		).toBe(false);
 	});
 
 	test("emits a visible warning once when openai auto websocket falls back to http", async () => {
@@ -520,7 +472,7 @@ test("failed runs send safe context even with diagnostics disabled; no raw cause
 	expect(
 		capture.messages.filter(
 			(message) =>
-				isRpcNotification(message) && message.method === "run.diagnostics",
+				isRpcNotification(message) && message.method === "run.metrics",
 		),
 	).toHaveLength(0);
 });

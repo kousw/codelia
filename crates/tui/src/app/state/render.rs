@@ -77,16 +77,3 @@ pub struct WrappedLogCache {
     pub committed: LogPosition,
     pub wrapped: Vec<WrappedLogRow>,
 }
-
-#[derive(Default)]
-pub struct PerfDebugStats {
-    pub frame_last_ms: f64,
-    pub draw_last_ms: f64,
-    pub wrap_last_miss_ms: f64,
-    pub wrap_cache_hits: u64,
-    pub wrap_cache_misses: u64,
-    pub redraw_count: u64,
-    pub wrapped_total: usize,
-    pub tui_rss_bytes: Option<u64>,
-    pub runtime_rss_bytes: Option<u64>,
-}

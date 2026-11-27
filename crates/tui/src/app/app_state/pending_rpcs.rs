@@ -37,6 +37,7 @@ pub(crate) enum PendingRpc {
         scope: Option<SkillsScopeFilter>,
     },
     ContextInspect,
+    TelemetryGet,
     Logout,
     ShellExec,
     ShellStart,
@@ -76,6 +77,7 @@ impl PendingRpc {
             Self::LaneCreate => Some(PendingRpcSlot::LaneCreate),
             Self::SkillsList { .. } => Some(PendingRpcSlot::SkillsList),
             Self::ContextInspect => Some(PendingRpcSlot::ContextInspect),
+            Self::TelemetryGet => Some(PendingRpcSlot::TelemetryGet),
             Self::Logout => Some(PendingRpcSlot::Logout),
             Self::ShellExec => Some(PendingRpcSlot::ShellExec),
             Self::ShellStart => Some(PendingRpcSlot::ShellStart),
@@ -114,6 +116,7 @@ pub(crate) enum PendingRpcSlot {
     LaneCreate,
     SkillsList,
     ContextInspect,
+    TelemetryGet,
     Logout,
     ShellExec,
     ShellStart,
@@ -131,7 +134,11 @@ pub(crate) enum PendingRpcSlot {
 impl PendingRpcSlot {
     pub fn blocks_auto_start(self) -> bool {
         match self {
-            Self::Initialize | Self::RunStart | Self::RunCancel | Self::Upload => false,
+            Self::Initialize
+            | Self::RunStart
+            | Self::RunCancel
+            | Self::Upload
+            | Self::TelemetryGet => false,
             Self::AutoReview
             | Self::ShellRules
             | Self::ImageModelGet
@@ -420,6 +427,7 @@ mod tests {
             (LaneCreate, true),
             (SkillsList, true),
             (ContextInspect, true),
+            (TelemetryGet, false),
             (Logout, true),
             (ShellExec, true),
             (ShellStart, true),

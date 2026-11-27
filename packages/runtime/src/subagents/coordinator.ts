@@ -165,6 +165,13 @@ export class AgentTreeCoordinator {
 	isAvailable(): boolean {
 		return this.factory.isAvailable();
 	}
+	getPerfStats(): { active: number; maxConcurrent: number } {
+		return {
+			active: this.active.size,
+			maxConcurrent:
+				this.parent?.subagent?.max_concurrent ?? DEFAULT_MAX_CONCURRENT,
+		};
+	}
 	private serialize<T>(fn: () => Promise<T>): Promise<T> {
 		const next = this.queue.then(fn, fn);
 		this.queue = next.then(

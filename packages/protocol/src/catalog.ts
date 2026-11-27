@@ -90,14 +90,18 @@ import {
 	RunCancelParamsSchema,
 	RunCancelResultSchema,
 	RunContextNotifySchema,
-	RunDiagnosticsNotifySchema,
 	RunMetricsNotifySchema,
 	RunStartParamsSchema,
 	RunStartResultSchema,
 	RunStatusNotifySchema,
 	RunSteerParamsSchema,
 	RunSteerResultSchema,
+	RunSummaryNotifySchema,
 } from "./run";
+import {
+	TelemetryGetParamsSchema,
+	TelemetryGetResultSchema,
+} from "./telemetry";
 import {
 	SessionHistoryParamsSchema,
 	SessionHistoryResultSchema,
@@ -522,6 +526,12 @@ export const protocolMethods = defineMethods({
 		result: ContextUsageResultSchema,
 		capability: "supports_context_usage",
 	}),
+	"telemetry.get": request({
+		from: "ui",
+		params: TelemetryGetParamsSchema,
+		result: TelemetryGetResultSchema,
+		capability: "supports_telemetry",
+	}),
 	"ui.context.update": notification({
 		from: "ui",
 		params: UiContextUpdateParamsSchema,
@@ -540,6 +550,10 @@ export const protocolMethods = defineMethods({
 		from: "runtime",
 		params: RunMetricsNotifySchema,
 	}),
+	"run.summary": notification({
+		from: "runtime",
+		params: RunSummaryNotifySchema,
+	}),
 	"agent.event": notification({
 		from: "runtime",
 		params: AgentEventNotifySchema,
@@ -547,10 +561,6 @@ export const protocolMethods = defineMethods({
 	"run.context": notification({
 		from: "runtime",
 		params: RunContextNotifySchema,
-	}),
-	"run.diagnostics": notification({
-		from: "runtime",
-		params: RunDiagnosticsNotifySchema,
 	}),
 	"run.context.usage": notification({
 		from: "runtime",

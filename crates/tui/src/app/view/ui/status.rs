@@ -108,12 +108,51 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             }
             segments.push("Alt+H help".to_string());
         }
+        StatusLineMode::Telemetry => {
+            let tps = app
+                .telemetry
+                .last_tps()
+                .or(app.runtime_info.last_llm_tps)
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_else(|| "-".to_string());
+            segments.push(format!("tps: {tps}"));
+            if let Some(ttft) = app.telemetry.last_ttft_ms() {
+                segments.push(format!("ttft: {}", format_compact_ms(ttft)));
+            } else if let Some(lat) = app.telemetry.last_latency_ms() {
+                segments.push(format!("lat: {}", format_compact_ms(lat)));
+            }
+            let totals = app.telemetry.session_totals();
+            if let Some(ratio) = totals.cache_read_ratio() {
+                segments.push(format!(
+                    "cache: {ratio:.0}% ({}/{})",
+                    totals.cache_hit_calls, totals.calls
+                ));
+            } else {
+                segments.push("cache: -".to_string());
+            }
+            segments.push(format!(
+                "tok: {}/{}",
+                format_compact_count(totals.input_tokens),
+                format_compact_count(totals.output_tokens)
+            ));
+            if let Some(cost) = totals.cost_usd {
+                segments.push(format!("cost: {}", format_compact_cost(cost)));
+            }
+            if let Some(percent) = app.context_left_percent {
+                segments.push(format!("ctx: {percent}%"));
+            }
+            segments.push("Alt+P perf".to_string());
+            segments.push("/stats".to_string());
+            segments.push("Alt+H help".to_string());
+        }
         StatusLineMode::Help => {
             segments.push("! at empty input: bang mode".to_string());
             segments.push("Esc/Backspace at empty: exit !mode".to_string());
             segments.push("Ctrl+J/Shift+Enter newline".to_string());
             segments.push("Alt+V paste image/files".to_string());
             segments.push("Alt+I preview image".to_string());
+            segments.push("Alt+P perf bar".to_string());
+            segments.push("/stats telemetry".to_string());
             segments.push("Alt+M toggle queue/steer".to_string());
             if app.steerable_run_id().is_some() && app.steerable_prompts().next().is_some() {
                 segments.push("Alt+Q select queued prompt".to_string());
@@ -141,12 +180,35 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
     ))
 }
 
-fn format_memory_bytes(bytes: Option<u64>) -> String {
+fn format_compact_count(value: u64) -> String {
+    if value >= 1_000_000 {
+        format!("{:.1}M", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.1}k", value as f64 / 1_000.0)
+    } else {
+        value.to_string()
+    }
+}
+
+fn format_compact_ms(ms: f64) -> String {
+    if ms >= 1000.0 {
+        format!("{:.2}s", ms / 1000.0)
+    } else {
+        format!("{ms:.0}ms")
+    }
+}
+
+fn format_compact_cost(usd: f64) -> String {
+    if usd < 0.01 {
+        format!("${usd:.4}")
+    } else {
+        format!("${usd:.3}")
+    }
+}
+
+fn format_memory_mib(bytes: Option<u64>) -> String {
     match bytes {
-        Some(value) => {
-            let mib = value as f64 / (1024.0 * 1024.0);
-            format!("{mib:.1} MiB")
-        }
+        Some(value) => format!("{:.1}", value as f64 / (1024.0 * 1024.0)),
         None => "-".to_string(),
     }
 }
@@ -156,39 +218,60 @@ fn build_debug_perf_line_texts(app: &AppState) -> Vec<String> {
         return Vec::new();
     }
 
-    let hits = app.perf_debug.wrap_cache_hits;
-    let misses = app.perf_debug.wrap_cache_misses;
-    let total = hits.saturating_add(misses);
-    let hit_rate = if total == 0 {
-        0.0
-    } else {
-        (hits as f64 * 100.0) / total as f64
-    };
-    let total_memory = app.perf_debug.tui_rss_bytes.and_then(|tui| {
-        app.perf_debug
-            .runtime_rss_bytes
-            .map(|runtime| tui.saturating_add(runtime))
-    });
+    let totals = app.telemetry.session_totals();
+    let tps = app
+        .telemetry
+        .last_tps()
+        .or(app.runtime_info.last_llm_tps)
+        .map(|value| format!("{value:.1}"))
+        .unwrap_or_else(|| "-".to_string());
+    let ttft = app
+        .telemetry
+        .last_ttft_ms()
+        .map(format_compact_ms)
+        .unwrap_or_else(|| "-".to_string());
+    let lat = app
+        .telemetry
+        .last_latency_ms()
+        .map(format_compact_ms)
+        .unwrap_or_else(|| "-".to_string());
+    let cache = totals
+        .cache_read_ratio()
+        .map(|pct| format!("{pct:.0}%({}/{})", totals.cache_hit_calls, totals.calls))
+        .unwrap_or_else(|| "-".to_string());
+    let mut llm_line = format!(
+        "llm tps:{tps} ttft:{ttft} lat:{lat} cache:{cache} tok:{}/{}",
+        format_compact_count(totals.input_tokens),
+        format_compact_count(totals.output_tokens),
+    );
+    if let Some(cost) = totals.cost_usd {
+        llm_line.push_str(&format!(" cost:{}", format_compact_cost(cost)));
+    }
+    if let Some(percent) = app.context_left_percent {
+        llm_line.push_str(&format!(" ctx:{percent}%"));
+    }
 
-    vec![
-        format!(
-            "perf frame:{:.2}ms draw:{:.2}ms wrap_miss:{:.2}ms wrapped:{}",
-            app.perf_debug.frame_last_ms,
-            app.perf_debug.draw_last_ms,
-            app.perf_debug.wrap_last_miss_ms,
-            app.perf_debug.wrapped_total
-        ),
-        format!(
-            "cache hit:{} miss:{} rate:{:.1}% redraw:{}",
-            hits, misses, hit_rate, app.perf_debug.redraw_count
-        ),
-        format!(
-            "mem tui:{} runtime:{} total:{}",
-            format_memory_bytes(app.perf_debug.tui_rss_bytes),
-            format_memory_bytes(app.perf_debug.runtime_rss_bytes),
-            format_memory_bytes(total_memory)
-        ),
-    ]
+    let perf = &app.perf;
+    let total_memory = perf
+        .tui_rss_bytes
+        .and_then(|tui| perf.runtime_rss_bytes.map(|rt| tui.saturating_add(rt)));
+    let tui_line = format!(
+        "tui frame:{:.1}/{:.1}ms draw:{:.1}/{:.1}ms flush:{:.1}ms wrap:{:.0}%(m:{:.1}ms) slow:{}/{} mem:{}+{}={}MiB",
+        perf.frame.last_ms(),
+        perf.frame.p95_ms(),
+        perf.draw.last_ms(),
+        perf.draw.p95_ms(),
+        perf.stream_flush.last_ms(),
+        perf.wrap_hit_rate(),
+        perf.wrap_miss.last_ms(),
+        perf.slow_ticks_16ms,
+        perf.slow_ticks_50ms,
+        format_memory_mib(perf.tui_rss_bytes),
+        format_memory_mib(perf.runtime_rss_bytes),
+        format_memory_mib(total_memory),
+    );
+
+    vec![llm_line, tui_line]
 }
 
 pub(super) fn build_debug_perf_lines(app: &AppState, width: usize) -> Vec<Line<'static>> {
@@ -219,22 +302,39 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn debug_perf_lines_include_memory_summary() {
+    fn debug_perf_lines_include_llm_and_tui_perf_summary() {
         let mut app = AppState::default();
         app.debug_perf_enabled = true;
-        app.perf_debug.frame_last_ms = 1.25;
-        app.perf_debug.draw_last_ms = 0.5;
-        app.perf_debug.wrap_last_miss_ms = 2.0;
-        app.perf_debug.wrap_cache_hits = 3;
-        app.perf_debug.wrap_cache_misses = 1;
-        app.perf_debug.redraw_count = 7;
-        app.perf_debug.wrapped_total = 42;
-        app.perf_debug.tui_rss_bytes = Some(8 * 1024 * 1024);
-        app.perf_debug.runtime_rss_bytes = Some(12 * 1024 * 1024);
+        app.runtime_info.last_llm_tps = Some(42.5);
+        app.context_left_percent = Some(78);
+        app.perf
+            .record_frame(Duration::from_micros(1250), Duration::from_micros(500));
+        app.perf.record_wrap_hit(42, 20);
+        app.perf.record_wrap_hit(42, 20);
+        app.perf.record_wrap_hit(42, 20);
+        app.perf.record_wrap_miss(Duration::from_millis(2), 42, 20);
+        app.perf.tui_rss_bytes = Some(8 * 1024 * 1024);
+        app.perf.runtime_rss_bytes = Some(12 * 1024 * 1024);
 
         let lines = build_debug_perf_line_texts(&app);
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[2], "mem tui:8.0 MiB runtime:12.0 MiB total:20.0 MiB");
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("llm tps:42.5"));
+        assert!(lines[0].contains("ctx:78%"));
+        assert!(lines[1].contains("wrap:75%"));
+        assert!(lines[1].contains("mem:8.0+12.0=20.0MiB"));
+    }
+
+    #[test]
+    fn status_line_telemetry_mode_displays_compact_metrics() {
+        let mut app = AppState::default();
+        app.status_line_mode = StatusLineMode::Telemetry;
+        app.runtime_info.last_llm_tps = Some(51.4);
+        app.context_left_percent = Some(64);
+        let text = build_status_line(&app).to_string();
+        assert!(text.contains("tps: 51.4"));
+        assert!(text.contains("ctx: 64%"));
+        assert!(text.contains("Alt+P perf"));
+        assert!(text.contains("/stats"));
     }
 
     #[test]

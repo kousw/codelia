@@ -22,8 +22,6 @@ export const UiCapabilitiesSchema = z
 		supports_permission_preflight_events: flag(),
 		/** Opt-in to provisional `text.delta` / `reasoning.delta` agent events. */
 		supports_text_delta: flag(),
-		/** Opt-in to `run.diagnostics` notifications for this connection. */
-		supports_run_diagnostics: flag(),
 	})
 	.meta({ id: "UiCapabilities" });
 export type UiCapabilities = z.infer<typeof UiCapabilitiesSchema>;
@@ -44,7 +42,8 @@ export const ServerCapabilitiesSchema = z
 		supports_run_steer: flag(),
 		supports_attachment_upload: flag(),
 		attachment_upload_limits: AttachmentUploadLimitsSchema.optional(),
-		supports_run_diagnostics: flag(),
+		/** Always-on structured run.metrics / run.summary and telemetry.get pull RPC. */
+		supports_telemetry: flag(),
 		supports_session_lifecycle: flag(),
 		supports_shell_exec: flag(),
 		supports_shell_tasks: flag(),

@@ -925,7 +925,6 @@ describe("runtime environment contract", () => {
 				.trim()
 				.split("\n")
 				.map((line) => JSON.parse(line) as SessionRecord);
-			expect(state.diagnosticsEnabled).toBe(false);
 			expect(
 				records.filter((record) => record.type === "approval.review_failure"),
 			).toEqual([

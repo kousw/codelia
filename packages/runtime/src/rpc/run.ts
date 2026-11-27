@@ -1,21 +1,21 @@
-import type {
-	Agent,
-	AgentSession,
-	PolledMessage,
-	RunEventStoreFactory,
-	SessionRecord,
-	SessionState,
-	SessionStateStore,
-	SessionStore,
-	Tool,
-	ToolChoice,
+import {
+	type Agent,
+	type AgentSession,
+	estimateUsageCostUsd,
+	type PolledMessage,
+	type RunEventStoreFactory,
+	type SessionRecord,
+	type SessionState,
+	type SessionStateStore,
+	type SessionStore,
+	type Tool,
+	type ToolChoice,
 } from "@codelia/core";
 import {
 	type GoalContinueParams,
-	type LlmCallDiagnostics,
 	RPC_ERROR_CODE,
 	type RunCancelParams,
-	type RunDiagnosticsNotify,
+	type RunMetricsNotify,
 	type RunStartParams,
 	type RunStartResult,
 	type RunStatusNotify,
@@ -86,9 +86,9 @@ import {
 	sendAgentEvent,
 	sendError,
 	sendRunContext,
-	sendRunDiagnostics,
 	sendRunMetrics,
 	sendRunStatus,
+	sendRunSummary,
 } from "./transport";
 
 export type RunHandlersDeps = {
@@ -246,6 +246,7 @@ export const resolveSessionWorkspaceRoot = (
 
 type PendingLlmRequest = {
 	ts: string;
+	startedAtMs: number;
 	provider?: string;
 	model: string;
 };
@@ -732,13 +733,14 @@ export const createRunHandlers = ({
 				},
 			);
 			const pendingLlmRequests = new Map<number, PendingLlmRequest>();
+			const toolNamesByCallId = new Map<string, string>();
+			let pendingRetryCount = 0;
+			let pendingRetryWaitMs = 0;
+			const runStartedAtMs = performance.now();
+			state.telemetry.beginRun(runId);
 			let openAiWsFallbackWarningShown = false;
 			// Provisional deltas only for clients that opted in; never persisted.
 			const streamDeltas = state.uiCapabilities?.supports_text_delta === true;
-			// External `CODELIA_DIAGNOSTICS=1` or this client's opt-in; never persisted.
-			const diagnosticsActive =
-				state.diagnosticsEnabled ||
-				state.uiCapabilities?.supports_run_diagnostics === true;
 			const deltaCoalescer = streamDeltas
 				? createTextDeltaCoalescer({
 						send: (event) => {
@@ -746,14 +748,6 @@ export const createRunHandlers = ({
 						},
 					})
 				: null;
-			const emitRunDiagnostics = (params: RunDiagnosticsNotify): void => {
-				if (!diagnosticsActive) return;
-				try {
-					sendRunDiagnostics(state, params);
-				} catch (error) {
-					log(`run diagnostics emit failed: ${String(error)}`);
-				}
-			};
 			const emitOpenAiWsFallbackWarning = (): void => {
 				if (openAiWsFallbackWarningShown) {
 					return;
@@ -782,79 +776,84 @@ export const createRunHandlers = ({
 				}
 			};
 			const sessionAppend = (record: SessionRecord): void => {
-				if (record.type === "llm.response") {
-					try {
-						sendRunMetrics(state, buildRunMetrics(record));
-					} catch (error) {
-						log(`run metrics emit failed: ${String(error)}`);
+				try {
+					if (record.type === "llm.request") {
+						const modelName =
+							record.model?.name ?? record.input.model ?? "unknown";
+						pendingLlmRequests.set(record.seq, {
+							ts: record.ts,
+							startedAtMs: performance.now(),
+							provider: record.model?.provider,
+							model: modelName,
+						});
 					}
-				}
-				if (diagnosticsActive) {
-					try {
-						if (record.type === "llm.request") {
-							const modelName =
-								record.model?.name ?? record.input.model ?? "unknown";
-							pendingLlmRequests.set(record.seq, {
-								ts: record.ts,
-								provider: record.model?.provider,
-								model: modelName,
-							});
-						}
-						if (record.type === "llm.response") {
-							const request = pendingLlmRequests.get(record.seq);
-							pendingLlmRequests.delete(record.seq);
-							const usage = record.output.usage ?? null;
-							const cacheReadTokens = usage?.input_cached_tokens ?? 0;
-							const cacheCreationTokens =
-								usage?.input_cache_creation_tokens ?? 0;
-							const inputTokens = usage?.input_tokens ?? 0;
-							const hitState = usage
-								? cacheReadTokens > 0
-									? "hit"
-									: "miss"
-								: "unknown";
-							const responseTsMs = toTimestampMs(record.ts);
-							const requestTsMs = request ? toTimestampMs(request.ts) : null;
-							const latencyMs =
-								responseTsMs !== null && requestTsMs !== null
-									? Math.max(0, responseTsMs - requestTsMs)
-									: 0;
-							const model = usage?.model ?? request?.model ?? "unknown";
-							const metrics = buildRunMetrics(record);
-							const diagnostics: LlmCallDiagnostics = {
-								run_id: runId,
-								seq: record.seq,
-								...(request?.provider ? { provider: request.provider } : {}),
-								model,
-								request_ts: request?.ts ?? record.ts,
-								response_ts: record.ts,
-								latency_ms: latencyMs,
-								...(metrics.timing ? { timing: metrics.timing } : {}),
-								output_tokens_per_second: metrics.output_tokens_per_second,
-								stop_reason: record.output.stop_reason ?? null,
-								usage,
-								cache: {
-									hit_state: hitState,
-									cache_read_tokens: cacheReadTokens,
-									cache_creation_tokens: cacheCreationTokens,
-									cache_read_ratio: usage
-										? cacheReadTokens / Math.max(inputTokens, 1)
-										: null,
-								},
-								cost_usd: null,
-								provider_meta_summary: summarizeProviderMeta(
-									record.output.provider_meta,
-								),
-							};
-							emitRunDiagnostics({
-								run_id: runId,
-								kind: "llm_call",
-								call: diagnostics,
-							});
-						}
-					} catch (error) {
-						log(`run diagnostics build failed: ${String(error)}`);
+					if (record.type === "llm.response") {
+						const request = pendingLlmRequests.get(record.seq);
+						pendingLlmRequests.delete(record.seq);
+						const usage = record.output.usage ?? null;
+						const cacheReadTokens = usage?.input_cached_tokens ?? 0;
+						const cacheCreationTokens =
+							usage?.input_cache_creation_tokens ?? 0;
+						const inputTokens = usage?.input_tokens ?? 0;
+						const hitState = usage
+							? cacheReadTokens > 0
+								? "hit"
+								: "miss"
+							: "unknown";
+						const latencyMs = request
+							? Math.max(0, Math.round(performance.now() - request.startedAtMs))
+							: 0;
+						const model = usage?.model ?? request?.model ?? "unknown";
+						const baseMetrics = buildRunMetrics(record);
+						const route = state.reviewChatRoute;
+						const metered = route?.kind === "builtin" && route.metered === true;
+						const costUsd = metered
+							? estimateUsageCostUsd(usage, runtimeAgent.getModelCost(model))
+							: null;
+						const providerMeta = record.output.provider_meta as
+							| { server_model?: unknown }
+							| undefined;
+						const actualModel =
+							typeof providerMeta?.server_model === "string" &&
+							providerMeta.server_model.trim().length > 0
+								? providerMeta.server_model
+								: null;
+						const retryCount = pendingRetryCount;
+						const retryWaitMs = pendingRetryWaitMs;
+						pendingRetryCount = 0;
+						pendingRetryWaitMs = 0;
+						const metrics: RunMetricsNotify = {
+							...baseMetrics,
+							...(request?.provider ? { provider: request.provider } : {}),
+							model,
+							...(actualModel ? { actual_model: actualModel } : {}),
+							request_ts: request?.ts ?? record.ts,
+							response_ts: record.ts,
+							latency_ms: latencyMs,
+							stop_reason: record.output.stop_reason ?? null,
+							usage,
+							cache: {
+								hit_state: hitState,
+								cache_read_tokens: cacheReadTokens,
+								cache_creation_tokens: cacheCreationTokens,
+								cache_read_ratio: usage
+									? cacheReadTokens / Math.max(inputTokens, 1)
+									: null,
+							},
+							cost_usd: costUsd,
+							cost_basis: costUsd !== null ? "api_list" : "unavailable",
+							retry_count: retryCount,
+							retry_wait_ms: retryWaitMs,
+							provider_meta_summary: summarizeProviderMeta(
+								record.output.provider_meta,
+							),
+							context: runtimeAgent.getContextSnapshot(),
+						};
+						state.telemetry.recordLlmCall(metrics);
+						sendRunMetrics(state, metrics);
 					}
+				} catch (error) {
+					log(`run metrics build/emit failed: ${String(error)}`);
 				}
 				if (
 					record.type === "llm.response" &&
@@ -997,12 +996,22 @@ export const createRunHandlers = ({
 				let sessionSaveChain = Promise.resolve(true);
 				let lastSessionSaveAt = 0;
 				const polledUnconfirmedSteers: PendingRunSteer[] = [];
-				const emitRunSummaryDiagnostics = (): void => {
-					emitRunDiagnostics({
-						run_id: runId,
-						kind: "run_summary",
-						summary: runtimeAgent.getUsageSummary(),
-					});
+				const emitRunSummary = (): void => {
+					try {
+						const runSummary = state.telemetry.getRunSummary();
+						if (!runSummary) return;
+						sendRunSummary(state, {
+							run_id: runId,
+							duration_ms: Math.max(
+								0,
+								Math.round(performance.now() - runStartedAtMs),
+							),
+							run: runSummary,
+							session: state.telemetry.getSessionSummary(),
+						});
+					} catch (error) {
+						log(`run summary emit failed: ${String(error)}`);
+					}
 				};
 				const buildTerminalStatusExtras = ():
 					| UnconsumedSteerIds
@@ -1168,11 +1177,38 @@ export const createRunHandlers = ({
 						}
 						// Pending deltas always precede any other event of the run.
 						deltaCoalescer?.flush();
+						if (event.type === "llm.retry") {
+							pendingRetryCount += 1;
+							pendingRetryWaitMs += Math.max(0, event.delay_ms);
+						}
+						if (event.type === "tool_call") {
+							toolNamesByCallId.set(event.tool_call_id, event.tool);
+						}
+						if (event.type === "step_complete") {
+							const toolName =
+								toolNamesByCallId.get(event.step_id) ?? "unknown";
+							toolNamesByCallId.delete(event.step_id);
+							state.telemetry.recordToolComplete({
+								run_id: runId,
+								tool_call_id: event.step_id,
+								tool: toolName,
+								status: event.status,
+								duration_ms: event.duration_ms,
+								...(event.exec_duration_ms !== undefined
+									? { exec_duration_ms: event.exec_duration_ms }
+									: {}),
+								...(event.approval_wait_ms !== undefined
+									? { approval_wait_ms: event.approval_wait_ms }
+									: {}),
+								finished_at: nowIso(),
+							});
+						}
 						if (event.type === "final") {
 							finalResponse = event.content;
 							await queueSessionSave("final");
 						}
 						if (event.type === "compaction_complete") {
+							state.telemetry.recordCompaction(runId, event.duration_ms ?? 0);
 							logCompactionSnapshot(log, runId, runtimeAgent, event.compacted);
 							if (event.compacted) await queueSessionSave("compaction");
 						}
@@ -1253,7 +1289,7 @@ export const createRunHandlers = ({
 						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
 					}
 					await queueSessionSave("terminal");
-					emitRunSummaryDiagnostics();
+					emitRunSummary();
 					const status = state.cancelRequested ? "cancelled" : "completed";
 					outcome = status;
 					const terminalExtras = buildTerminalStatusExtras();
@@ -1271,7 +1307,7 @@ export const createRunHandlers = ({
 						outcome = "cancelled";
 						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
 						await queueSessionSave("cancelled");
-						emitRunSummaryDiagnostics();
+						emitRunSummary();
 						const terminalExtras = buildTerminalStatusExtras();
 						emitRunStatus(
 							runId,
@@ -1286,7 +1322,7 @@ export const createRunHandlers = ({
 					const safeFailure = normalizeRunFailure(err);
 					logRunDebug(log, runId, `stream.error ${safeFailure.debugMessage}`);
 					await queueSessionSave("error");
-					emitRunSummaryDiagnostics();
+					emitRunSummary();
 					const terminalExtras = buildTerminalStatusExtras();
 					emitRunStatus(
 						runId,

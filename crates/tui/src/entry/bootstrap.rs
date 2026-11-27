@@ -92,6 +92,7 @@ pub(crate) fn build_initial_app(
     }
     app.enable_debug_print = debug_print;
     app.debug_perf_enabled = debug_perf;
+    app.diagnostics_transcript_enabled = diagnostics;
 
     for line in LOGO_LINES {
         app.push_line(LogKind::System, line);

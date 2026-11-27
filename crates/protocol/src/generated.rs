@@ -1707,6 +1707,16 @@ pub struct CompactionCompleteEvent {
     #[serde(deserialize_with = "deserialize_int")]
     pub timestamp: i64,
     pub compacted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub duration_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
+    pub messages_before: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
+    pub messages_after: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
+    pub estimated_tokens_before: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
+    pub estimated_tokens_after: Option<i64>,
 }
 impl_object_serde!(CompactionCompleteEvent);
 
@@ -2107,6 +2117,61 @@ impl_object_serde!(ContextInspectUiContext);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
+pub struct ContextUsage {
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub provider: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub model: Option<String>,
+    #[serde(deserialize_with = "deserialize_int_nullable")]
+    pub limit_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_int_nullable")]
+    pub used_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_int_nullable")]
+    pub input_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub left_percent: Option<f64>,
+    pub basis: ContextUsageBasis,
+    pub breakdown: Vec<ContextUsageBreakdownEntry>,
+}
+impl_object_serde!(ContextUsage);
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum ContextUsageBasis {
+    Provider,
+    None,
+    Unknown(String),
+}
+impl ContextUsageBasis {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Provider => "provider",
+            Self::None => "none",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ContextUsageBasis {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "provider" => Self::Provider,
+            "none" => Self::None,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ContextUsageBasis> for String {
+    fn from(value: ContextUsageBasis) -> Self {
+        match value {
+            ContextUsageBasis::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct ContextUsageBreakdownEntry {
     pub category: ContextUsageCategory,
     #[serde(deserialize_with = "deserialize_int")]
@@ -2218,6 +2283,41 @@ impl From<ContextUsageResultBasis> for String {
     fn from(value: ContextUsageResultBasis) -> Self {
         match value {
             ContextUsageResultBasis::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum CostBasis {
+    ApiList,
+    Unavailable,
+    Unknown(String),
+}
+impl CostBasis {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ApiList => "api_list",
+            Self::Unavailable => "unavailable",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for CostBasis {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "api_list" => Self::ApiList,
+            "unavailable" => Self::Unavailable,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<CostBasis> for String {
+    fn from(value: CostBasis) -> Self {
+        match value {
+            CostBasis::Unknown(value) => value,
             known => known.as_str().to_owned(),
         }
     }
@@ -3473,35 +3573,7 @@ impl<'de> Deserialize<'de> for LitWorkspaceWrite {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
-pub struct LlmCallDiagnostics {
-    pub run_id: String,
-    #[serde(deserialize_with = "deserialize_int")]
-    pub seq: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
-    pub provider: Option<String>,
-    pub model: String,
-    pub request_ts: String,
-    pub response_ts: String,
-    pub latency_ms: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
-    pub timing: Option<LlmCallTiming>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_tokens_per_second: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stop_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<LlmCallDiagnosticsUsage>,
-    pub cache: LlmCallDiagnosticsCache,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost_usd: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_meta_summary: Option<String>,
-}
-impl_object_serde!(LlmCallDiagnostics);
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(remote = "Self")]
-pub struct LlmCallDiagnosticsCache {
+pub struct LlmCallCache {
     pub hit_state: CacheHitState,
     #[serde(deserialize_with = "deserialize_int")]
     pub cache_read_tokens: i64,
@@ -3510,27 +3582,7 @@ pub struct LlmCallDiagnosticsCache {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_ratio: Option<f64>,
 }
-impl_object_serde!(LlmCallDiagnosticsCache);
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(remote = "Self")]
-pub struct LlmCallDiagnosticsUsage {
-    #[serde(deserialize_with = "deserialize_int")]
-    pub input_tokens: i64,
-    #[serde(deserialize_with = "deserialize_int")]
-    pub output_tokens: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
-    pub output_reasoning_tokens: Option<i64>,
-    #[serde(deserialize_with = "deserialize_int")]
-    pub total_tokens: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
-    pub input_cached_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
-    pub input_cache_creation_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
-    pub input_image_tokens: Option<i64>,
-}
-impl_object_serde!(LlmCallDiagnosticsUsage);
+impl_object_serde!(LlmCallCache);
 
 /// Observed successful stream timing, measured with a monotonic clock.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3579,6 +3631,26 @@ impl From<LlmCallTimingGenerationStartSource> for String {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub struct LlmCallUsage {
+    #[serde(deserialize_with = "deserialize_int")]
+    pub input_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub output_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
+    pub output_reasoning_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub total_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
+    pub input_cached_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
+    pub input_cache_creation_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
+    pub input_image_tokens: Option<i64>,
+}
+impl_object_serde!(LlmCallUsage);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
@@ -5008,6 +5080,59 @@ impl_object_serde!(RunContextNotify);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
+pub struct RunContextSnapshot {
+    #[serde(deserialize_with = "deserialize_int_nullable")]
+    pub limit_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_int_nullable")]
+    pub used_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_int_nullable")]
+    pub input_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub left_percent: Option<f64>,
+    pub basis: RunContextSnapshotBasis,
+}
+impl_object_serde!(RunContextSnapshot);
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum RunContextSnapshotBasis {
+    ProviderUsage,
+    Estimate,
+    None,
+    Unknown(String),
+}
+impl RunContextSnapshotBasis {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ProviderUsage => "provider_usage",
+            Self::Estimate => "estimate",
+            Self::None => "none",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for RunContextSnapshotBasis {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "provider_usage" => Self::ProviderUsage,
+            "estimate" => Self::Estimate,
+            "none" => Self::None,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<RunContextSnapshotBasis> for String {
+    fn from(value: RunContextSnapshotBasis) -> Self {
+        match value {
+            RunContextSnapshotBasis::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct RunContextUsageNotify {
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub provider: Option<String>,
@@ -5061,59 +5186,6 @@ impl From<RunContextUsageNotifyBasis> for String {
         }
     }
 }
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(remote = "Self")]
-pub struct RunDiagnosticsLlmCall {
-    pub run_id: String,
-    pub call: LlmCallDiagnostics,
-}
-impl_object_serde!(RunDiagnosticsLlmCall);
-
-/// Tagged on the string `kind`. A known tag decodes strictly; an unknown
-/// string decodes as `Unknown` with the raw value. A missing or non-string
-/// tag is an error.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(tag = "kind")]
-pub enum RunDiagnosticsNotify {
-    #[serde(rename = "llm_call")]
-    LlmCall(RunDiagnosticsLlmCall),
-    #[serde(rename = "run_summary")]
-    RunSummary(RunDiagnosticsRunSummary),
-    #[serde(untagged)]
-    Unknown(serde_json::Value),
-}
-impl<'de> Deserialize<'de> for RunDiagnosticsNotify {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let value = serde_json::Value::deserialize(deserializer)?;
-        let tag = match value.get("kind") {
-            Some(serde_json::Value::String(tag)) => tag.clone(),
-            _ => return Err(D::Error::custom("missing or non-string tag `kind`")),
-        };
-        Ok(match tag.as_str() {
-            "llm_call" => Self::LlmCall(
-                serde_json::from_value(value).map_err(|error| {
-                    D::Error::custom(format_args!("{} {:?}: {}", "kind", "llm_call", error))
-                })?,
-            ),
-            "run_summary" => Self::RunSummary(
-                serde_json::from_value(value).map_err(|error| {
-                    D::Error::custom(format_args!("{} {:?}: {}", "kind", "run_summary", error))
-                })?,
-            ),
-            _ => Self::Unknown(value),
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(remote = "Self")]
-pub struct RunDiagnosticsRunSummary {
-    pub run_id: String,
-    pub summary: RunUsageSummary,
-}
-impl_object_serde!(RunDiagnosticsRunSummary);
 
 /// Safe failure-only context for status notifications and retained errors.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -5256,17 +5328,47 @@ pub struct RunInputTextPart {
 }
 impl_object_serde!(RunInputTextPart);
 
-/// Latest completed model call; emitted independently of diagnostics mode.
+/// Always-on structured telemetry for each completed model call.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
 pub struct RunMetricsNotify {
     pub run_id: String,
     #[serde(deserialize_with = "deserialize_int")]
     pub seq: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub request_ts: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub response_ts: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub latency_ms: Option<f64>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub output_tokens_per_second: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub timing: Option<LlmCallTiming>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<LlmCallUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub cache: Option<LlmCallCache>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub cost_basis: Option<CostBasis>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
+    pub retry_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub retry_wait_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_meta_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub context: Option<RunContextSnapshot>,
 }
 impl_object_serde!(RunMetricsNotify);
 
@@ -5380,46 +5482,55 @@ pub struct RunSteerResult {
 }
 impl_object_serde!(RunSteerResult);
 
+/// Always-on terminal run and cumulative session telemetry summary.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
-pub struct RunUsageByModel {
-    #[serde(deserialize_with = "deserialize_int")]
-    pub calls: i64,
-    #[serde(deserialize_with = "deserialize_int")]
-    pub input_tokens: i64,
-    #[serde(deserialize_with = "deserialize_int")]
-    pub output_tokens: i64,
-    #[serde(deserialize_with = "deserialize_int")]
-    pub cached_input_tokens: i64,
-    #[serde(deserialize_with = "deserialize_int")]
-    pub cache_creation_tokens: i64,
-    #[serde(deserialize_with = "deserialize_int")]
-    pub total_tokens: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost_usd: Option<f64>,
+pub struct RunSummaryNotify {
+    pub run_id: String,
+    pub duration_ms: f64,
+    pub run: TelemetrySummary,
+    pub session: TelemetrySummary,
 }
-impl_object_serde!(RunUsageByModel);
+impl_object_serde!(RunSummaryNotify);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
-pub struct RunUsageSummary {
+pub struct RuntimeMemoryUsage {
     #[serde(deserialize_with = "deserialize_int")]
-    pub total_calls: i64,
+    pub rss_bytes: i64,
     #[serde(deserialize_with = "deserialize_int")]
-    pub total_tokens: i64,
+    pub heap_used_bytes: i64,
     #[serde(deserialize_with = "deserialize_int")]
-    pub total_input_tokens: i64,
+    pub heap_total_bytes: i64,
     #[serde(deserialize_with = "deserialize_int")]
-    pub total_output_tokens: i64,
+    pub external_bytes: i64,
     #[serde(deserialize_with = "deserialize_int")]
-    pub total_cached_input_tokens: i64,
-    #[serde(deserialize_with = "deserialize_int")]
-    pub total_cache_creation_tokens: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_cost_usd: Option<f64>,
-    pub by_model: std::collections::BTreeMap<String, RunUsageByModel>,
+    pub array_buffers_bytes: i64,
 }
-impl_object_serde!(RunUsageSummary);
+impl_object_serde!(RuntimeMemoryUsage);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub struct RuntimePerfPhase {
+    pub name: String,
+    pub duration_ms: f64,
+}
+impl_object_serde!(RuntimePerfPhase);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub struct RuntimePerfSnapshot {
+    pub startup_phases: Vec<RuntimePerfPhase>,
+    pub agent_init_phases: Vec<RuntimePerfPhase>,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub active_subagents: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub max_concurrent_subagents: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub backpressure_events: i64,
+    pub memory: RuntimeMemoryUsage,
+}
+impl_object_serde!(RuntimePerfSnapshot);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
@@ -5823,7 +5934,7 @@ pub struct ServerCapabilities {
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub attachment_upload_limits: Option<AttachmentUploadLimits>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
-    pub supports_run_diagnostics: Option<bool>,
+    pub supports_telemetry: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub supports_session_lifecycle: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
@@ -6425,6 +6536,10 @@ pub struct StepCompleteEvent {
     pub step_id: String,
     pub status: StepCompleteEventStatus,
     pub duration_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub exec_duration_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub approval_wait_ms: Option<f64>,
 }
 impl_object_serde!(StepCompleteEvent);
 
@@ -7174,6 +7289,102 @@ impl From<TaskWorkspaceMode> for String {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub struct TelemetryGetParams {
+}
+impl_object_serde!(TelemetryGetParams);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub struct TelemetryGetResult {
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub session_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub active_run_id: Option<String>,
+    pub context: ContextUsage,
+    pub session_summary: TelemetrySummary,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub run_summary: Option<TelemetrySummary>,
+    pub recent_calls: Vec<RunMetricsNotify>,
+    pub recent_tools: Vec<ToolTimingRecord>,
+    pub runtime: RuntimePerfSnapshot,
+}
+impl_object_serde!(TelemetryGetResult);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub struct TelemetryModelUsage {
+    #[serde(deserialize_with = "deserialize_int")]
+    pub calls: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub input_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub output_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub output_reasoning_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub cached_input_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub cache_creation_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub input_image_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub cache_hit_calls: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub cache_miss_calls: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub cache_unknown_calls: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub total_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+}
+impl_object_serde!(TelemetryModelUsage);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub struct TelemetrySummary {
+    #[serde(deserialize_with = "deserialize_int")]
+    pub total_calls: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub total_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub total_input_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub total_output_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub total_output_reasoning_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub total_cached_input_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub total_cache_creation_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub total_input_image_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub cache_hit_calls: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub cache_miss_calls: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub cache_unknown_calls: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_cost_usd: Option<f64>,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub retry_count: i64,
+    pub retry_wait_ms: f64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub tool_calls: i64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub tool_errors: i64,
+    pub tool_exec_ms: f64,
+    pub tool_approval_wait_ms: f64,
+    #[serde(deserialize_with = "deserialize_int")]
+    pub compaction_count: i64,
+    pub compaction_duration_ms: f64,
+    pub by_model: std::collections::BTreeMap<String, TelemetryModelUsage>,
+}
+impl_object_serde!(TelemetrySummary);
+
 /// Provisional text of one model call attempt. Complete `text` events replace all provisional text of the same `stream_id`. Never persisted or replayed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
@@ -7299,6 +7510,57 @@ impl_object_serde!(ToolResultEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
+pub struct ToolTimingRecord {
+    pub run_id: String,
+    pub tool_call_id: String,
+    pub tool: String,
+    pub status: ToolTimingRecordStatus,
+    pub duration_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub exec_duration_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub approval_wait_ms: Option<f64>,
+    pub finished_at: String,
+}
+impl_object_serde!(ToolTimingRecord);
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum ToolTimingRecordStatus {
+    Completed,
+    Error,
+    Unknown(String),
+}
+impl ToolTimingRecordStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Completed => "completed",
+            Self::Error => "error",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ToolTimingRecordStatus {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "completed" => Self::Completed,
+            "error" => Self::Error,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ToolTimingRecordStatus> for String {
+    fn from(value: ToolTimingRecordStatus) -> Self {
+        match value {
+            ToolTimingRecordStatus::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct UiActiveFile {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
@@ -7333,8 +7595,6 @@ pub struct UiCapabilities {
     pub supports_permission_preflight_events: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub supports_text_delta: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
-    pub supports_run_diagnostics: Option<bool>,
 }
 impl_object_serde!(UiCapabilities);
 
@@ -8076,6 +8336,15 @@ pub mod methods {
         type Result = TaskInfo;
     }
 
+    /// `telemetry.get` request (UI -> runtime).
+    pub struct TelemetryGet;
+    impl ClientRequest for TelemetryGet {
+        const METHOD: &'static str = "telemetry.get";
+        const CAPABILITY: Option<&'static str> = Some("supports_telemetry");
+        type Params = TelemetryGetParams;
+        type Result = TelemetryGetResult;
+    }
+
     /// `theme.set` request (UI -> runtime).
     pub struct ThemeSet;
     impl ClientRequest for ThemeSet {
@@ -8137,9 +8406,9 @@ pub enum ServerNotification {
     GoalUpdated(GoalSnapshot),
     RunContext(RunContextNotify),
     RunContextUsage(RunContextUsageNotify),
-    RunDiagnostics(RunDiagnosticsNotify),
     RunMetrics(RunMetricsNotify),
     RunStatus(RunStatusNotify),
+    RunSummary(RunSummaryNotify),
     TaskProgress(TaskProgressNotify),
     UiPickCancelled(UiPickCancelledParams),
     /// A method this client does not know; ignore it or use the generic fallback.
@@ -8156,9 +8425,9 @@ impl ServerNotification {
             "goal.updated" => Self::GoalUpdated(DecodeError::decode(method, params)?),
             "run.context" => Self::RunContext(DecodeError::decode(method, params)?),
             "run.context.usage" => Self::RunContextUsage(DecodeError::decode(method, params)?),
-            "run.diagnostics" => Self::RunDiagnostics(DecodeError::decode(method, params)?),
             "run.metrics" => Self::RunMetrics(DecodeError::decode(method, params)?),
             "run.status" => Self::RunStatus(DecodeError::decode(method, params)?),
+            "run.summary" => Self::RunSummary(DecodeError::decode(method, params)?),
             "task.progress" => Self::TaskProgress(DecodeError::decode(method, params)?),
             "ui.pick.cancelled" => Self::UiPickCancelled(DecodeError::decode(method, params)?),
             _ => Self::Unknown { method: method.to_owned(), params },
@@ -8176,9 +8445,9 @@ impl ServerNotification {
             Self::GoalUpdated(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
             Self::RunContext(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
             Self::RunContextUsage(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
-            Self::RunDiagnostics(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
             Self::RunMetrics(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
             Self::RunStatus(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::RunSummary(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
             Self::TaskProgress(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
             Self::UiPickCancelled(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
             Self::Unknown { params, .. } => params.clone(),
@@ -8302,6 +8571,7 @@ pub mod fixture_support {
             "task.spawn" => roundtrip::<TaskSpawnParams>(value),
             "task.status" => roundtrip::<TaskIdParams>(value),
             "task.wait" => roundtrip::<TaskIdParams>(value),
+            "telemetry.get" => roundtrip::<TelemetryGetParams>(value),
             "theme.set" => roundtrip::<ThemeSetParams>(value),
             "tool.call" => roundtrip::<ToolCallParams>(value),
             "ui.context.update" => roundtrip::<UiContextUpdateParams>(value),
@@ -8366,6 +8636,7 @@ pub mod fixture_support {
             "task.spawn" => roundtrip::<TaskInfo>(value),
             "task.status" => roundtrip::<TaskInfo>(value),
             "task.wait" => roundtrip::<TaskInfo>(value),
+            "telemetry.get" => roundtrip::<TelemetryGetResult>(value),
             "theme.set" => roundtrip::<ThemeSetResult>(value),
             "tool.call" => roundtrip::<ToolCallResult>(value),
             _ => return None,

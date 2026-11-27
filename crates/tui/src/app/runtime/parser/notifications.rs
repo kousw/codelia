@@ -7,11 +7,10 @@ use super::types::{
     GoalNotification, RunControlMsg, RuntimeMsg, ServerUiMsg, UiConfirmRequest, UiPickItem,
     UiPickRequest, UiPromptRequest,
 };
-use crate::app::state::LogKind;
+use crate::app::state::{LogKind, LogLine};
 use crate::protocol::{
-    GoalOffer, GoalSnapshot, LlmCallDiagnostics, RunContextNotify, RunDiagnosticsNotify,
-    RunUsageSummary, UiConfirmRequestParams, UiPickCancelledParams, UiPickRequestParams,
-    UiPromptRequestParams,
+    GoalOffer, GoalSnapshot, RunContextNotify, RunMetricsNotify, RunSummaryNotify,
+    UiConfirmRequestParams, UiPickCancelledParams, UiPickRequestParams, UiPromptRequestParams,
 };
 
 /// Token counts are non-negative on the wire; clamp defensively for display.
@@ -86,22 +85,11 @@ pub(super) fn goal_ready_output(offer: GoalOffer) -> RuntimeMsg {
     RuntimeMsg::RunControl(RunControlMsg::Goal(GoalNotification::Ready(offer)))
 }
 
-pub(super) fn run_diagnostics_output(params: RunDiagnosticsNotify) -> RuntimeMsg {
-    let (label, detail) = match params {
-        RunDiagnosticsNotify::LlmCall(call) => llm_call_line(&call.call),
-        RunDiagnosticsNotify::RunSummary(summary) => run_summary_line(&summary.summary),
-        RunDiagnosticsNotify::Unknown(_) => return RuntimeMsg::Ignored,
-    };
-    RuntimeMsg::LogLines(summary_and_detail_line(
-        "",
-        &label,
-        &detail,
-        LogKind::Status,
-        LogKind::Status,
-    ))
+pub(super) fn run_summary_output(params: RunSummaryNotify) -> RuntimeMsg {
+    RuntimeMsg::RunControl(RunControlMsg::Summary(Box::new(params)))
 }
 
-fn llm_call_line(call: &LlmCallDiagnostics) -> (String, String) {
+pub(crate) fn format_metrics_diagnostic_lines(call: &RunMetricsNotify) -> Vec<LogLine> {
     let (input_tokens, output_tokens, total_tokens) = call
         .usage
         .as_ref()
@@ -113,17 +101,27 @@ fn llm_call_line(call: &LlmCallDiagnostics) -> (String, String) {
             )
         })
         .unwrap_or((0, 0, 0));
-    let cache_read = count(call.cache.cache_read_tokens);
+    let (hit_state, cache_read, cache_create) = call
+        .cache
+        .as_ref()
+        .map(|cache| {
+            (
+                cache.hit_state.as_str(),
+                count(cache.cache_read_tokens),
+                count(cache.cache_creation_tokens),
+            )
+        })
+        .unwrap_or(("unknown", 0, 0));
     let cache_read_ratio = if input_tokens == 0 {
         0.0
     } else {
         (cache_read as f64 / input_tokens as f64) * 100.0
     };
-    let latency_ms = if call.latency_ms.is_finite() && call.latency_ms >= 0.0 {
-        call.latency_ms as u64
-    } else {
-        0
-    };
+    let latency_ms = call
+        .latency_ms
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|value| value as u64)
+        .unwrap_or(0);
     let mut detail = format!(
         "provider={} latency={}ms stop={} tok(in/out/total)={}/{}/{} cache={} read={} ({}) create={}",
         call.provider.as_deref().unwrap_or("-"),
@@ -132,16 +130,33 @@ fn llm_call_line(call: &LlmCallDiagnostics) -> (String, String) {
         format_u64_with_commas(input_tokens),
         format_u64_with_commas(output_tokens),
         format_u64_with_commas(total_tokens),
-        call.cache.hit_state.as_str(),
+        hit_state,
         format_u64_with_commas(cache_read),
         format_percent(cache_read_ratio),
-        format_u64_with_commas(count(call.cache.cache_creation_tokens)),
+        format_u64_with_commas(cache_create),
     );
+    if let Some(ttft) = call
+        .timing
+        .as_ref()
+        .map(|timing| timing.time_to_first_token_ms)
+        .filter(|value| value.is_finite() && *value >= 0.0)
+    {
+        detail = format!("{detail} ttft={:.0}ms", ttft);
+    }
     if let Some(tps) = call
         .output_tokens_per_second
         .filter(|value| value.is_finite() && *value >= 0.0)
     {
         detail = format!("{detail} tps={tps:.1}");
+    }
+    if let Some(cost) = call
+        .cost_usd
+        .filter(|value| value.is_finite() && *value >= 0.0)
+    {
+        detail = format!("{detail} cost=${cost:.4}");
+    }
+    if let Some(retries) = call.retry_count.filter(|value| *value > 0) {
+        detail = format!("{detail} retries={retries}");
     }
     if let Some(meta) = call
         .provider_meta_summary
@@ -150,13 +165,17 @@ fn llm_call_line(call: &LlmCallDiagnostics) -> (String, String) {
     {
         detail = format!("{detail} meta={meta}");
     }
-    (
-        format!("diag llm#{} {}", count(call.seq), call.model),
-        detail,
-    )
+    let model = call
+        .actual_model
+        .as_deref()
+        .or(call.model.as_deref())
+        .unwrap_or("-");
+    let label = format!("diag llm#{} {}", count(call.seq), model);
+    summary_and_detail_line("", &label, &detail, LogKind::Status, LogKind::Status)
 }
 
-fn run_summary_line(summary: &RunUsageSummary) -> (String, String) {
+pub(crate) fn format_summary_diagnostic_lines(notify: &RunSummaryNotify) -> Vec<LogLine> {
+    let summary = &notify.session;
     let total_calls = count(summary.total_calls);
     let total_input = count(summary.total_input_tokens);
     let total_cached = count(summary.total_cached_input_tokens);
@@ -165,24 +184,7 @@ fn run_summary_line(summary: &RunUsageSummary) -> (String, String) {
     } else {
         (total_cached as f64 / total_input as f64) * 100.0
     };
-    let (mut hit_calls, mut miss_calls, mut unknown_calls) = (0_u64, 0_u64, 0_u64);
-    for stats in summary.by_model.values() {
-        let calls = count(stats.calls);
-        if calls == 0 {
-            continue;
-        }
-        if stats.cached_input_tokens > 0 {
-            hit_calls += calls;
-        } else if stats.input_tokens > 0 {
-            miss_calls += calls;
-        } else {
-            unknown_calls += calls;
-        }
-    }
-    if hit_calls + miss_calls + unknown_calls < total_calls {
-        unknown_calls += total_calls - (hit_calls + miss_calls + unknown_calls);
-    }
-    let detail = format!(
+    let mut detail = format!(
         "calls={} tok(in/out/total)={}/{}/{} cache(read/create)={}/{} ({}) calls(hit/miss/unknown)={}/{}/{}",
         total_calls,
         format_u64_with_commas(total_input),
@@ -191,9 +193,21 @@ fn run_summary_line(summary: &RunUsageSummary) -> (String, String) {
         format_u64_with_commas(total_cached),
         format_u64_with_commas(count(summary.total_cache_creation_tokens)),
         format_percent(cache_read_ratio),
-        hit_calls,
-        miss_calls,
-        unknown_calls,
+        count(summary.cache_hit_calls),
+        count(summary.cache_miss_calls),
+        count(summary.cache_unknown_calls),
     );
-    ("diag run total (cumulative)".to_owned(), detail)
+    if let Some(cost) = summary
+        .total_cost_usd
+        .filter(|value| value.is_finite() && *value >= 0.0)
+    {
+        detail = format!("{detail} cost=${cost:.4}");
+    }
+    summary_and_detail_line(
+        "",
+        "diag run total (cumulative)",
+        &detail,
+        LogKind::Status,
+        LogKind::Status,
+    )
 }

@@ -1,7 +1,7 @@
 use crate::app::runtime::{
     send_auth_logout, send_context_inspect, send_mcp_list, send_model_set, send_run_start,
-    send_skills_list, send_task_cancel, send_task_list, send_task_status, send_theme_set,
-    send_tool_call, RuntimeTx,
+    send_skills_list, send_task_cancel, send_task_list, send_task_status, send_telemetry_get,
+    send_theme_set, send_tool_call, RuntimeTx,
 };
 use crate::app::state::{
     command_suggestion_rows, parse_theme_name, theme_options, LogKind, ThemeListPanelState,
@@ -732,5 +732,55 @@ pub(super) fn handle_logout_command<'a>(
     if let Err(error) = send_auth_logout(tx, &id, true, provider) {
         app.rpc_pending.remove_slot(PendingRpcSlot::Logout);
         app.push_error_report("send error", error.to_string());
+    }
+}
+
+pub(super) fn handle_perf_command<'a>(
+    app: &mut AppState,
+    parts: &mut impl Iterator<Item = &'a str>,
+) {
+    let next = match parts.next() {
+        None | Some("toggle") => !app.debug_perf_enabled,
+        Some("on") | Some("true") | Some("enable") | Some("enabled") => true,
+        Some("off") | Some("false") | Some("disable") | Some("disabled") => false,
+        Some(_) => {
+            app.push_line(LogKind::Error, "usage: /perf [on|off|toggle]");
+            return;
+        }
+    };
+    if parts.next().is_some() {
+        app.push_line(LogKind::Error, "usage: /perf [on|off|toggle]");
+        return;
+    }
+    app.debug_perf_enabled = next;
+    app.push_line(
+        LogKind::Status,
+        format!(
+            "Perf bar {} (Alt+P to toggle).",
+            if next { "enabled" } else { "disabled" }
+        ),
+    );
+}
+
+pub(super) fn handle_stats_command<'a>(
+    app: &mut AppState,
+    tx: &mut dyn RuntimeTx,
+    parts: &mut impl Iterator<Item = &'a str>,
+) {
+    if parts.next().is_some() {
+        app.push_line(LogKind::Error, "usage: /stats");
+        return;
+    }
+    let can_fetch = app.runtime_info.supports_telemetry;
+    let panel =
+        crate::app::handlers::runtime_response::telemetry::build_stats_panel(app, can_fetch);
+    app.overlays.local_panel = Some(LocalPanel::Context(panel));
+    if can_fetch {
+        let id = tx.next_id();
+        app.rpc_pending.insert(id.clone(), PendingRpc::TelemetryGet);
+        if let Err(error) = send_telemetry_get(tx, &id) {
+            app.rpc_pending.remove_slot(PendingRpcSlot::TelemetryGet);
+            app.push_error_report("send error", error.to_string());
+        }
     }
 }

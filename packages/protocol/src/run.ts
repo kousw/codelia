@@ -164,56 +164,64 @@ export const RunContextNotifySchema = z
 	.meta({ id: "RunContextNotify" });
 export type RunContextNotify = z.infer<typeof RunContextNotifySchema>;
 
-export const RunUsageByModelSchema = z
+export const TelemetryModelUsageSchema = z
 	.object({
 		calls: wireInt(),
 		input_tokens: wireInt(),
 		output_tokens: wireInt(),
+		output_reasoning_tokens: wireInt(),
 		cached_input_tokens: wireInt(),
 		cache_creation_tokens: wireInt(),
+		input_image_tokens: wireInt(),
+		cache_hit_calls: wireInt(),
+		cache_miss_calls: wireInt(),
+		cache_unknown_calls: wireInt(),
 		total_tokens: wireInt(),
 		/** Absent and `null` both mean the cost is unknown. */
 		cost_usd: nullish(z.number()),
 	})
-	.meta({ id: "RunUsageByModel" });
+	.meta({ id: "TelemetryModelUsage" });
+export type TelemetryModelUsage = z.infer<typeof TelemetryModelUsageSchema>;
 
-export const RunUsageSummarySchema = z
+export const TelemetrySummarySchema = z
 	.object({
 		total_calls: wireInt(),
 		total_tokens: wireInt(),
 		total_input_tokens: wireInt(),
 		total_output_tokens: wireInt(),
+		total_output_reasoning_tokens: wireInt(),
 		total_cached_input_tokens: wireInt(),
 		total_cache_creation_tokens: wireInt(),
+		total_input_image_tokens: wireInt(),
+		cache_hit_calls: wireInt(),
+		cache_miss_calls: wireInt(),
+		cache_unknown_calls: wireInt(),
 		/** Absent and `null` both mean the cost is unknown. */
 		total_cost_usd: nullish(z.number()),
-		by_model: z.record(z.string(), RunUsageByModelSchema),
+		retry_count: wireInt(),
+		retry_wait_ms: z.number(),
+		tool_calls: wireInt(),
+		tool_errors: wireInt(),
+		tool_exec_ms: z.number(),
+		tool_approval_wait_ms: z.number(),
+		compaction_count: wireInt(),
+		compaction_duration_ms: z.number(),
+		by_model: z.record(z.string(), TelemetryModelUsageSchema),
 	})
-	.meta({ id: "RunUsageSummary" });
-export type RunUsageSummary = z.infer<typeof RunUsageSummarySchema>;
+	.meta({ id: "TelemetrySummary" });
+export type TelemetrySummary = z.infer<typeof TelemetrySummarySchema>;
 
 export const CacheHitStateSchema = z
 	.enum(["hit", "miss", "unknown"])
 	.meta({ id: "CacheHitState" });
 export type CacheHitState = z.infer<typeof CacheHitStateSchema>;
 
-/** Latest completed model call; emitted independently of diagnostics mode. */
-export const RunMetricsNotifySchema = z
-	.object({
-		run_id: z.string(),
-		seq: wireInt(),
-		/** Always sent; `null` clears the last known rate. */
-		output_tokens_per_second: z.number().nullable(),
-		timing: LlmCallTimingSchema.optional(),
-	})
-	.meta({
-		id: "RunMetricsNotify",
-		description:
-			"Latest completed model call; emitted independently of diagnostics mode.",
-	});
-export type RunMetricsNotify = z.infer<typeof RunMetricsNotifySchema>;
+export const CostBasisSchema = z
+	.enum(["api_list", "unavailable"])
+	.meta({ id: "CostBasis" });
+export type CostBasis = z.infer<typeof CostBasisSchema>;
 
-export const LlmCallDiagnosticsUsageSchema = z
+export const LlmCallUsageSchema = z
 	.object({
 		input_tokens: wireInt(),
 		output_tokens: wireInt(),
@@ -223,58 +231,76 @@ export const LlmCallDiagnosticsUsageSchema = z
 		input_cache_creation_tokens: nullish(wireInt()),
 		input_image_tokens: nullish(wireInt()),
 	})
-	.meta({ id: "LlmCallDiagnosticsUsage" });
+	.meta({ id: "LlmCallUsage" });
+export type LlmCallUsage = z.infer<typeof LlmCallUsageSchema>;
 
-export const LlmCallDiagnosticsCacheSchema = z
+export const LlmCallCacheSchema = z
 	.object({
 		hit_state: CacheHitStateSchema,
 		cache_read_tokens: wireInt(),
 		cache_creation_tokens: wireInt(),
 		cache_read_ratio: nullish(z.number()),
 	})
-	.meta({ id: "LlmCallDiagnosticsCache" });
+	.meta({ id: "LlmCallCache" });
+export type LlmCallCache = z.infer<typeof LlmCallCacheSchema>;
 
-export const LlmCallDiagnosticsSchema = z
+export const RunContextSnapshotSchema = z
+	.object({
+		limit_tokens: wireInt().nullable(),
+		used_tokens: wireInt().nullable(),
+		input_tokens: wireInt().nullable(),
+		left_percent: z.number().nullable(),
+		basis: z.enum(["provider_usage", "estimate", "none"]),
+	})
+	.meta({ id: "RunContextSnapshot" });
+export type RunContextSnapshot = z.infer<typeof RunContextSnapshotSchema>;
+
+/**
+ * Always-on per-LLM-call structured telemetry emitted after each completed model call.
+ * Clients retain the last known TPS when `output_tokens_per_second` is `null`.
+ */
+export const RunMetricsNotifySchema = z
 	.object({
 		run_id: z.string(),
 		seq: wireInt(),
 		provider: z.string().optional(),
-		model: z.string(),
-		request_ts: z.string(),
-		response_ts: z.string(),
-		latency_ms: z.number(),
+		model: z.string().optional(),
+		actual_model: nullish(z.string()),
+		request_ts: z.string().optional(),
+		response_ts: z.string().optional(),
+		latency_ms: z.number().optional(),
+		/** Observed generation TPS; `null` when unavailable (clients keep last measured rate). */
+		output_tokens_per_second: z.number().nullable(),
 		timing: LlmCallTimingSchema.optional(),
-		output_tokens_per_second: nullish(z.number()),
 		stop_reason: nullish(z.string()),
 		/** Absent and `null` both mean usage was not reported. */
-		usage: nullish(LlmCallDiagnosticsUsageSchema),
-		cache: LlmCallDiagnosticsCacheSchema,
+		usage: nullish(LlmCallUsageSchema),
+		cache: LlmCallCacheSchema.optional(),
 		cost_usd: nullish(z.number()),
+		cost_basis: CostBasisSchema.optional(),
+		retry_count: wireInt().optional(),
+		retry_wait_ms: z.number().optional(),
 		provider_meta_summary: nullish(z.string()),
+		context: RunContextSnapshotSchema.optional(),
 	})
-	.meta({ id: "LlmCallDiagnostics" });
-export type LlmCallDiagnostics = z.infer<typeof LlmCallDiagnosticsSchema>;
+	.meta({
+		id: "RunMetricsNotify",
+		description:
+			"Always-on structured telemetry for each completed model call.",
+	});
+export type RunMetricsNotify = z.infer<typeof RunMetricsNotifySchema>;
 
-export const RunDiagnosticsLlmCallSchema = z
+/** Always-on terminal summary emitted when a run completes, cancels, or errors. */
+export const RunSummaryNotifySchema = z
 	.object({
 		run_id: z.string(),
-		kind: z.literal("llm_call"),
-		call: LlmCallDiagnosticsSchema,
+		duration_ms: z.number(),
+		run: TelemetrySummarySchema,
+		session: TelemetrySummarySchema,
 	})
-	.meta({ id: "RunDiagnosticsLlmCall" });
-
-export const RunDiagnosticsRunSummarySchema = z
-	.object({
-		run_id: z.string(),
-		kind: z.literal("run_summary"),
-		summary: RunUsageSummarySchema,
-	})
-	.meta({ id: "RunDiagnosticsRunSummary" });
-
-/** Only sent with `CODELIA_DIAGNOSTICS=1` or `ui_capabilities.supports_run_diagnostics`; never persisted. */
-export const RunDiagnosticsNotifySchema = tagged(
-	"kind",
-	[RunDiagnosticsLlmCallSchema, RunDiagnosticsRunSummarySchema],
-	{ id: "RunDiagnosticsNotify" },
-);
-export type RunDiagnosticsNotify = z.infer<typeof RunDiagnosticsNotifySchema>;
+	.meta({
+		id: "RunSummaryNotify",
+		description:
+			"Always-on terminal run and cumulative session telemetry summary.",
+	});
+export type RunSummaryNotify = z.infer<typeof RunSummaryNotifySchema>;

@@ -121,40 +121,32 @@ impl AppState {
     }
 
     pub fn record_perf_frame(&mut self, frame_duration: Duration, draw_duration: Duration) {
-        if !self.debug_perf_enabled {
-            return;
-        }
-        self.perf_debug.frame_last_ms = frame_duration.as_secs_f64() * 1000.0;
-        self.perf_debug.draw_last_ms = draw_duration.as_secs_f64() * 1000.0;
-        self.perf_debug.redraw_count = self.perf_debug.redraw_count.saturating_add(1);
+        self.perf.record_frame(frame_duration, draw_duration);
     }
 
     pub fn record_wrap_cache_hit(&mut self, wrapped_total: usize) {
-        if !self.debug_perf_enabled {
-            return;
-        }
-        self.perf_debug.wrap_cache_hits = self.perf_debug.wrap_cache_hits.saturating_add(1);
-        self.perf_debug.wrapped_total = wrapped_total;
+        self.perf.record_wrap_hit(wrapped_total, self.log.len());
     }
 
     pub fn record_wrap_cache_miss(&mut self, duration: Duration, wrapped_total: usize) {
-        if !self.debug_perf_enabled {
-            return;
-        }
-        self.perf_debug.wrap_last_miss_ms = duration.as_secs_f64() * 1000.0;
-        self.perf_debug.wrap_cache_misses = self.perf_debug.wrap_cache_misses.saturating_add(1);
-        self.perf_debug.wrapped_total = wrapped_total;
+        self.perf
+            .record_wrap_miss(duration, wrapped_total, self.log.len());
     }
 
     pub fn record_memory_sample(&mut self, sample: PerfMemorySample) -> bool {
         if !self.debug_perf_enabled {
             return false;
         }
-        let changed = self.perf_debug.tui_rss_bytes != sample.tui_rss_bytes
-            || self.perf_debug.runtime_rss_bytes != sample.runtime_rss_bytes;
-        self.perf_debug.tui_rss_bytes = sample.tui_rss_bytes;
-        self.perf_debug.runtime_rss_bytes = sample.runtime_rss_bytes;
+        let changed = self.perf.tui_rss_bytes != sample.tui_rss_bytes
+            || self.perf.runtime_rss_bytes != sample.runtime_rss_bytes;
+        self.perf.tui_rss_bytes = sample.tui_rss_bytes;
+        self.perf.runtime_rss_bytes = sample.runtime_rss_bytes;
         changed
+    }
+
+    pub fn toggle_debug_perf(&mut self) -> bool {
+        self.debug_perf_enabled = !self.debug_perf_enabled;
+        self.debug_perf_enabled
     }
 
     pub fn update_run_status(&mut self, status: String) {
@@ -189,7 +181,8 @@ impl AppState {
 
     pub fn toggle_status_line_mode(&mut self) {
         self.status_line_mode = match self.status_line_mode {
-            StatusLineMode::Info => StatusLineMode::Help,
+            StatusLineMode::Info => StatusLineMode::Telemetry,
+            StatusLineMode::Telemetry => StatusLineMode::Help,
             StatusLineMode::Help => StatusLineMode::Info,
         };
     }

@@ -237,22 +237,40 @@ export const createAgentFactory = (
 					? await runtimeResourceReader(state, workspaceRoot, ctx)
 					: undefined;
 
+			const initPhases: Array<{ name: string; duration_ms: number }> = [];
+			const measurePhase = async <T>(
+				name: string,
+				fn: () => Promise<T>,
+			): Promise<T> => {
+				const started = performance.now();
+				try {
+					return await fn();
+				} finally {
+					initPhases.push({
+						name,
+						duration_ms: Math.max(0, Math.round(performance.now() - started)),
+					});
+				}
+			};
 			if (
 				environment.context.projectInstructions === "from-workspace" &&
 				workspaceRoot
 			) {
-				const agentsEnabled =
-					environment.config.source === "disabled"
-						? true
-						: await resolveAgentsEnabled(workspaceRoot).catch(() => true);
-				agentsResolver =
-					state.agentsResolver ??
-					(await AgentsResolver.create(
-						workspaceRoot,
-						{ enabled: agentsEnabled },
-						undefined,
-						reader,
-					));
+				agentsResolver = await measurePhase("agents_resolver", async () => {
+					const agentsEnabled =
+						environment.config.source === "disabled"
+							? true
+							: await resolveAgentsEnabled(workspaceRoot).catch(() => true);
+					return (
+						state.agentsResolver ??
+						(await AgentsResolver.create(
+							workspaceRoot,
+							{ enabled: agentsEnabled },
+							undefined,
+							reader,
+						))
+					);
+				});
 				state.agentsResolver = agentsResolver;
 			}
 
@@ -270,13 +288,16 @@ export const createAgentFactory = (
 						error instanceof Error ? error.message : String(error);
 					throw new Error(message);
 				}
-				skillsResolver =
-					state.skillsResolver ??
-					(await SkillsResolver.create({
-						workingDir: workspaceRoot,
-						config: skillsConfig,
-						reader,
-					}));
+				skillsResolver = await measurePhase(
+					"skills_resolver",
+					async () =>
+						state.skillsResolver ??
+						(await SkillsResolver.create({
+							workingDir: workspaceRoot,
+							config: skillsConfig,
+							reader,
+						})),
+				);
 				state.skillsResolver = skillsResolver;
 				state.updateSkillsSnapshot(workspaceRoot, skillsResolver.getSnapshot());
 			}
@@ -342,24 +363,32 @@ export const createAgentFactory = (
 			}
 			let mcpTools: Awaited<ReturnType<McpManager["getTools"]>> = [];
 			if (environment.tools.mcp === "from-config" && options.mcpManager) {
-				try {
-					mcpTools = await options.mcpManager.getTools({
-						onStatus: (message) => {
-							log(`mcp: ${message}`);
-						},
-						requestOAuthTokens: async ({ server_id, oauth, error, signal }) => {
-							return requestMcpOAuthTokensWithRunStatus(
-								state,
+				mcpTools = await measurePhase("mcp_tools", async () => {
+					try {
+						return await options.mcpManager!.getTools({
+							onStatus: (message) => {
+								log(`mcp: ${message}`);
+							},
+							requestOAuthTokens: async ({
 								server_id,
 								oauth,
 								error,
 								signal,
-							);
-						},
-					});
-				} catch (error) {
-					log(`failed to load mcp tools: ${String(error)}`);
-				}
+							}) => {
+								return requestMcpOAuthTokensWithRunStatus(
+									state,
+									server_id,
+									oauth,
+									error,
+									signal,
+								);
+							},
+						});
+					} catch (error) {
+						log(`failed to load mcp tools: ${String(error)}`);
+						return [];
+					}
+				});
 			}
 			const hostTools =
 				environment.tools.host === "enabled"
@@ -387,13 +416,15 @@ export const createAgentFactory = (
 						state,
 						workspaceRoot,
 					);
-				executionEnvironmentContext = await buildExecutionEnvironmentContext({
-					workingDir: workspaceRoot,
-					sandboxRoot: ctx.rootDir,
-					config: executionEnvironmentConfig,
-					hostInfo: describeExecutionEnvironmentHost(state.sandboxMode.value),
-					probeOptions: { authorize: authorizeRuntimeShell(state) },
-				});
+				executionEnvironmentContext = await measurePhase("exec_env", () =>
+					buildExecutionEnvironmentContext({
+						workingDir: workspaceRoot,
+						sandboxRoot: ctx.rootDir,
+						config: executionEnvironmentConfig,
+						hostInfo: describeExecutionEnvironmentHost(state.sandboxMode.value),
+						probeOptions: { authorize: authorizeRuntimeShell(state) },
+					}),
+				);
 			}
 			state.executionEnvironmentContext = executionEnvironmentContext;
 			if (
@@ -582,14 +613,15 @@ export const createAgentFactory = (
 			state.currentModelProvider = provider;
 			state.currentModelName = resolvedModelName;
 			state.currentModelSource = modelConfig.source;
-			const modelRegistry =
+			const modelRegistry = await measurePhase("model_registry", async () =>
 				environment.persistence.mode === "runtime" ||
 				getResponsesProvider(modelConfig, provider)
 					? await buildModelRegistry(llm, {
 							strict: provider !== "openrouter",
 							providers: modelConfig.providers,
 						})
-					: buildConfiguredModelRegistry(modelConfig.providers);
+					: buildConfiguredModelRegistry(modelConfig.providers),
+			);
 			const builtinTools = new Set([...baseLocalTools, ...imageTools]);
 			if (
 				localSearchTool &&
@@ -768,13 +800,15 @@ export const createAgentFactory = (
 			});
 
 			state.canReadAttachment = canReadAttachment;
+			state.telemetry.setAgentInitPhases(initPhases);
 			state.recordAgentChatRoute(
 				agent,
 				getResponsesProvider(modelConfig, provider)
-					? { kind: "named" }
+					? { kind: "named", metered: false }
 					: {
 							kind: "builtin",
 							provider,
+							metered: providerAuth.method === "api_key",
 							apiBase:
 								providerAuth.method === "api_key"
 									? builtinApiKeyBase(provider)

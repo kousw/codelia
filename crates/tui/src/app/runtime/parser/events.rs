@@ -10,8 +10,8 @@ use super::helpers::{
 };
 use super::{
     is_replayed_event, shell, subagents, summary_line, AgentMsg, ClientToolCancel, ClientToolMsg,
-    ClientToolRequest, CompactionPhase, LlmMetricsUpdate, PermissionPreviewUpdate,
-    PermissionReadyUpdate, ReplayProgressEvent, RunControlMsg, RuntimeMsg, ToolCallResultUpdate,
+    ClientToolRequest, CompactionPhase, PermissionPreviewUpdate, PermissionReadyUpdate,
+    ReplayProgressEvent, RunControlMsg, RuntimeMsg, ToolCallResultUpdate,
 };
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
 use crate::app::transcript::render_body;
@@ -173,21 +173,30 @@ pub(super) fn agent_event_output(
                 })
             }
         }
-        AgentEvent::StepStart(_) | AgentEvent::StepComplete(_) => RuntimeMsg::Ignored,
+        AgentEvent::StepStart(_) => RuntimeMsg::Ignored,
+        AgentEvent::StepComplete(event) => {
+            if replayed {
+                RuntimeMsg::Ignored
+            } else {
+                RuntimeMsg::Agent(AgentMsg::StepComplete(Box::new(event)))
+            }
+        }
         AgentEvent::CompactionStart(_) => RuntimeMsg::Agent(AgentMsg::Compaction {
             lines: vec![summary_line("", "Compaction: running", LogKind::Compaction)],
             phase: CompactionPhase::Started,
+            completed: None,
         }),
         AgentEvent::CompactionComplete(event) => {
             let compacted = event.compacted;
             let status = if compacted { "completed" } else { "skipped" };
+            let detail = match event.duration_ms.filter(|v| v.is_finite() && *v >= 0.0) {
+                Some(ms) => format!("Compaction: {status} (compacted={compacted}, {ms:.0}ms)"),
+                None => format!("Compaction: {status} (compacted={compacted})"),
+            };
             RuntimeMsg::Agent(AgentMsg::Compaction {
-                lines: vec![summary_line(
-                    "",
-                    format!("Compaction: {status} (compacted={compacted})"),
-                    LogKind::Compaction,
-                )],
+                lines: vec![summary_line("", detail, LogKind::Compaction)],
                 phase: CompactionPhase::Completed,
+                completed: (!replayed).then(|| Box::new(event)),
             })
         }
         AgentEvent::ToolCall(event) => {
@@ -221,6 +230,7 @@ pub(super) fn agent_event_output(
             RuntimeMsg::Agent(AgentMsg::ToolCallStart {
                 lines: vec![LogLine::new_with_spans(spans)],
                 tool_call_id: event.tool_call_id,
+                tool: event.tool,
             })
         }
         AgentEvent::ToolResult(event) => {
@@ -331,12 +341,7 @@ fn stream_delta(
 }
 
 pub(super) fn run_metrics_output(notify: RunMetricsNotify) -> RuntimeMsg {
-    RuntimeMsg::RunControl(RunControlMsg::Metrics(LlmMetricsUpdate {
-        run_id: notify.run_id,
-        output_tokens_per_second: notify
-            .output_tokens_per_second
-            .filter(|value| value.is_finite() && *value >= 0.0),
-    }))
+    RuntimeMsg::RunControl(RunControlMsg::Metrics(Box::new(notify)))
 }
 
 pub(super) fn run_status_output(notify: RunStatusNotify) -> RuntimeMsg {

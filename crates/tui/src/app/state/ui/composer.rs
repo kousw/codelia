@@ -127,6 +127,21 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         usage: "/tasks [list|show <task_id>|cancel <task_id>]",
         summary: "List background tasks and inspect/cancel one",
     },
+    SlashCommandSpec {
+        command: "/perf",
+        usage: "/perf [on|off|toggle]",
+        summary: "Toggle live telemetry & TUI perf footer bar (Alt+P)",
+    },
+    SlashCommandSpec {
+        command: "/stats",
+        usage: "/stats",
+        summary: "Show session telemetry, tool timings, context & runtime stats",
+    },
+    SlashCommandSpec {
+        command: "/diag",
+        usage: "/diag",
+        summary: "Alias for /stats",
+    },
 ];
 
 fn find_command(command: &str) -> Option<&'static SlashCommandSpec> {

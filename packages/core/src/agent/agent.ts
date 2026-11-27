@@ -280,6 +280,48 @@ export class Agent {
 		return this.usageService.getLastUsage();
 	}
 
+	getModelCost(modelName?: string): import("../di/model-metadata").ModelCost | undefined {
+		return resolveModel(
+			this.modelRegistry,
+			modelName ?? this.llm.model,
+			this.llm.provider,
+		)?.cost;
+	}
+
+	/** Lightweight scalar context window snapshot without estimating category breakdown. */
+	getContextSnapshot(): {
+		limit_tokens: number | null;
+		used_tokens: number | null;
+		input_tokens: number | null;
+		left_percent: number | null;
+		basis: "provider_usage" | "estimate" | "none";
+	} {
+		const spec = resolveModel(
+			this.modelRegistry,
+			this.llm.model,
+			this.llm.provider,
+		);
+		const limitTokens = spec?.maxInputTokens ?? spec?.contextWindow ?? null;
+		const usage = this.usageService.getLastUsage();
+		const leftPercent = this.getContextLeftPercent();
+		if (!usage) {
+			return {
+				limit_tokens: limitTokens,
+				used_tokens: null,
+				input_tokens: null,
+				left_percent: leftPercent,
+				basis: "none",
+			};
+		}
+		return {
+			limit_tokens: limitTokens,
+			used_tokens: usage.total_tokens,
+			input_tokens: usage.input_tokens,
+			left_percent: leftPercent,
+			basis: "provider_usage",
+		};
+	}
+
 	/** Context window usage with an estimated per-category breakdown. */
 	getContextUsage(): ContextUsage {
 		return buildContextUsage({
@@ -338,6 +380,10 @@ export class Agent {
 				);
 		if (shouldCompact && this.compactionService) {
 			throwIfAborted(signal);
+			const compactionStartedAt = this.monotonicNowMs();
+			const messagesBefore = this.history.getViewMessages().length;
+			const estimatedTokensBefore =
+				this.getContextUsage().used_tokens ?? options.estimatedInputTokens;
 			const startEvent: CompactionStartEvent = {
 				type: "compaction_start",
 				timestamp: Date.now(),
@@ -383,10 +429,27 @@ export class Agent {
 				await this.llm.onHistoryCompacted?.(invokeContext);
 			}
 
+			const compactionDurationMs = elapsedMilliseconds(
+				compactionStartedAt,
+				this.monotonicNowMs,
+			);
+			const messagesAfter = this.history.getViewMessages().length;
+			const estimatedTokensAfter = this.getContextUsage().used_tokens;
 			const completeEvent: CompactionCompleteEvent = {
 				type: "compaction_complete",
 				timestamp: Date.now(),
 				compacted,
+				duration_ms: compactionDurationMs,
+				messages_before: messagesBefore,
+				messages_after: messagesAfter,
+				...(typeof estimatedTokensBefore === "number" &&
+				Number.isFinite(estimatedTokensBefore)
+					? { estimated_tokens_before: Math.max(0, Math.round(estimatedTokensBefore)) }
+					: {}),
+				...(typeof estimatedTokensAfter === "number" &&
+				Number.isFinite(estimatedTokensAfter)
+					? { estimated_tokens_after: Math.max(0, Math.round(estimatedTokensAfter)) }
+					: {}),
 			};
 			yield completeEvent;
 		}
@@ -982,6 +1045,12 @@ export class Agent {
 						step_id: toolCall.id,
 						status: execution.message.is_error ? "error" : "completed",
 						duration_ms: durationMs,
+						...(execution.execDurationMs !== undefined
+							? { exec_duration_ms: execution.execDurationMs }
+							: {}),
+						...(execution.approvalWaitMs !== undefined
+							? { approval_wait_ms: execution.approvalWaitMs }
+							: {}),
 					};
 					yield stepCompleteEvent;
 

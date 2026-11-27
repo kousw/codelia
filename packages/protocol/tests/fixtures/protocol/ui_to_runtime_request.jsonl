@@ -134,6 +134,8 @@
 {"case":"invalid include skills","expect":"error","ts":"invalid","route":"ui_to_runtime_request","method":"context.inspect","message":{"jsonrpc":"2.0","id":"1","method":"context.inspect","params":{"include_skills":1}}}
 {"case":"no params","expect":"typed","ts":"valid","route":"ui_to_runtime_request","method":"context.usage","message":{"jsonrpc":"2.0","id":"1","method":"context.usage","params":{}}}
 {"case":"not an object","expect":"error","ts":"invalid","route":"ui_to_runtime_request","method":"context.usage","message":{"jsonrpc":"2.0","id":"1","method":"context.usage","params":[]}}
+{"case":"no params","expect":"typed","ts":"valid","route":"ui_to_runtime_request","method":"telemetry.get","message":{"jsonrpc":"2.0","id":"1","method":"telemetry.get","params":{}}}
+{"case":"not an object","expect":"error","ts":"invalid","route":"ui_to_runtime_request","method":"telemetry.get","message":{"jsonrpc":"2.0","id":"1","method":"telemetry.get","params":[]}}
 {"case":"by id","expect":"typed","ts":"valid","route":"ui_to_runtime_request","method":"shell.status","message":{"jsonrpc":"2.0","id":"1","method":"shell.status","params":{"task_id":"task-1"}}}
 {"case":"missing task id","expect":"error","ts":"invalid","route":"ui_to_runtime_request","method":"shell.status","message":{"jsonrpc":"2.0","id":"1","method":"shell.status","params":{}}}
 {"case":"by id","expect":"typed","ts":"valid","route":"ui_to_runtime_request","method":"shell.cancel","message":{"jsonrpc":"2.0","id":"1","method":"shell.cancel","params":{"task_id":"task-1"}}}

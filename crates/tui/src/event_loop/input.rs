@@ -203,6 +203,10 @@ pub(crate) fn handle_main_key(
             app.toggle_status_line_mode();
             true
         }
+        (KeyCode::Char('p'), mods) if mods.contains(KeyModifiers::ALT) => {
+            app.toggle_debug_perf();
+            true
+        }
         (KeyCode::Char('m'), mods) if mods.contains(KeyModifiers::ALT) => {
             app.toggle_active_run_submit_mode();
             true

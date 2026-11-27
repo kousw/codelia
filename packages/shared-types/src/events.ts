@@ -185,6 +185,8 @@ export const StepCompleteEventSchema = z
 		step_id: z.string(),
 		status: z.enum(["completed", "error"]),
 		duration_ms: z.number(),
+		exec_duration_ms: z.number().optional(),
+		approval_wait_ms: z.number().optional(),
 	})
 	.meta({ id: "StepCompleteEvent" });
 export type StepCompleteEvent = z.infer<typeof StepCompleteEventSchema>;
@@ -202,6 +204,11 @@ export const CompactionCompleteEventSchema = z
 		type: z.literal("compaction_complete"),
 		timestamp: wireInt(),
 		compacted: z.boolean(),
+		duration_ms: z.number().optional(),
+		messages_before: wireInt().optional(),
+		messages_after: wireInt().optional(),
+		estimated_tokens_before: wireInt().optional(),
+		estimated_tokens_after: wireInt().optional(),
 	})
 	.meta({ id: "CompactionCompleteEvent" });
 export type CompactionCompleteEvent = z.infer<

@@ -42,12 +42,13 @@ export type ApprovalScope = "session" | "workspace";
 
 import { defaultSandboxMode } from "./sandbox/mode";
 import type { SkillsResolver } from "./skills";
+import { RuntimeTelemetryStore } from "./telemetry";
 
 export type RuntimeModelSource = "config" | "session";
 
 type RuntimeChatRoute =
-	| { kind: "builtin"; provider: string; apiBase?: string }
-	| { kind: "named" };
+	| { kind: "builtin"; provider: string; apiBase?: string; metered?: boolean }
+	| { kind: "named"; metered?: false };
 
 export type RuntimeModelOverride = {
 	provider?: string;
@@ -245,6 +246,7 @@ export class RuntimeState {
 	set sessionId(value: string | null) {
 		if (value === this.boundSessionId) return;
 		this.boundSessionId = value;
+		this.telemetry.resetSession();
 		this.receiptOwner.abort();
 		this.receiptOwner = new AbortController();
 		this.signalApprovalChange();
@@ -315,7 +317,7 @@ export class RuntimeState {
 	currentModelName: string | null = null;
 	currentModelSource: RuntimeModelSource | null = null;
 	sessionModelOverride: RuntimeModelOverride | null = null;
-	diagnosticsEnabled = false;
+	readonly telemetry = new RuntimeTelemetryStore();
 
 	setRuntimeEnvironment(options: RuntimeOptions): void {
 		this.effectiveEnvironment = resolveRuntimeEnvironment(options);

@@ -615,6 +615,17 @@
 			},
 			"capability": "supports_context_usage"
 		},
+		"telemetry.get": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/TelemetryGetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/TelemetryGetResult"
+			},
+			"capability": "supports_telemetry"
+		},
 		"ui.context.update": {
 			"kind": "notification",
 			"from": "ui",
@@ -647,6 +658,13 @@
 				"$ref": "#/$defs/RunMetricsNotify"
 			}
 		},
+		"run.summary": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/RunSummaryNotify"
+			}
+		},
 		"agent.event": {
 			"kind": "notification",
 			"from": "runtime",
@@ -659,13 +677,6 @@
 			"from": "runtime",
 			"params": {
 				"$ref": "#/$defs/RunContextNotify"
-			}
-		},
-		"run.diagnostics": {
-			"kind": "notification",
-			"from": "runtime",
-			"params": {
-				"$ref": "#/$defs/RunDiagnosticsNotify"
 			}
 		},
 		"run.context.usage": {
@@ -1976,6 +1987,29 @@
 				},
 				"compacted": {
 					"type": "boolean"
+				},
+				"duration_ms": {
+					"type": "number"
+				},
+				"messages_before": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"messages_after": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"estimated_tokens_before": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"estimated_tokens_after": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
 				}
 			},
 			"required": [
@@ -2405,6 +2439,100 @@
 				}
 			}
 		},
+		"ContextUsage": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"model": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"limit_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"used_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"input_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"left_percent": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"basis": {
+					"type": "string",
+					"enum": [
+						"provider",
+						"none"
+					]
+				},
+				"breakdown": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ContextUsageBreakdownEntry"
+					}
+				}
+			},
+			"required": [
+				"provider",
+				"model",
+				"limit_tokens",
+				"used_tokens",
+				"input_tokens",
+				"left_percent",
+				"basis",
+				"breakdown"
+			]
+		},
 		"ContextUsageBreakdownEntry": {
 			"type": "object",
 			"properties": {
@@ -2536,6 +2664,13 @@
 				"left_percent",
 				"basis",
 				"breakdown"
+			]
+		},
+		"CostBasis": {
+			"type": "string",
+			"enum": [
+				"api_list",
+				"unavailable"
 			]
 		},
 		"DocumentPart": {
@@ -3428,105 +3563,7 @@
 				"issues"
 			]
 		},
-		"LlmCallDiagnostics": {
-			"type": "object",
-			"properties": {
-				"run_id": {
-					"type": "string"
-				},
-				"seq": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
-				},
-				"provider": {
-					"type": "string"
-				},
-				"model": {
-					"type": "string"
-				},
-				"request_ts": {
-					"type": "string"
-				},
-				"response_ts": {
-					"type": "string"
-				},
-				"latency_ms": {
-					"type": "number"
-				},
-				"timing": {
-					"$ref": "#/$defs/LlmCallTiming"
-				},
-				"output_tokens_per_second": {
-					"x-codelia-presence": "collapse",
-					"anyOf": [
-						{
-							"type": "number"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"stop_reason": {
-					"x-codelia-presence": "collapse",
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"usage": {
-					"x-codelia-presence": "collapse",
-					"anyOf": [
-						{
-							"$ref": "#/$defs/LlmCallDiagnosticsUsage"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"cache": {
-					"$ref": "#/$defs/LlmCallDiagnosticsCache"
-				},
-				"cost_usd": {
-					"x-codelia-presence": "collapse",
-					"anyOf": [
-						{
-							"type": "number"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"provider_meta_summary": {
-					"x-codelia-presence": "collapse",
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				}
-			},
-			"required": [
-				"run_id",
-				"seq",
-				"model",
-				"request_ts",
-				"response_ts",
-				"latency_ms",
-				"cache"
-			]
-		},
-		"LlmCallDiagnosticsCache": {
+		"LlmCallCache": {
 			"type": "object",
 			"properties": {
 				"hit_state": {
@@ -3560,7 +3597,33 @@
 				"cache_creation_tokens"
 			]
 		},
-		"LlmCallDiagnosticsUsage": {
+		"LlmCallTiming": {
+			"type": "object",
+			"properties": {
+				"time_to_first_token_ms": {
+					"type": "number"
+				},
+				"generation_duration_ms": {
+					"type": "number"
+				},
+				"generation_start_ms": {
+					"type": "number"
+				},
+				"generation_start_source": {
+					"type": "string",
+					"enum": [
+						"reasoning_item",
+						"thought_step"
+					]
+				}
+			},
+			"required": [
+				"time_to_first_token_ms",
+				"generation_duration_ms"
+			],
+			"description": "Observed successful stream timing, measured with a monotonic clock."
+		},
+		"LlmCallUsage": {
 			"type": "object",
 			"properties": {
 				"input_tokens": {
@@ -3636,32 +3699,6 @@
 				"output_tokens",
 				"total_tokens"
 			]
-		},
-		"LlmCallTiming": {
-			"type": "object",
-			"properties": {
-				"time_to_first_token_ms": {
-					"type": "number"
-				},
-				"generation_duration_ms": {
-					"type": "number"
-				},
-				"generation_start_ms": {
-					"type": "number"
-				},
-				"generation_start_source": {
-					"type": "string",
-					"enum": [
-						"reasoning_item",
-						"thought_step"
-					]
-				}
-			},
-			"required": [
-				"time_to_first_token_ms",
-				"generation_duration_ms"
-			],
-			"description": "Observed successful stream timing, measured with a monotonic clock."
 		},
 		"LlmRetryEvent": {
 			"type": "object",
@@ -4798,6 +4835,72 @@
 				"context_left_percent"
 			]
 		},
+		"RunContextSnapshot": {
+			"type": "object",
+			"properties": {
+				"limit_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"used_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"input_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"left_percent": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"basis": {
+					"type": "string",
+					"enum": [
+						"provider_usage",
+						"estimate",
+						"none"
+					]
+				}
+			},
+			"required": [
+				"limit_tokens",
+				"used_tokens",
+				"input_tokens",
+				"left_percent",
+				"basis"
+			]
+		},
 		"RunContextUsageNotify": {
 			"type": "object",
 			"properties": {
@@ -4894,57 +4997,6 @@
 				"basis",
 				"breakdown",
 				"run_id"
-			]
-		},
-		"RunDiagnosticsLlmCall": {
-			"type": "object",
-			"properties": {
-				"run_id": {
-					"type": "string"
-				},
-				"kind": {
-					"type": "string",
-					"const": "llm_call"
-				},
-				"call": {
-					"$ref": "#/$defs/LlmCallDiagnostics"
-				}
-			},
-			"required": [
-				"run_id",
-				"kind",
-				"call"
-			]
-		},
-		"RunDiagnosticsNotify": {
-			"oneOf": [
-				{
-					"$ref": "#/$defs/RunDiagnosticsLlmCall"
-				},
-				{
-					"$ref": "#/$defs/RunDiagnosticsRunSummary"
-				}
-			],
-			"x-codelia-tag": "kind"
-		},
-		"RunDiagnosticsRunSummary": {
-			"type": "object",
-			"properties": {
-				"run_id": {
-					"type": "string"
-				},
-				"kind": {
-					"type": "string",
-					"const": "run_summary"
-				},
-				"summary": {
-					"$ref": "#/$defs/RunUsageSummary"
-				}
-			},
-			"required": [
-				"run_id",
-				"kind",
-				"summary"
 			]
 		},
 		"RunErrorInfo": {
@@ -5112,6 +5164,32 @@
 					"minimum": -9007199254740991,
 					"maximum": 9007199254740991
 				},
+				"provider": {
+					"type": "string"
+				},
+				"model": {
+					"type": "string"
+				},
+				"actual_model": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"request_ts": {
+					"type": "string"
+				},
+				"response_ts": {
+					"type": "string"
+				},
+				"latency_ms": {
+					"type": "number"
+				},
 				"output_tokens_per_second": {
 					"anyOf": [
 						{
@@ -5124,6 +5202,67 @@
 				},
 				"timing": {
 					"$ref": "#/$defs/LlmCallTiming"
+				},
+				"stop_reason": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"usage": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/LlmCallUsage"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"cache": {
+					"$ref": "#/$defs/LlmCallCache"
+				},
+				"cost_usd": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"cost_basis": {
+					"$ref": "#/$defs/CostBasis"
+				},
+				"retry_count": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"retry_wait_ms": {
+					"type": "number"
+				},
+				"provider_meta_summary": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"context": {
+					"$ref": "#/$defs/RunContextSnapshot"
 				}
 			},
 			"required": [
@@ -5131,7 +5270,7 @@
 				"seq",
 				"output_tokens_per_second"
 			],
-			"description": "Latest completed model call; emitted independently of diagnostics mode."
+			"description": "Always-on structured telemetry for each completed model call."
 		},
 		"RunStartParams": {
 			"type": "object",
@@ -5266,122 +5405,123 @@
 				"steer_id"
 			]
 		},
-		"RunUsageByModel": {
+		"RunSummaryNotify": {
 			"type": "object",
 			"properties": {
-				"calls": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+				"run_id": {
+					"type": "string"
 				},
-				"input_tokens": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+				"duration_ms": {
+					"type": "number"
 				},
-				"output_tokens": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+				"run": {
+					"$ref": "#/$defs/TelemetrySummary"
 				},
-				"cached_input_tokens": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
-				},
-				"cache_creation_tokens": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
-				},
-				"total_tokens": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
-				},
-				"cost_usd": {
-					"x-codelia-presence": "collapse",
-					"anyOf": [
-						{
-							"type": "number"
-						},
-						{
-							"type": "null"
-						}
-					]
+				"session": {
+					"$ref": "#/$defs/TelemetrySummary"
 				}
 			},
 			"required": [
-				"calls",
-				"input_tokens",
-				"output_tokens",
-				"cached_input_tokens",
-				"cache_creation_tokens",
-				"total_tokens"
+				"run_id",
+				"duration_ms",
+				"run",
+				"session"
+			],
+			"description": "Always-on terminal run and cumulative session telemetry summary."
+		},
+		"RuntimeMemoryUsage": {
+			"type": "object",
+			"properties": {
+				"rss_bytes": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"heap_used_bytes": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"heap_total_bytes": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"external_bytes": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"array_buffers_bytes": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"rss_bytes",
+				"heap_used_bytes",
+				"heap_total_bytes",
+				"external_bytes",
+				"array_buffers_bytes"
 			]
 		},
-		"RunUsageSummary": {
+		"RuntimePerfPhase": {
 			"type": "object",
 			"properties": {
-				"total_calls": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+				"name": {
+					"type": "string"
 				},
-				"total_tokens": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
-				},
-				"total_input_tokens": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
-				},
-				"total_output_tokens": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
-				},
-				"total_cached_input_tokens": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
-				},
-				"total_cache_creation_tokens": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
-				},
-				"total_cost_usd": {
-					"x-codelia-presence": "collapse",
-					"anyOf": [
-						{
-							"type": "number"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"by_model": {
-					"type": "object",
-					"propertyNames": {
-						"type": "string"
-					},
-					"additionalProperties": {
-						"$ref": "#/$defs/RunUsageByModel"
-					}
+				"duration_ms": {
+					"type": "number"
 				}
 			},
 			"required": [
-				"total_calls",
-				"total_tokens",
-				"total_input_tokens",
-				"total_output_tokens",
-				"total_cached_input_tokens",
-				"total_cache_creation_tokens",
-				"by_model"
+				"name",
+				"duration_ms"
+			]
+		},
+		"RuntimePerfSnapshot": {
+			"type": "object",
+			"properties": {
+				"startup_phases": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/RuntimePerfPhase"
+					}
+				},
+				"agent_init_phases": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/RuntimePerfPhase"
+					}
+				},
+				"active_subagents": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_concurrent_subagents": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"backpressure_events": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"memory": {
+					"$ref": "#/$defs/RuntimeMemoryUsage"
+				}
+			},
+			"required": [
+				"startup_phases",
+				"agent_init_phases",
+				"active_subagents",
+				"max_concurrent_subagents",
+				"backpressure_events",
+				"memory"
 			]
 		},
 		"SandboxApplied": {
@@ -5629,7 +5769,7 @@
 				"attachment_upload_limits": {
 					"$ref": "#/$defs/AttachmentUploadLimits"
 				},
-				"supports_run_diagnostics": {
+				"supports_telemetry": {
 					"type": "boolean"
 				},
 				"supports_session_lifecycle": {
@@ -6414,6 +6554,12 @@
 				},
 				"duration_ms": {
 					"type": "number"
+				},
+				"exec_duration_ms": {
+					"type": "number"
+				},
+				"approval_wait_ms": {
+					"type": "number"
 				}
 			},
 			"required": [
@@ -7112,6 +7258,287 @@
 				"worktree"
 			]
 		},
+		"TelemetryGetParams": {
+			"type": "object",
+			"properties": {},
+			"additionalProperties": false
+		},
+		"TelemetryGetResult": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"active_run_id": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"context": {
+					"$ref": "#/$defs/ContextUsage"
+				},
+				"session_summary": {
+					"$ref": "#/$defs/TelemetrySummary"
+				},
+				"run_summary": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/TelemetrySummary"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"recent_calls": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/RunMetricsNotify"
+					}
+				},
+				"recent_tools": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ToolTimingRecord"
+					}
+				},
+				"runtime": {
+					"$ref": "#/$defs/RuntimePerfSnapshot"
+				}
+			},
+			"required": [
+				"active_run_id",
+				"context",
+				"session_summary",
+				"run_summary",
+				"recent_calls",
+				"recent_tools",
+				"runtime"
+			]
+		},
+		"TelemetryModelUsage": {
+			"type": "object",
+			"properties": {
+				"calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"output_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"output_reasoning_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cached_input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cache_creation_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"input_image_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cache_hit_calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cache_miss_calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cache_unknown_calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cost_usd": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"calls",
+				"input_tokens",
+				"output_tokens",
+				"output_reasoning_tokens",
+				"cached_input_tokens",
+				"cache_creation_tokens",
+				"input_image_tokens",
+				"cache_hit_calls",
+				"cache_miss_calls",
+				"cache_unknown_calls",
+				"total_tokens"
+			]
+		},
+		"TelemetrySummary": {
+			"type": "object",
+			"properties": {
+				"total_calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_output_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_output_reasoning_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_cached_input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_cache_creation_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_input_image_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cache_hit_calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cache_miss_calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cache_unknown_calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_cost_usd": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"retry_count": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"retry_wait_ms": {
+					"type": "number"
+				},
+				"tool_calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"tool_errors": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"tool_exec_ms": {
+					"type": "number"
+				},
+				"tool_approval_wait_ms": {
+					"type": "number"
+				},
+				"compaction_count": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"compaction_duration_ms": {
+					"type": "number"
+				},
+				"by_model": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {
+						"$ref": "#/$defs/TelemetryModelUsage"
+					}
+				}
+			},
+			"required": [
+				"total_calls",
+				"total_tokens",
+				"total_input_tokens",
+				"total_output_tokens",
+				"total_output_reasoning_tokens",
+				"total_cached_input_tokens",
+				"total_cache_creation_tokens",
+				"total_input_image_tokens",
+				"cache_hit_calls",
+				"cache_miss_calls",
+				"cache_unknown_calls",
+				"retry_count",
+				"retry_wait_ms",
+				"tool_calls",
+				"tool_errors",
+				"tool_exec_ms",
+				"tool_approval_wait_ms",
+				"compaction_count",
+				"compaction_duration_ms",
+				"by_model"
+			]
+		},
 		"TextDeltaEvent": {
 			"type": "object",
 			"properties": {
@@ -7312,6 +7739,47 @@
 				"tool_call_id"
 			]
 		},
+		"ToolTimingRecord": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"tool_call_id": {
+					"type": "string"
+				},
+				"tool": {
+					"type": "string"
+				},
+				"status": {
+					"type": "string",
+					"enum": [
+						"completed",
+						"error"
+					]
+				},
+				"duration_ms": {
+					"type": "number"
+				},
+				"exec_duration_ms": {
+					"type": "number"
+				},
+				"approval_wait_ms": {
+					"type": "number"
+				},
+				"finished_at": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"run_id",
+				"tool_call_id",
+				"tool",
+				"status",
+				"duration_ms",
+				"finished_at"
+			]
+		},
 		"UiActiveFile": {
 			"type": "object",
 			"properties": {
@@ -7363,9 +7831,6 @@
 					"type": "boolean"
 				},
 				"supports_text_delta": {
-					"type": "boolean"
-				},
-				"supports_run_diagnostics": {
 					"type": "boolean"
 				}
 			}

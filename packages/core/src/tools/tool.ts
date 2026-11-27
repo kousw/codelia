@@ -33,4 +33,6 @@ export type ToolExecution = {
 	message: ToolMessage;
 	done?: boolean;
 	finalMessage?: string;
+	approvalWaitMs?: number;
+	execDurationMs?: number;
 };

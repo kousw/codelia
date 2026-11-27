@@ -5,9 +5,9 @@ use super::replay::apply_replay_progress;
 use super::{client_tools, steer};
 use crate::app::handlers::confirm::handle_confirm_request;
 use crate::app::runtime::{
-    send_client_tool_error, send_pick_response, AgentMsg, ClientToolMsg, ClientToolRejection,
-    RunControlMsg, RunErrorPresentation, RuntimeMsg, RuntimeTx, ServerUiMsg, UiPickRequest,
-    UiPromptRequest,
+    format_metrics_diagnostic_lines, format_summary_diagnostic_lines, send_client_tool_error,
+    send_pick_response, AgentMsg, ClientToolMsg, ClientToolRejection, RunControlMsg,
+    RunErrorPresentation, RuntimeMsg, RuntimeTx, ServerUiMsg, UiPickRequest, UiPromptRequest,
 };
 use crate::app::state::{InputState, LogKind, LogLine, LogTone};
 use crate::app::{
@@ -109,10 +109,33 @@ fn apply_run_control(app: &mut AppState, msg: RunControlMsg) {
         }
         RunControlMsg::Metrics(metrics) => {
             if app.runtime_info.active_run_id.as_deref() == Some(metrics.run_id.as_str()) {
-                if let Some(tps) = metrics.output_tokens_per_second {
+                if let Some(tps) = metrics
+                    .output_tokens_per_second
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                {
                     app.runtime_info.last_llm_tps = Some(tps);
                 }
             }
+            if let Some(percent) = metrics
+                .context
+                .as_ref()
+                .and_then(|ctx| ctx.left_percent)
+                .filter(|value| value.is_finite())
+            {
+                app.context_left_percent = Some(percent.clamp(0.0, 100.0).round() as u8);
+            }
+            if app.diagnostics_transcript_enabled {
+                let diag_lines = format_metrics_diagnostic_lines(&metrics);
+                append_lines(app, diag_lines, false);
+            }
+            app.telemetry.record_metrics(*metrics);
+        }
+        RunControlMsg::Summary(summary) => {
+            if app.diagnostics_transcript_enabled {
+                let diag_lines = format_summary_diagnostic_lines(&summary);
+                append_lines(app, diag_lines, false);
+            }
+            app.telemetry.record_summary(*summary);
         }
         RunControlMsg::Goal(notification) => crate::app::goal::notify(app, notification),
     }
@@ -214,8 +237,10 @@ fn apply_agent_msg(app: &mut AppState, event: AgentMsg) {
         }
         AgentMsg::ToolCallStart {
             tool_call_id,
+            tool,
             lines,
         } => {
+            app.telemetry.record_tool_call(&tool_call_id, &tool);
             let start = components::tool_call_start(app, &tool_call_id);
             let appended_from = app.log.len();
             append_lines(app, lines, false);
@@ -233,6 +258,10 @@ fn apply_agent_msg(app: &mut AppState, event: AgentMsg) {
             components::tool_call_result(app, &mut lines, update);
             lines
         }
+        AgentMsg::StepComplete(event) => {
+            app.telemetry.record_step_complete(&event);
+            return;
+        }
         AgentMsg::PermissionPreview { update, lines } => {
             if let Some(update) = update {
                 components::permission_preview(app, update);
@@ -245,7 +274,14 @@ fn apply_agent_msg(app: &mut AppState, event: AgentMsg) {
             }
             lines
         }
-        AgentMsg::Compaction { phase, mut lines } => {
+        AgentMsg::Compaction {
+            phase,
+            mut lines,
+            completed,
+        } => {
+            if let Some(event) = completed {
+                app.telemetry.record_compaction_complete(&event);
+            }
             let mut starts = Vec::new();
             components::apply_compaction_component_events(app, &mut lines, &mut starts, phase);
             let appended_from = app.log.len();

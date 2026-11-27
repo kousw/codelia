@@ -8,7 +8,8 @@ use crate::protocol::{
 };
 use crate::protocol::{
     ContextInspectParams, McpListParams, McpListScope, ShellExecParams, ShellTaskIdParams,
-    ShellWaitParams, SkillsListParams, TaskIdParams, TaskListParams, ToolCallParams,
+    ShellWaitParams, SkillsListParams, TaskIdParams, TaskListParams, TelemetryGetParams,
+    ToolCallParams,
 };
 use crate::protocol::{ModelListParams, ModelReasoningLevel, ModelSelectionSource, ModelSetParams};
 use crate::protocol::{UiConfirmResult, UiPickResult, UiPromptResult};
@@ -472,7 +473,7 @@ pub(crate) fn send_reply<R: ServerRequestReply>(
     tx.send_line(&crate::protocol::reply_line::<R>(id, result))
 }
 
-pub(crate) fn initialize_params(diagnostics: bool) -> InitializeParams {
+pub(crate) fn initialize_params() -> InitializeParams {
     InitializeParams {
         protocol_version: Some(PROTOCOL_VERSION.to_owned()),
         client: Some(PeerInfo {
@@ -487,14 +488,13 @@ pub(crate) fn initialize_params(diagnostics: bool) -> InitializeParams {
             supports_permission_preflight_events: Some(true),
             supports_text_delta: Some(true),
             supports_goals: Some(true),
-            supports_run_diagnostics: diagnostics.then_some(true),
             ..Default::default()
         }),
     }
 }
 
-pub fn send_initialize(tx: &mut dyn RuntimeTx, id: &str, diagnostics: bool) -> std::io::Result<()> {
-    send_request::<methods::Initialize>(tx, id, &initialize_params(diagnostics))
+pub fn send_initialize(tx: &mut dyn RuntimeTx, id: &str) -> std::io::Result<()> {
+    send_request::<methods::Initialize>(tx, id, &initialize_params())
 }
 
 pub fn send_confirm_response(
@@ -832,6 +832,10 @@ pub fn send_context_inspect(
     send_request::<methods::ContextInspect>(tx, id, &params)
 }
 
+pub fn send_telemetry_get(tx: &mut dyn RuntimeTx, id: &str) -> std::io::Result<()> {
+    send_request::<methods::TelemetryGet>(tx, id, &TelemetryGetParams::default())
+}
+
 pub fn send_skills_list(
     tx: &mut dyn RuntimeTx,
     id: &str,
@@ -958,14 +962,12 @@ mod tests {
     }
 
     #[test]
-    fn initialize_opts_into_run_diagnostics_only_when_enabled() {
-        let capabilities = |enabled| {
-            initialize_params(enabled)
-                .ui_capabilities
-                .and_then(|caps| caps.supports_run_diagnostics)
-        };
-        assert_eq!(capabilities(true), Some(true));
-        assert_eq!(capabilities(false), None);
+    fn initialize_params_advertises_core_tui_capabilities() {
+        let caps = initialize_params()
+            .ui_capabilities
+            .expect("ui_capabilities");
+        assert_eq!(caps.supports_text_delta, Some(true));
+        assert_eq!(caps.supports_goals, Some(true));
     }
 
     #[cfg(unix)]

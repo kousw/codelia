@@ -18,6 +18,7 @@ export * from "./session";
 export * from "./shell";
 export * from "./skills";
 export * from "./task";
+export * from "./telemetry";
 export * from "./theme";
 export * from "./tool";
 export * from "./ui-context";

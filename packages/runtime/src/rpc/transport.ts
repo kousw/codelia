@@ -5,9 +5,9 @@ import type {
 	RpcMessage,
 	RpcNotification,
 	RpcResponse,
-	RunDiagnosticsNotify,
 	RunMetricsNotify,
 	RunStatusNotify,
+	RunSummaryNotify,
 } from "@codelia/protocol";
 import { debugLog, log } from "../logger";
 import type { RuntimeState } from "../runtime-state";
@@ -91,6 +91,11 @@ export const sendNotificationAsync = async (
 	await sendAsync(notify);
 };
 
+let transportBackpressureEvents = 0;
+
+export const getTransportBackpressureEvents = (): number =>
+	transportBackpressureEvents;
+
 export const send = (msg: RpcMessage): void => {
 	const { payload, label } = serializeMessage(msg);
 	const writable = process.stdout.write(payload, (error) => {
@@ -99,6 +104,7 @@ export const send = (msg: RpcMessage): void => {
 		}
 	});
 	if (!writable) {
+		transportBackpressureEvents += 1;
 		debugLog(`transport.backpressure label=${label} bytes=${payload.length}`);
 	}
 };
@@ -115,6 +121,7 @@ export const sendAsync = async (msg: RpcMessage): Promise<void> =>
 			resolve();
 		});
 		if (!writable) {
+			transportBackpressureEvents += 1;
 			debugLog(`transport.backpressure label=${label} bytes=${payload.length}`);
 		}
 	});
@@ -223,16 +230,16 @@ export const sendRunContext = (
 	);
 };
 
-export const sendRunDiagnostics = (
-	state: RuntimeState,
-	params: RunDiagnosticsNotify,
-): void => {
-	sendNotification(state, notificationMessage("run.diagnostics", params));
-};
-
 export const sendRunMetrics = (
 	state: RuntimeState,
 	params: RunMetricsNotify,
 ): void => {
 	sendNotification(state, notificationMessage("run.metrics", params));
+};
+
+export const sendRunSummary = (
+	state: RuntimeState,
+	params: RunSummaryNotify,
+): void => {
+	sendNotification(state, notificationMessage("run.summary", params));
 };

@@ -58,6 +58,7 @@ import {
 	supportsLocalAutoReviewConfiguration,
 } from "./auto-review";
 import { createConfigHandlers, supportsConfigReadWrite } from "./config";
+import { createTelemetryHandlers } from "./telemetry";
 import { createContextHandlers } from "./context";
 import { createContextUsageHandlers } from "./context-usage";
 import { createHistoryHandlers } from "./history";
@@ -431,6 +432,11 @@ export const createRuntimeHandlers = ({
 		state,
 		log,
 	});
+	const telemetryHandlers = createTelemetryHandlers({
+		state,
+		subagents,
+		log,
+	});
 	const { handleSkillsList } = createSkillsHandlers({
 		state,
 		log,
@@ -536,7 +542,7 @@ export const createRuntimeHandlers = ({
 				supports_run_cancel: true,
 				supports_run_steer: true,
 				supports_goals: Boolean(goalStore),
-				supports_run_diagnostics: true,
+				supports_telemetry: true,
 				supports_session_lifecycle: !!sessionStateStore.updateMetadata,
 				supports_shell_exec: !!shellBackend,
 				supports_shell_tasks: processEnabled,
@@ -883,6 +889,11 @@ export const createRuntimeHandlers = ({
 				const parsed = parseRequestParams("context.usage", req.params);
 				if (!parsed.ok) return sendError(req.id, parsed.error);
 				return contextUsageHandlers.handleContextUsage(req.id);
+			}
+			case "telemetry.get": {
+				const parsed = parseRequestParams("telemetry.get", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return telemetryHandlers.handleTelemetryGet(req.id);
 			}
 			case "theme.set":
 				if (!themeSetEnabled)

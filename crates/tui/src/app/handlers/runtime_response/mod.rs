@@ -15,6 +15,7 @@ mod session;
 mod skills;
 mod steer;
 mod tasks;
+pub(crate) mod telemetry;
 #[cfg(test)]
 mod tests;
 
@@ -86,7 +87,9 @@ pub(crate) fn drain_runtime_messages(
             Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
         }
     }
-    if processed == MAX_RUNTIME_LINES_PER_TICK {
+    let hit_cap = processed == MAX_RUNTIME_LINES_PER_TICK;
+    app.perf.record_runtime_drain(processed, hit_cap);
+    if hit_cap {
         // Keep the UI responsive under heavy runtime output by yielding each tick.
         needs_redraw = true;
     }
@@ -225,6 +228,7 @@ fn apply_initialize_result(app: &mut AppState, result: &InitializeResult) {
             *target = value;
         }
     }
+    info.supports_telemetry = caps.supports_telemetry.unwrap_or(false);
     info.supports_model_ultrafast = caps.supports_model_ultrafast.unwrap_or(false);
     info.supports_scoped_logout = caps.supports_scoped_logout.unwrap_or(false);
     info.supports_session_lifecycle = caps.supports_session_lifecycle.unwrap_or(false);
@@ -358,6 +362,7 @@ fn handle_rpc_response(app: &mut AppState, response: RpcResponse, tx: &mut dyn R
             PendingRpc::ContextInspect => {
                 context_inspect::handle_context_inspect_response(app, response)
             }
+            PendingRpc::TelemetryGet => telemetry::handle_telemetry_get_response(app, response),
             PendingRpc::Logout => run_control::handle_logout_response(app, response),
             PendingRpc::ShellExec => run_control::handle_shell_exec_response(app, response),
             PendingRpc::ShellStart => run_control::handle_shell_start_response(app, response, tx),

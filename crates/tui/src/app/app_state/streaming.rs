@@ -33,6 +33,7 @@ impl AppState {
         if !std::mem::take(&mut self.stream_dirty) {
             return;
         }
+        let started = std::time::Instant::now();
         // Runtime may drain many token events in one tick. Parse and highlight
         // once before drawing, handoff or reset rather than once per token.
         let mut segments = std::mem::take(self.stream_preview.segments_mut());
@@ -48,6 +49,7 @@ impl AppState {
         }
         *self.stream_preview.segments_mut() = segments;
         self.mark_log_changed();
+        self.perf.record_stream_flush(started.elapsed());
     }
 
     /// The unconfirmed tail may change Markdown presentation; all preceding rows

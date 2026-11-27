@@ -1,4 +1,3 @@
-import { hasDebugTopic } from "@codelia/logger";
 import {
 	cleanupRunLogs,
 	isTrustedGlobalConfigLocationSync,
@@ -39,12 +38,16 @@ export const startRuntime = async (
 	const state = new RuntimeState();
 	state.setRuntimeEnvironment(options);
 	const environment = state.effectiveEnvironment;
+	const sandboxModeStart = performance.now();
 	state.sandboxMode = await resolveRuntimeSandboxMode(environment);
+	state.telemetry.recordStartupPhase(
+		"sandbox_mode",
+		performance.now() - sandboxModeStart,
+	);
 	if (state.sandboxMode.legacy === "full-access")
 		log(
 			"Legacy approval_mode full-access uses workspace-write. Specify --sandbox-mode full-access to disable OS isolation and keep command approval.",
 		);
-	state.diagnosticsEnabled = hasDebugTopic("diagnostics");
 	const workingDir = environment.workspace.root;
 	if (workingDir) {
 		state.runtimeWorkingDir = workingDir;
@@ -58,6 +61,7 @@ export const startRuntime = async (
 		environment.context.projectInstructions === "from-workspace" &&
 		workingDir
 	) {
+		const agentsStart = performance.now();
 		try {
 			const agentsEnabled =
 				environment.config.source === "disabled"
@@ -71,6 +75,11 @@ export const startRuntime = async (
 			);
 		} catch (error) {
 			log(`agents resolver startup init failed: ${String(error)}`);
+		} finally {
+			state.telemetry.recordStartupPhase(
+				"agents_resolver",
+				performance.now() - agentsStart,
+			);
 		}
 	}
 

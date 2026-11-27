@@ -22,8 +22,8 @@ pub(crate) use queue::{handle_queue_steer_picker_key, open_queue_steer_picker};
 use slash::{
     handle_compact_command, handle_context_command, handle_errors_command, handle_fast_command,
     handle_help_command, handle_lane_command, handle_logout_command, handle_mcp_command,
-    handle_model_command, handle_model_session_command, handle_skills_command,
-    handle_tasks_command, handle_theme_command,
+    handle_model_command, handle_model_session_command, handle_perf_command, handle_skills_command,
+    handle_stats_command, handle_tasks_command, handle_theme_command,
 };
 
 const MODEL_PROVIDERS: &[&str] = &[
@@ -145,6 +145,10 @@ pub(crate) fn handle_enter(
         clear_input = prompt::start_explicit_steer_run(app, tx, steer_arg);
     } else if command == "/tasks" {
         handle_tasks_command(app, tx, &mut parts);
+    } else if command == "/perf" {
+        handle_perf_command(app, &mut parts);
+    } else if matches!(command, "/stats" | "/diag") {
+        handle_stats_command(app, tx, &mut parts);
     } else if command == "/help" {
         handle_help_command(app, &mut parts);
     } else if trimmed.starts_with("!") {

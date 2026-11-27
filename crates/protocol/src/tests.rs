@@ -91,8 +91,7 @@ fn classified<T: Serialize + DeserializeOwned>(
 /// fixtures, including open enums nested inside a known tagged event.
 fn notification_is_unknown(notification: &ServerNotification) -> bool {
     match notification {
-        ServerNotification::Unknown { .. }
-        | ServerNotification::RunDiagnostics(RunDiagnosticsNotify::Unknown(_)) => true,
+        ServerNotification::Unknown { .. } => true,
         ServerNotification::RunStatus(status) => matches!(status.status, RunStatus::Unknown(_)),
         ServerNotification::ClientToolCancel(cancel) => {
             matches!(cancel.reason, ClientToolCancelParamsReason::Unknown(_))

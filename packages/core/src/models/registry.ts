@@ -1,5 +1,6 @@
-import type { ModelMetadataIndex } from "../di/model-metadata";
+import type { ModelCost, ModelMetadataIndex } from "../di/model-metadata";
 import type { ProviderName } from "../llm/base";
+import type { ChatInvokeUsage } from "../types/llm/invoke";
 
 export type ModelSpec = {
 	id: string;
@@ -9,12 +10,57 @@ export type ModelSpec = {
 	contextWindow?: number;
 	maxInputTokens?: number;
 	maxOutputTokens?: number;
+	cost?: ModelCost;
 	supportsTools?: boolean;
 	supportsVision?: boolean;
 	supportsReasoning?: boolean;
 	supportsFast?: boolean;
 	supportsJsonSchema?: boolean;
 };
+
+const isNonNegativeFinite = (value: unknown): value is number =>
+	typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+/**
+ * Estimates per-call USD cost from normalized usage (where `input_tokens`
+ * already includes cached and cache-creation tokens) and USD-per-1M-tokens
+ * `ModelCost`. Returns `null` when required list prices are unavailable.
+ */
+export function estimateUsageCostUsd(
+	usage: ChatInvokeUsage | null | undefined,
+	cost: ModelCost | undefined,
+): number | null {
+	if (
+		!usage ||
+		!cost ||
+		!isNonNegativeFinite(cost.input) ||
+		!isNonNegativeFinite(cost.output)
+	) {
+		return null;
+	}
+	const cacheRead = Math.max(0, usage.input_cached_tokens ?? 0);
+	const cacheWrite = Math.max(0, usage.input_cache_creation_tokens ?? 0);
+	const uncachedInput = Math.max(0, usage.input_tokens - cacheRead - cacheWrite);
+	const reasoningTokens = Math.max(0, usage.output_reasoning_tokens ?? 0);
+	const nonReasoningOutput = Math.max(0, usage.output_tokens - reasoningTokens);
+	const cacheReadRate = isNonNegativeFinite(cost.cacheRead)
+		? cost.cacheRead
+		: cost.input;
+	const cacheWriteRate = isNonNegativeFinite(cost.cacheWrite)
+		? cost.cacheWrite
+		: cost.input;
+	const reasoningRate = isNonNegativeFinite(cost.reasoning)
+		? cost.reasoning
+		: cost.output;
+	const totalUsd =
+		(uncachedInput * cost.input +
+			cacheRead * cacheReadRate +
+			cacheWrite * cacheWriteRate +
+			nonReasoningOutput * cost.output +
+			reasoningTokens * reasoningRate) /
+		1_000_000;
+	return Number.isFinite(totalUsd) ? totalUsd : null;
+}
 
 export type ModelRegistry = {
 	modelsById: Record<string, ModelSpec>;
@@ -168,6 +214,7 @@ export function applyModelMetadata(
 				contextWindow: spec.contextWindow ?? entry.limits?.contextWindow,
 				maxInputTokens: spec.maxInputTokens ?? entry.limits?.inputTokens,
 				maxOutputTokens: spec.maxOutputTokens ?? entry.limits?.outputTokens,
+				cost: spec.cost ?? entry.cost,
 				supportsFast: spec.supportsFast ?? entry.capabilities?.supportsFast,
 				supportsVision:
 					spec.supportsVision ?? entry.capabilities?.supportsVision,

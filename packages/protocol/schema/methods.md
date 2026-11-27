@@ -48,11 +48,11 @@ capability the sender checks before sending.
 | `run.cancel` | UI → runtime | request | `RunCancelParams` | `RunCancelResult` | server `supports_run_cancel` |
 | `run.context` | runtime → UI | notification | `RunContextNotify` | - | - |
 | `run.context.usage` | runtime → UI | notification | `RunContextUsageNotify` | - | UI `supports_context_usage` |
-| `run.diagnostics` | runtime → UI | notification | `RunDiagnosticsNotify` | - | - |
 | `run.metrics` | runtime → UI | notification | `RunMetricsNotify` | - | - |
 | `run.start` | UI → runtime | request | `RunStartParams` | `RunStartResult` | - |
 | `run.status` | runtime → UI | notification | `RunStatusNotify` | - | - |
 | `run.steer` | UI → runtime | request | `RunSteerParams` | `RunSteerResult` | server `supports_run_steer` |
+| `run.summary` | runtime → UI | notification | `RunSummaryNotify` | - | - |
 | `sandbox.get` | UI → runtime | request | `SandboxGetParams` | `SandboxGetResult` | server `supports_sandbox_mode_management` |
 | `sandbox.set` | UI → runtime | request | `SandboxSetParams` | `SandboxGetResult` | server `supports_sandbox_mode_management` |
 | `session.history` | UI → runtime | request | `SessionHistoryParams` | `SessionHistoryResult` | - |
@@ -75,6 +75,7 @@ capability the sender checks before sending.
 | `task.spawn` | UI → runtime | request | `TaskSpawnParams` | `TaskInfo` | server `supports_tasks` |
 | `task.status` | UI → runtime | request | `TaskIdParams` | `TaskInfo` | server `supports_tasks` |
 | `task.wait` | UI → runtime | request | `TaskIdParams` | `TaskInfo` | server `supports_tasks` |
+| `telemetry.get` | UI → runtime | request | `TelemetryGetParams` | `TelemetryGetResult` | server `supports_telemetry` |
 | `theme.set` | UI → runtime | request | `ThemeSetParams` | `ThemeSetResult` | server `supports_theme_set` |
 | `tool.call` | UI → runtime | request | `ToolCallParams` | `ToolCallResult` | server `supports_tool_call` |
 | `ui.confirm.request` | runtime → UI | request | `UiConfirmRequestParams` | `UiConfirmResult` | UI `supports_confirm` |

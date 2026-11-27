@@ -1,8 +1,8 @@
 use crate::app::state::InputState;
 use crate::app::state::LogLine;
 use crate::app::state::{
-    PendingImageAttachment, PerfDebugStats, RenderState, SkillsListItemState, StatusLineMode,
-    TextSelectionPhase, TranscriptHitMap, WrappedLogCache,
+    PendingImageAttachment, RenderState, SkillsListItemState, StatusLineMode, TelemetryStore,
+    TextSelectionPhase, TranscriptHitMap, TuiPerfStore, WrappedLogCache,
 };
 use crate::app::util::attachments::{ClipboardImport, StagedAttachment};
 use crate::app::OverlayState;
@@ -220,6 +220,7 @@ pub struct RuntimeInfoState {
     pub supports_mcp_list: bool,
     pub supports_skills_list: bool,
     pub supports_context_inspect: bool,
+    pub supports_telemetry: bool,
     pub supports_tool_call: bool,
     pub supports_theme_set: bool,
     pub supports_scoped_logout: bool,
@@ -253,7 +254,9 @@ pub struct AppState {
     pub log_version: u64,
     pub wrapped_log_cache: Option<WrappedLogCache>,
     pub debug_perf_enabled: bool,
-    pub perf_debug: PerfDebugStats,
+    pub diagnostics_transcript_enabled: bool,
+    pub perf: TuiPerfStore,
+    pub telemetry: TelemetryStore,
     pub(crate) terminal_uses_alternate_screen: bool,
     pub(crate) cli_color_scheme_override: bool,
     pub(crate) cli_image_protocol_override: bool,
@@ -338,7 +341,9 @@ impl Default for AppState {
             log_version: 0,
             wrapped_log_cache: None,
             debug_perf_enabled: false,
-            perf_debug: PerfDebugStats::default(),
+            diagnostics_transcript_enabled: false,
+            perf: TuiPerfStore::default(),
+            telemetry: TelemetryStore::default(),
             terminal_uses_alternate_screen: false,
             cli_color_scheme_override: false,
             cli_image_protocol_override: false,

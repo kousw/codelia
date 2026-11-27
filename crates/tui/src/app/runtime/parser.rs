@@ -19,11 +19,14 @@ mod web;
 use self::common::summary_line;
 pub(crate) use self::errors::RunErrorPresentation;
 use self::helpers::parse_runtime_log_line;
+pub(crate) use self::notifications::{
+    format_metrics_diagnostic_lines, format_summary_diagnostic_lines,
+};
 pub(crate) use self::types::{
     AgentMsg, ClientToolCancel, ClientToolMsg, ClientToolRejection, ClientToolRequest,
-    CompactionPhase, GoalNotification, LlmMetricsUpdate, PermissionPreviewUpdate,
-    PermissionReadyUpdate, ReplayProgressEvent, RpcResponse, RunControlMsg, RuntimeMsg,
-    ServerUiMsg, ToolCallResultUpdate, UiConfirmRequest, UiPickRequest, UiPromptRequest,
+    CompactionPhase, GoalNotification, PermissionPreviewUpdate, PermissionReadyUpdate,
+    ReplayProgressEvent, RpcResponse, RunControlMsg, RuntimeMsg, ServerUiMsg, ToolCallResultUpdate,
+    UiConfirmRequest, UiPickRequest, UiPromptRequest,
 };
 
 /// Wire decoding: catalogued methods decode through the generated protocol
@@ -82,8 +85,8 @@ fn typed_output(
                 Ok(ServerNotification::RunContext(notify)) => {
                     Some(notifications::run_context_output(notify))
                 }
-                Ok(ServerNotification::RunDiagnostics(notify)) => {
-                    Some(notifications::run_diagnostics_output(notify))
+                Ok(ServerNotification::RunSummary(notify)) => {
+                    Some(notifications::run_summary_output(notify))
                 }
                 Ok(ServerNotification::GoalUpdated(snapshot))
                 | Ok(ServerNotification::GoalCleared(snapshot)) => {

@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let run_result = (|| -> Result<(), Box<dyn std::error::Error>> {
         let mut tx = StdioRuntimeTx::new(&mut child_stdin);
         let initialize_id = tx.next_id();
-        send_initialize(&mut tx, &initialize_id, diagnostics)?;
+        send_initialize(&mut tx, &initialize_id)?;
 
         let mut app = build_initial_app(
             debug_print,

@@ -36,9 +36,12 @@ pub(super) fn handle_session_open_response(
         return;
     }
     if let Some(result) = response.result {
-        if let Err(error) = decode_result::<methods::SessionOpen>(result) {
-            super::push_protocol_mismatch(app, &error);
-            return;
+        match decode_result::<methods::SessionOpen>(result) {
+            Ok(_) => app.telemetry.reset_session(),
+            Err(error) => {
+                super::push_protocol_mismatch(app, &error);
+                return;
+            }
         }
     }
     // The opened session may carry its own model; refresh the status line,

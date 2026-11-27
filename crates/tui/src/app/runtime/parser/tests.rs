@@ -399,43 +399,44 @@ fn parse_run_status_error_is_rendered_as_error_line() {
 }
 
 #[test]
-fn parse_run_diagnostics_llm_call_as_status_line() {
+fn parse_run_metrics_decodes_rich_telemetry_and_formats_diagnostics() {
     let payload = json!({
-            "jsonrpc": "2.0",
-            "method": "run.diagnostics",
-            "params": {
-                "run_id": "run-1",
-                "kind": "llm_call",
-                "call": {
-                    "run_id": "run-1",
-                    "seq": 2,
-                    "provider": "openai",
-                    "model": "gpt-5-mini",
-                    "request_ts": "2026-02-19T12:00:00.000Z",
-                    "response_ts": "2026-02-19T12:00:00.321Z",
-                    "latency_ms": 321,
-                    "output_tokens_per_second": 93.5,
-                    "stop_reason": "tool_use",
-                    "usage": {
-                        "input_tokens": 100,
-                        "output_tokens": 30,
-                        "total_tokens": 130,
-                        "input_cached_tokens": 40,
-                        "input_cache_creation_tokens": 0
-                    },
-                    "cache": {
-                        "hit_state": "hit",
-                        "cache_read_tokens": 40,
-                        "cache_creation_tokens": 0
-                    },
-                    "provider_meta_summary": "transport=ws_mode websocket_mode=on chain_reset=true ws_input_mode=full_regenerated"
-                }
-            }
-        })
-        .to_string();
-    let RuntimeMsg::LogLines(lines) = parse_runtime_output(&payload) else {
+        "jsonrpc": "2.0",
+        "method": "run.metrics",
+        "params": {
+            "run_id": "run-1",
+            "seq": 2,
+            "provider": "openai",
+            "model": "gpt-5-mini",
+            "request_ts": "2026-02-19T12:00:00.000Z",
+            "response_ts": "2026-02-19T12:00:00.321Z",
+            "latency_ms": 321,
+            "output_tokens_per_second": 93.5,
+            "stop_reason": "tool_use",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 30,
+                "total_tokens": 130,
+                "input_cached_tokens": 40,
+                "input_cache_creation_tokens": 0
+            },
+            "cache": {
+                "hit_state": "hit",
+                "cache_read_tokens": 40,
+                "cache_creation_tokens": 0
+            },
+            "provider_meta_summary": "transport=ws_mode websocket_mode=on chain_reset=true ws_input_mode=full_regenerated"
+        }
+    })
+    .to_string();
+    let RuntimeMsg::RunControl(RunControlMsg::Metrics(metrics)) = parse_runtime_output(&payload)
+    else {
         panic!("unexpected runtime message");
     };
+    assert_eq!(metrics.run_id, "run-1");
+    assert_eq!(metrics.output_tokens_per_second, Some(93.5));
+
+    let lines = super::format_metrics_diagnostic_lines(&metrics);
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].kind(), LogKind::Status);
     let line = lines[0].plain_text();
@@ -447,11 +448,11 @@ fn parse_run_diagnostics_llm_call_as_status_line() {
 }
 
 #[test]
-fn parse_run_metrics_updates_status_without_transcript_lines() {
+fn parse_run_metrics_accepts_nullable_or_negative_tps_without_transcript_lines() {
     for (rate, expected) in [
         (json!(42.25), Some(42.25)),
         (json!(null), None),
-        (json!(-1), None),
+        (json!(-1), Some(-1.0)),
     ] {
         let payload = json!({
             "method": "run.metrics", "params": {
@@ -470,35 +471,54 @@ fn parse_run_metrics_updates_status_without_transcript_lines() {
 }
 
 #[test]
-fn parse_run_diagnostics_summary_as_status_line() {
+fn parse_run_summary_decodes_exact_cache_counts_and_formats_diagnostics() {
+    let summary_obj = json!({
+        "total_calls": 3,
+        "total_tokens": 300,
+        "total_input_tokens": 210,
+        "total_output_tokens": 90,
+        "total_output_reasoning_tokens": 0,
+        "total_cached_input_tokens": 50,
+        "total_cache_creation_tokens": 10,
+        "total_input_image_tokens": 0,
+        "cache_hit_calls": 1,
+        "cache_miss_calls": 2,
+        "cache_unknown_calls": 0,
+        "total_cost_usd": 0.0125,
+        "retry_count": 0,
+        "retry_wait_ms": 0,
+        "tool_calls": 2,
+        "tool_errors": 0,
+        "tool_exec_ms": 100,
+        "tool_approval_wait_ms": 0,
+        "compaction_count": 0,
+        "compaction_duration_ms": 0,
+        "by_model": {}
+    });
     let payload = json!({
         "jsonrpc": "2.0",
-        "method": "run.diagnostics",
+        "method": "run.summary",
         "params": {
             "run_id": "run-1",
-            "kind": "run_summary",
-            "summary": {
-                "total_calls": 3,
-                "total_tokens": 300,
-                "total_input_tokens": 210,
-                "total_output_tokens": 90,
-                "total_cached_input_tokens": 50,
-                "total_cache_creation_tokens": 10,
-                "by_model": {}
-            }
+            "duration_ms": 1500,
+            "run": summary_obj,
+            "session": summary_obj
         }
     })
     .to_string();
-    let RuntimeMsg::LogLines(lines) = parse_runtime_output(&payload) else {
+    let RuntimeMsg::RunControl(RunControlMsg::Summary(summary)) = parse_runtime_output(&payload)
+    else {
         panic!("unexpected runtime message");
     };
+    let lines = super::format_summary_diagnostic_lines(&summary);
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].kind(), LogKind::Status);
     let line = lines[0].plain_text();
     assert!(line.contains("diag run total (cumulative)"));
     assert!(line.contains("calls=3"));
     assert!(line.contains("cache(read/create)=50/10 (23.8%)"));
-    assert!(line.contains("calls(hit/miss/unknown)=0/0/3"));
+    assert!(line.contains("calls(hit/miss/unknown)=1/2/0"));
+    assert!(line.contains("cost=$0.0125"));
 }
 
 #[test]
@@ -517,6 +537,7 @@ fn parse_compaction_start_event_as_running_line() {
     let RuntimeMsg::Agent(AgentMsg::Compaction {
         lines,
         phase: super::CompactionPhase::Started,
+        ..
     }) = parse_runtime_output(&payload)
     else {
         panic!("unexpected runtime message");
@@ -628,6 +649,7 @@ fn parse_compaction_complete_event_as_compaction_line() {
     let RuntimeMsg::Agent(AgentMsg::Compaction {
         lines,
         phase: super::CompactionPhase::Completed,
+        ..
     }) = parse_runtime_output(&payload_completed)
     else {
         panic!("unexpected runtime message");
@@ -654,6 +676,7 @@ fn parse_compaction_complete_event_as_compaction_line() {
     let RuntimeMsg::Agent(AgentMsg::Compaction {
         lines,
         phase: super::CompactionPhase::Completed,
+        ..
     }) = parse_runtime_output(&payload_skipped)
     else {
         panic!("unexpected runtime message");
