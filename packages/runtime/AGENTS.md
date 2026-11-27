@@ -91,7 +91,7 @@ Provide RPC `mcp.list` and return server state/tool number for `/mcp`.
 MCP HTTP assigns a token of `mcp-auth.json` with Bearer and tries to reacquire it with refresh token when 401 occurs.
 MCP server that requires OAuth authenticates with Authorization Code + PKCE (localhost callback) and saves the obtained token in `mcp-auth.json`.
 OpenAI auth offers device-code login for SSH/headless environments via `https://auth.openai.com/api/accounts/deviceauth/*` and exchanges the returned authorization code at `https://auth.openai.com/deviceauth/callback`.
-OAuth browser launch defaults to `manual` when `SSH_CONNECTION` / `SSH_CLIENT` / `SSH_TTY` is present; override with `CODELIA_OAUTH_BROWSER=auto|manual`.
+OAuth browser launch defaults to `manual` when `SSH_CONNECTION` / `SSH_CLIENT` / `SSH_TTY` is present; override via `auth.oauth_browser` (`auto|manual`) in config.
 Manual SSH OAuth can complete by pasting the redirected callback URL (or `code=...&state=...`) into the TUI.
 OAuth metadata is automatically detected from `/.well-known/oauth-protected-resource` and authorization-server metadata, and can be overwritten with `mcp.servers.<id>.oauth.*` of `config.json`.
 If 401 is returned by an HTTP server that can resolve OAuth metadata, the state will be treated as `auth_required` and will transition to waiting for authentication instead of `connect failed`.
@@ -99,12 +99,12 @@ Session store writes to `sessions/YYYY/MM/DD/<run_id>.jsonl` and runtime
 Record `run.start` / `run.status` / `run.end` / `agent.event` / `run.context`.
 `run.start` result includes `session_log_path` when the run event store exposes a persisted JSONL path; CLI benchmark/ATIF export relies on this.
 - Normal file stores keep compact `llm.usage`, with separate durable usage logs;
-  full dumps require `CODELIA_SESSION_DUMP=1`. `session.update` manages pinned/archive
+  full dumps require `CODELIA_DEBUG=session-dump`. `session.update` manages pinned/archive
   metadata independently of snapshots. Local-owned runtime startup and lifecycle
   operations archive unpinned archived/30-day-old run events after removing diagnostics,
   including embedded snapshots in legacy gzip; explicit dumps may expire. Embedded/custom
   stores never acquire default-home cleanup implicitly.
-If `CODELIA_DIAGNOSTICS=1` or the client sent `ui_capabilities.supports_run_diagnostics`, runtime emits `run.diagnostics` notifications (`llm_call`/`run_summary`) derived in-memory from `llm.request`/`llm.response`; diagnostics are not persisted as session records.
+Runtime always emits structured `run.metrics` (per completed LLM call) and `run.summary` (per completed run with run delta and session-scoped cumulative totals surviving `invalidateAgentCache()`) derived in-memory, and serves read-only `telemetry.get` (behind `supports_telemetry`) for on-demand inspection of session/run totals, recent calls/tools, context breakdown, and runtime perf phases/memory/subagents/backpressure. Legacy `run.diagnostics` / `supports_run_diagnostics` are removed.
 `run.start` accepts `input.type="text"` and `input.type="parts"` (text/image_url), validates multimodal parts, and forwards them to Agent as `string | ContentPart[]`.
 LLM calls and tool output are logged from the core's session hook.
 Original messages are appended through awaited `AgentSession.recordMessages` before

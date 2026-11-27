@@ -90,12 +90,12 @@ Confirm/prompt behavior:
 
 - Requested terminal modes are `auto`, `inline`, and `alternate`; the default is `auto`.
 - `auto` resolves to alternate screen on native Windows and WSL, and inline mode elsewhere.
-- `--tui-mode` overrides `CODELIA_TUI_MODE`; either can explicitly force `inline` or `alternate`.
+- `--tui-mode <auto|inline|alternate>` selects terminal-buffer behavior.
 - The run row shows the current goal state and a width-limited objective preview. A restored active goal shows `goal resume required`.
 - Inline mode renders in the main buffer and inserts overflowed log lines into native terminal scrollback.
 - Alternate mode uses the terminal alternate screen, keeps scrolling inside the TUI, and skips native scrollback insertion.
 - The run row pulses during startup and execution. It shows a steady `awaiting input` indicator while the runtime waits for a response.
-- Image previews use query-free halfblock text cells by default, including tmux. Native Kitty is explicit opt-in (`CODELIA_TUI_IMAGE_PROTOCOL=kitty` with `--tui-mode alternate`), outside multiplexers and with safe OS pixel metrics; unavailable cases show the halfblock fallback reason. Preview graphics are not durable log rows. See [local image preview](tui-image-preview.md) for limits and manual native visual gates.
+- Image previews use query-free halfblock text cells by default, including tmux. Native Kitty is explicit opt-in (`--image-protocol kitty` or `tui.image_protocol: "kitty"` with `--tui-mode alternate`), outside multiplexers and with safe OS pixel metrics; unavailable cases show the halfblock fallback reason. Preview graphics are not durable log rows. See [local image preview](tui-image-preview.md) for limits and manual native visual gates.
 - With mouse capture enabled in alternate mode, primary drag selects visible
   transcript text and release copies it; wheel scrolling remains available.
 - `F2` disables mouse capture when native terminal selection is preferred.
@@ -119,24 +119,28 @@ Confirm/prompt behavior:
   - `codelia --version` / `codelia -V` / `codelia -v`: prints CLI version.
   - `codelia-tui --help` / `codelia-tui -h`: prints direct TUI usage and exits.
   - `codelia-tui --version` / `codelia-tui -V` / `codelia-tui -v`: prints version and exits.
-  - `--tui-mode <auto|inline|alternate>`: select terminal-buffer behavior; `CODELIA_TUI_MODE` is the lower-precedence environment equivalent.
+  - `--tui-mode <auto|inline|alternate>`: select terminal-buffer behavior.
+  - `--color-scheme <dark|light>`: override `tui.color_scheme` for this launch.
+  - `--image-protocol <halfblocks|kitty>`: override `tui.image_protocol` for this launch.
 - Startup initializes runtime capabilities and loads current model/provider.
 - Startup log prints a version line (`Version: ...`) after welcome banner.
 - With resume mode (`--resume`), TUI fetches session list/history and restores log context.
 - With `--initial-message` / `--initial-user-message`, TUI queues and auto-starts first prompt when idle.
 
-## 6. Diagnostics
+## 6. Diagnostics & Telemetry
 
-- `CODELIA_DEBUG=1`: runtime/RPC debug logs.
-- `--debug` / `--debug=true`: runtime/RPC debug logs (same effect as `CODELIA_DEBUG=1`).
-- `--debug-perf` or `CODELIA_DEBUG_PERF=1`: fixed perf panel (frame/draw/wrap-cache stats).
-- `--diagnostics` or `CODELIA_DIAGNOSTICS=1`: enable `run.diagnostics` stream (per-call cache hit/miss, token/latency, final run summary).
+- `CODELIA_DEBUG=1` or `--debug`: runtime/RPC/WS debug logs.
+- `CODELIA_DEBUG=<topic,...>` + `CODELIA_DEBUG_DIR`: unified debug topics (`debug`, `rpc`, `ws`, `perf`, `keys`, `diff`, `diagnostics`, `provider-log`, `session-dump`, `ansi-syntax`, `all`).
+- `--debug-perf` or `CODELIA_DEBUG=perf` (or live `Alt+P` / `/perf [on|off|toggle]`): 2-line live Telemetry + TUI Perf footer bar.
+- `Alt+H` cycles `Info -> Telemetry -> Help` (1-line compact Telemetry mode with zero height change).
+- `/stats` (alias `/diag`): read-only panel showing session/run telemetry, recent LLM calls, tool timings, context breakdown, TUI perf ring buffers, and runtime perf snapshot (`telemetry.get`).
+- `--diagnostics` or `CODELIA_DEBUG=diagnostics`: expands always-on `run.metrics` / `run.summary` notifications into transcript status lines.
 
 ## 7. Terminal Colors
 
 - TUI does not query terminal colors with OSC sequences, so delayed color responses cannot leak into composer input.
 - Primary canvas text uses the terminal's default foreground/background pair.
 - Accents default to a dark-background palette, preserving original theme colors when already bright enough and brightening low-contrast colors. This includes dark gray terminals, rather than optimizing only for pure black/white.
-- For a light terminal background, launch with `CODELIA_TUI_COLOR_SCHEME=light codelia`. `dark` is the default; unset or unrecognized values also fall back to dark. The value is read once at startup, case-insensitively, independently of theme hue (`/theme` / `CODELIA_TUI_THEME`). Background colors are not auto-detected.
+- For a light terminal background, set `tui.color_scheme: "light"` in config or launch with `codelia --color-scheme light` (CI tests use `CODELIA_TEST_TUI_COLOR_SCHEME=light`). `dark` is the default; unset or unrecognized values also fall back to dark, independently of theme hue (`/theme`). Background colors are not auto-detected.
 - Input, code, and diff regions use explicit dark foreground/background pairs, and canvas hierarchy avoids terminal `DIM` styling.
 - The bang-shell input prefix keeps a bright dark-surface accent in either color scheme.

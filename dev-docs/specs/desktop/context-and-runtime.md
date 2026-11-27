@@ -57,12 +57,17 @@ Desktop should expose the following protocol-backed surfaces:
 
 These may appear as dialogs, side panels, or inline controls as long as they remain easy to discover.
 
-## 6. Diagnostics and approvals
+## 6. Telemetry, diagnostics, and approvals
 
-Desktop should allow opt-in diagnostics visibility for:
+Runtime always emits `run.metrics` (per completed LLM call) and `run.summary`
+(per run + session cumulative totals), and exposes the read-only `telemetry.get`
+pull RPC behind `supports_telemetry`. Desktop should subscribe to these always-on
+notifications and call `telemetry.get` on connect / panel open to render:
 
-- per-call usage/cost/latency
-- final run summary
+- live per-call TPS, TTFT, latency, cache hit/ratio, token usage, and metered API list cost
+- session-cumulative totals surviving agent invalidation
+- recent tool timings (splitting `exec_duration_ms` vs `approval_wait_ms`) and compaction metrics
+- runtime perf snapshot (startup/agent-init phases, memory, active subagents, transport backpressure)
 
 Approval/permission-related state should be rendered in a more readable form than raw event text when possible.
 

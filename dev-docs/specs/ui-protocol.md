@@ -696,105 +696,43 @@ export type RunContextNotify = {
 };
 ```
 
-### 5.7.1 `run.metrics` (optional)
+### 5.7.1 `run.metrics` (always-on)
 
-Runtime → UI notification after each completed model call, independent of
-diagnostics mode. This is an observed stream rate: output usage divided by the
-monotonic interval from observed generation activity to stream completion. Initial
-wait and abandoned retry/fallback attempts are excluded. Missing usage/timing
-or an interval shorter than 250ms produces `null`, meaning unavailable for this
-call. Clients retain the last known rate until a measured replacement arrives;
-call starts do not emit resets. Older runtimes may send null at call start.
-See `llm-call-diagnostics.md` section 4.2 for hidden-reasoning/buffering limits.
+Runtime → UI notification emitted after each completed model call. Carries both
+observed streaming TPS (`output_tokens_per_second`, `null` when unavailable or
+generation duration < 250ms) and full structured per-call telemetry (`provider`,
+`model`, `actual_model?`, `request_ts`, `response_ts`, `latency_ms`, `timing`,
+`stop_reason`, `usage`, `cache`, `cost_usd`, `cost_basis`, `retry_count`,
+`retry_wait_ms`, `provider_meta_summary`, and scalar `context`). Clients retain
+the last known TPS and context % until replacement measurements arrive; call
+starts do not emit resets. Authoritative schema is generated from
+`packages/protocol/src/run.ts` (`RunMetricsNotifySchema`).
 
-```ts
-export type RunMetricsNotify = {
-  run_id: string;
-  seq: number;
-  output_tokens_per_second: number | null;
-  timing?: {
-    time_to_first_token_ms: number;
-    generation_duration_ms: number;
-    generation_start_ms?: number;
-    generation_start_source?: "reasoning_item" | "thought_step";
-  };
-};
-```
+### 5.7.2 `run.summary` (always-on)
 
-TUI matches the active `run_id`, updates the status line without adding transcript
-rows, and keeps the last rate across completion, next calls/runs and unavailable
-metrics. Last-known remaining context is likewise retained across turn starts
-until a new `run.context` measurement arrives.
-Older peers may ignore this notification; no capability negotiation is required.
+Runtime → UI notification emitted when a run terminates. Carries `run_id`,
+`duration_ms`, per-run delta `run: TelemetrySummary`, and session-scoped
+cumulative totals `session: TelemetrySummary` (surviving `invalidateAgentCache()`
+within the same session, including exact `cache_hit_calls` / `cache_miss_calls` /
+`cache_unknown_calls`, tool `exec_duration_ms` vs `approval_wait_ms`, retries,
+compactions, and `by_model`). Replaces legacy `run.diagnostics` /
+`supports_run_diagnostics`. Authoritative schema is in `packages/protocol/src/run.ts`
+(`RunSummaryNotifySchema`).
 
-### 5.7.2 `run.diagnostics` (optional)
+### 5.7.3 `telemetry.get` (capability: `supports_telemetry`)
 
-Runtime → UI notification.
-
-Use for opt-in diagnostics detail (per-call usage/cache/latency and final run summary).
-Sent when the runtime runs with `CODELIA_DIAGNOSTICS=1` or the connected client opts in with `initialize.ui_capabilities.supports_run_diagnostics: true` (the TUI does this for `--diagnostics`).
-
-```ts
-export type RunDiagnosticsNotify =
-  | {
-      run_id: string;
-      kind: "llm_call";
-      call: {
-        run_id: string;
-        seq: number;
-        provider?: string;
-        model: string;
-        request_ts: string;
-        response_ts: string;
-        latency_ms: number;
-        timing?: { time_to_first_token_ms: number; generation_duration_ms: number };
-        output_tokens_per_second?: number | null;
-        stop_reason?: string | null;
-        usage?: {
-          input_tokens: number;
-          output_tokens: number;
-          total_tokens: number;
-          input_cached_tokens?: number | null;
-          input_cache_creation_tokens?: number | null;
-          input_image_tokens?: number | null;
-        } | null;
-        cache: {
-          hit_state: "hit" | "miss" | "unknown";
-          cache_read_tokens: number;
-          cache_creation_tokens: number;
-          cache_read_ratio?: number | null;
-        };
-        cost_usd?: number | null;
-        provider_meta_summary?: string | null;
-      };
-    }
-  | {
-      run_id: string;
-      kind: "run_summary";
-      summary: {
-        total_calls: number;
-        total_tokens: number;
-        total_input_tokens: number;
-        total_output_tokens: number;
-        total_cached_input_tokens: number;
-        total_cache_creation_tokens: number;
-        total_cost_usd?: number | null;
-        by_model: Record<string, {
-          calls: number;
-          input_tokens: number;
-          output_tokens: number;
-          cached_input_tokens: number;
-          cache_creation_tokens: number;
-          total_tokens: number;
-          cost_usd?: number | null;
-        }>;
-      };
-    };
-```
+UI → Runtime read-only pull request (safe mid-run; never constructs an agent or
+triggers auth prompts). Returns `TelemetryGetResult` (`session_id`,
+`active_run_id`, `context` with breakdown, `session_summary`, `run_summary`,
+`recent_calls` (bounded to 64), `recent_tools` (bounded to 64), and `runtime`
+perf snapshot containing `startup_phases`, `agent_init_phases`,
+`active_subagents`, `max_concurrent_subagents`, `backpressure_events`, and
+`memory`). Used by TUI `/stats` (`/diag`) and Desktop telemetry panels.
+Authoritative schema is in `packages/protocol/src/telemetry.ts`.
 
 Notes:
-- Diagnostics must not add/modify `messages` history sent to the LLM.
-- Diagnostics payloads are notifications for UI visibility, not session record types.
+- Telemetry notifications and `telemetry.get` must not add/modify `messages` history sent to the LLM.
+- Telemetry payloads are in-memory UI/runtime visibility surfaces, not session transcript records.
 
 ### 5.8 `model.list` (optional)
 

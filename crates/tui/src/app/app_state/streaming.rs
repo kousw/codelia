@@ -143,18 +143,14 @@ impl AppState {
 
         // `stable_trimmed` extends into the single trailing line past `committed_bytes`.
         let tail_offset = 1 + committed_len;
-        let Some(&source_line) = segment.row_indices.get(tail_offset) else {
-            return None;
-        };
+        let &source_line = segment.row_indices.get(tail_offset)?;
         if segment.render_cache.in_code_block() {
             return Some(LogPosition {
                 line: source_line,
                 grapheme: 0,
             });
         }
-        let Some(body_tail) = tail_lines.first() else {
-            return None;
-        };
+        let body_tail = tail_lines.first()?;
         let stable_tail_raw = &stable_trimmed[committed_bytes..];
         let stable_tail_line = render_single_body_line(stable_tail_raw, segment.reasoning);
         if body_tail == &stable_tail_line {

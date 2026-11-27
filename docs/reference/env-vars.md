@@ -1,7 +1,9 @@
 # Environment variables
 
-This page lists the most important current environment variables for Codelia.
-It focuses on variables that are useful to users running the TUI and CLI.
+This page lists the current user-facing environment variables for Codelia.
+Most user preferences live in `config.json` (see [`config.md`](./config.md)) or
+CLI flags; environment variables are reserved for provider keys, bootstrap paths,
+one-shot overrides, and unified debugging.
 
 ## Auth and provider setup
 
@@ -20,68 +22,51 @@ It focuses on variables that are useful to users running the TUI and CLI.
 | `XAI_API_KEY` | xAI API key |
 | `XAI_BASE_URL` | Override the xAI API base URL |
 
-## Core runtime and storage
+## Core runtime, sandbox, and storage
 
 | Variable | Purpose |
 |---|---|
 | `CODELIA_SANDBOX_ROOT` | Set the runtime working/sandbox root |
 | `CODELIA_LAYOUT` | Switch storage layout to `xdg` |
 | `CODELIA_CONFIG_PATH` | Override the global `config.json` path |
-| `CODELIA_SANDBOX_MODE` | Select `readonly`, `workspace-write` or `full-access` at runtime startup. |
-| `CODELIA_APPROVAL_MODE` | Legacy sandbox selection used when the new variable is unset. |
-| `CODELIA_SYSTEM_PROMPT_PATH` | Override the system prompt file |
-| `CODELIA_SESSION_DUMP` | Set to `1` to save full session diagnostic dumps; default off |
+| `CODELIA_SANDBOX_MODE` | Select `readonly`, `workspace-write`, or `full-access` at runtime startup |
+| `CODELIA_AUTH_STORAGE` | Override credential backend (`auto`, `keyring`, or `file`) |
+| `CODELIA_AUTO_UPDATE` | Override update mode (`notify`, `auto`, or `off`) |
+| `CODELIA_MAC_SHELL_BACKEND` | macOS arm64 shell backend override (`seatbelt` default, `mxc` opt-in) |
+| `CODELIA_LINUX_SHELL_BACKEND` | Linux shell backend override (`mxc` default, `gvisor` fallback) |
+| `CODELIA_AGENTS_ROOT` | Override the `AGENTS.md` / Skills repo root |
+| `CODELIA_SYSTEM_PROMPT_PATH` | Override the system prompt file (advanced / benchmarks) |
 | `CODELIA_ATIF_OUT` | Explicit output path for headless ATIF export; unset means no ATIF output |
 
-## TUI and startup
+## Debug and diagnostics
 
 | Variable | Purpose |
 |---|---|
-| `CODELIA_DIAGNOSTICS` | Enable live run diagnostic notifications; does not enable full dumps |
-| `CODELIA_DEBUG` | Enable debug logs |
-| `CODELIA_DEBUG_PERF` | Enable the perf panel |
-| `CODELIA_TUI_THEME` | Set the initial TUI theme |
-| `CODELIA_TUI_MARKDOWN_THEME` | Legacy/fallback theme env also read by the TUI |
+| `CODELIA_DEBUG` | Unified debug topic selector. `1` / `true` enables `debug,rpc,ws`. Comma-separated topics: `debug`, `rpc`, `ws`, `perf`, `keys`, `diff`, `diagnostics`, `provider-log`, `session-dump`, `ansi-syntax`, `all` (excludes disk dumps `provider-log` and `session-dump`). |
+| `CODELIA_DEBUG_DIR` | Output directory for file-backed debug topics (`provider-log`, `keys`) |
+
+Live telemetry (TPS, TTFT, cache hits, tokens, cost, tool timing, TUI perf) is
+collected automatically without setting any environment variable. In the TUI,
+press `Alt+H` to cycle to the 1-line Telemetry status bar, `Alt+P` (or `/perf`)
+to toggle the 2-line live footer bar, or run `/stats` (`/diag`) for the full
+breakdown.
+
+## Launch overrides and OAuth ports
+
+| Variable | Purpose |
+|---|---|
 | `CODELIA_TUI_CMD` | Override the TUI executable launched by the CLI |
 | `CODELIA_TUI_ARGS` | Extra args for the overridden TUI command |
 | `CODELIA_RUNTIME_CMD` | Override the runtime command used by the TUI/CLI launcher |
 | `CODELIA_RUNTIME_ARGS` | Override runtime arguments |
 | `CODELIA_PROMPT_PROGRESS_STDERR` | Emit prompt-mode progress summaries to stderr |
+| `CODELIA_OPENAI_OAUTH_PORT` | Override the local loopback callback port used by OpenAI OAuth |
+| `CODELIA_MCP_OAUTH_PORT` | Override the local loopback callback port used by MCP OAuth |
 
-Note: a configured theme returned from runtime config can override the env/default startup theme.
-See [`../themes.md`](../themes.md) for the supported theme names and `/theme` workflow.
-
-## AGENTS.md and Skills discovery
-
-| Variable | Purpose |
-|---|---|
-| `CODELIA_AGENTS_ENABLED` | Enable or disable AGENTS loading |
-| `CODELIA_AGENTS_ROOT` | Override the AGENTS/Skills repo root |
-| `CODELIA_AGENTS_MARKERS` | Override root-detection markers |
-| `CODELIA_AGENTS_INITIAL_MAX_FILES` | Limit initial AGENTS file count |
-| `CODELIA_AGENTS_INITIAL_MAX_BYTES` | Limit initial AGENTS bytes |
-| `CODELIA_AGENTS_RESOLVER_ENABLED` | Enable or disable extra path-based AGENTS resolving |
-| `CODELIA_AGENTS_MAX_FILES_PER_RESOLVE` | Limit AGENTS files returned by one resolve |
-
-## MCP
-
-| Variable | Purpose |
-|---|---|
-| `CODELIA_MCP_OAUTH_PORT` | Override the local OAuth callback port used by MCP auth |
-| `CODELIA_MCP_OAUTH_TIMEOUT_MS` | Override MCP OAuth wait timeout |
-
-## Advanced diagnostics and limits
-
-| Variable | Purpose |
-|---|---|
-| `CODELIA_PROVIDER_LOG` | Enable provider request/response diagnostics |
-| `CODELIA_PROVIDER_LOG_DIR` | Override provider-log dump directory |
-| `CODELIA_TOOL_OUTPUT_TOTAL_TRIM` | Re-enable total-budget trim of tool output cache |
-| `CODELIA_READ_MAX_BYTES` | Override read-tool byte cap |
-| `CODELIA_READ_MAX_LINE_LENGTH` | Override read-tool line-length cap |
-| `CODELIA_TOOL_OUTPUT_CACHE_MAX_READ_BYTES` | Override cache read byte cap |
-| `CODELIA_TOOL_OUTPUT_CACHE_MAX_GREP_BYTES` | Override cache grep byte cap |
-| `CODELIA_TOOL_OUTPUT_CACHE_MAX_LINE_LENGTH` | Override cache line-length cap |
+Note: TUI appearance and protocol settings are configured in `config.json`
+(`tui.theme`, `tui.color_scheme`, `tui.image_protocol`, `auth.oauth_browser`,
+`agents.enabled`) or via CLI flags (`--tui-mode`, `--color-scheme`,
+`--image-protocol`). See [`../themes.md`](../themes.md) for `/theme`.
 
 ## Example
 
@@ -89,7 +74,7 @@ See [`../themes.md`](../themes.md) for the supported theme names and `/theme` wo
 export OPENAI_API_KEY=...
 export CODELIA_LAYOUT=xdg
 export CODELIA_SANDBOX_MODE=workspace-write
-export CODELIA_DIAGNOSTICS=1
+export CODELIA_DEBUG=perf,diagnostics
 codelia
 ```
 

@@ -190,7 +190,7 @@ impl TelemetryStore {
                     self.in_flight_delta.cache_miss_calls =
                         self.in_flight_delta.cache_miss_calls.saturating_add(1);
                 }
-                CacheHitState::Unknown | _ => {
+                CacheHitState::Unknown | CacheHitState::Other(_) => {
                     self.in_flight_delta.cache_unknown_calls =
                         self.in_flight_delta.cache_unknown_calls.saturating_add(1);
                 }

@@ -59,11 +59,11 @@ unrecognized/unsafe files are retained. Results report compressed files, expired
 diagnostic files, skips, failures and reclaimed bytes. Messages, active contexts,
 indexes, usage, image/tool references and task data are never collected.
 
-`CODELIA_SESSION_DUMP=1` explicitly enables full request/response/tool dumps under
+`CODELIA_DEBUG=session-dump` explicitly enables full request/response/tool dumps under
 `sessions/diagnostics/`; default is off. These diagnostic files may expire after
 30 days or archive if unpinned. Embedded diagnostics in legacy plain/gzip logs are
 also removed when the run meets the same archival conditions.
-`CODELIA_DIAGNOSTICS=1` controls live diagnostic display independently.
+Live telemetry (`run.metrics` / `run.summary` / `telemetry.get`) is always active in-memory; `--diagnostics` or `CODELIA_DEBUG=diagnostics` expands per-call/run telemetry into TUI transcript lines independently.
 
 Usage is also retained without message bodies at `usage/YYYY/MM/DD/<run_id>.jsonl`
 under the storage root. Legacy usage is extracted before event maintenance. ATIF is

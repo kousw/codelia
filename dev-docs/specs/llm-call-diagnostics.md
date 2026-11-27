@@ -189,55 +189,49 @@ Evidence: `packages/core/src/llm/stream-timing.ts`, provider adapters,
 
 ---
 
-## 5. Protocol extension
+## 5. Protocol surface (implemented)
 
-Add optional notification method:
+Legacy `run.diagnostics` / `supports_run_diagnostics` have been replaced by
+always-on structured telemetry notifications plus a read-only pull RPC:
 
-```ts
-// Runtime -> UI
-method: "run.diagnostics"
-params:
-  | {
-      run_id: string;
-      kind: "llm_call";
-      call: LlmCallDiagnostics;
-    }
-  | {
-      run_id: string;
-      kind: "run_summary";
-      summary: UsageSummary;
-    };
-```
-
-Compatibility:
-- Older UIs can ignore unknown method `run.diagnostics`.
-- Older runtimes simply do not emit the method.
+1. **`run.metrics`** (Runtime → UI, always emitted after every completed LLM call):
+   carries `provider`, `model`, `actual_model?`, `request_ts`, `response_ts`,
+   `latency_ms`, `timing` (TTFT + generation duration), `output_tokens_per_second`,
+   `stop_reason`, `usage` (including reasoning/image/cached/cache-create tokens),
+   `cache` (`hit_state`, `cache_read_tokens`, `cache_creation_tokens`, `cache_read_ratio`),
+   `cost_usd`, `cost_basis` (`"api_list" | "unavailable"`), `retry_count`, `retry_wait_ms`,
+   `provider_meta_summary`, and scalar `context`.
+2. **`run.summary`** (Runtime → UI, always emitted at run completion):
+   carries `run_id`, `duration_ms`, per-run `run: TelemetrySummary`, and
+   session-scoped cumulative `session: TelemetrySummary` (survives `invalidateAgentCache()`),
+   including exact `cache_hit_calls` / `cache_miss_calls` / `cache_unknown_calls`,
+   tool `exec_duration_ms` vs `approval_wait_ms`, retry totals, compaction totals, and `by_model`.
+3. **`telemetry.get`** (UI → Runtime, read-only pull RPC behind `supports_telemetry`):
+   returns `session_id`, `active_run_id`, `context` (with category breakdown),
+   `session_summary`, `run_summary`, `recent_calls` (64), `recent_tools` (64),
+   and `runtime` (`startup_phases`, `agent_init_phases`, `active_subagents`,
+   `max_concurrent_subagents`, `backpressure_events`, `memory`).
 
 ---
 
 ## 6. Rendering requirements
 
-### 6.1 Normal mode
+### 6.1 Normal mode & quick toggles (implemented)
 
-- Show latest completed-call TPS in the status line when available.
-- Optionally show only one compact final usage/cost summary (B-009 scope).
+- `StatusLineMode::Info` shows latest completed-call TPS and context left %.
+- `Alt+H` cycles `Info -> Telemetry -> Help`, providing a 1-line compact
+  `Telemetry` status bar (TPS, TTFT/latency, cache hit ratio, session tokens,
+  optional cost, context %) with zero layout height change.
+- `Alt+P` / `/perf [on|off|toggle]` toggles the 2-line live Telemetry + TUI Perf
+  footer bar.
+- `/stats` (alias `/diag`) opens a read-only scrollable telemetry panel backed
+  by local stores and refreshed via `telemetry.get`.
 
-### 6.2 Diagnostics mode
+### 6.2 Diagnostics transcript mode (implemented)
 
-Current: compact per-call status lines with optional TPS. Planned: a dedicated
-per-call list/table. Minimum columns:
-
-- `seq`
-- `model`
-- `latency_ms`
-- `input/output/total`
-- `cached` (`input_cached_tokens`)
-- `cache_create` (`input_cache_creation_tokens`)
-- `cache_hit` (`hit|miss|unknown`)
-- `cost_usd` (if available)
-- `stop_reason`
-
-For narrow layouts, row expansion is acceptable as long as fields remain structured.
+- `--diagnostics` or `CODELIA_DEBUG=diagnostics` expands always-on `run.metrics`
+  and `run.summary` notifications into compact per-call and cumulative transcript
+  status lines using exact cache hit/miss/unknown call counts.
 
 ---
 
@@ -245,17 +239,16 @@ For narrow layouts, row expansion is acceptable as long as fields remain structu
 
 - OpenAI: cache read is mapped to `input_cached_tokens` when provided.
 - Anthropic: read/create tokens map to `input_cached_tokens` and `input_cache_creation_tokens`.
-- Providers without cache metrics should report `hit_state: "unknown"` unless normalized usage clearly indicates `0`.
+- Providers without cache metrics report `hit_state: "unknown"` unless normalized usage clearly indicates `0`.
+- Across all providers, normalized `input_tokens` equals total input tokens (uncached + cached read + cache creation); cost estimation accounts for this when subtracting cached/creation tokens from base input pricing, and sets `cost_usd: null` (`cost_basis: "unavailable"`) for non-metered OAuth routes or unknown pricing.
 
 ---
 
 ## 8. Rollout status
 
-1. Runtime derives per-call diagnostics from `llm.request`/`llm.response`.
-2. Runtime emits `run.diagnostics` (`kind: "llm_call"`).
-3. Runtime emits final `run_summary` diagnostics payload.
-4. TUI compact diagnostics lines and normal-mode TPS are implemented;
-   a dedicated diagnostics panel remains planned.
+1. Always-on `run.metrics` and `run.summary` notifications are implemented in runtime.
+2. Read-only `telemetry.get` pull RPC (`supports_telemetry`) is implemented in runtime and protocol codegen.
+3. TUI always-on telemetry + perf ring-buffer stores, `Alt+H` Telemetry mode, `Alt+P` / `/perf` bar, `/stats` (`/diag`) panel, and `--diagnostics` transcript expansion are implemented.
 
 ---
 
