@@ -5,6 +5,8 @@
 		"paths": {
 			"@codelia/config": ["../config/src/index.ts"],
 			"@codelia/config/*": ["../config/src/*"],
+			"@codelia/logger": ["../logger/src/index.ts"],
+			"@codelia/logger/*": ["../logger/src/*"],
 			"@codelia/shared-types": ["../shared-types/src/index.ts"],
 			"@codelia/shared-types/*": ["../shared-types/src/*"]
 		}
