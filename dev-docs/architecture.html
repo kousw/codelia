@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Codelia Architecture</title>
+<style>
+/* Layout: sticky table of contents on the left, one reading column on the right; diagrams span the column. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --band: #eceff3;
+  --fg: #1b2230;
+  --muted: #5b6475;
+  --line: #c3cad5;
+  --accent: #0f6e8c;
+  --accent-soft: #e1f0f5;
+  --warn: #9a5b00;
+  --warn-soft: #fbf0dc;
+  --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161d; --surface: #1a2029; --band: #202733; --fg: #e4e8ef; --muted: #9aa4b5;
+    --line: #3a4455; --accent: #5cc0de; --accent-soft: #15313b; --warn: #e6b45c; --warn-soft: #33290f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161d; --surface: #1a2029; --band: #202733; --fg: #e4e8ef; --muted: #9aa4b5;
+  --line: #3a4455; --accent: #5cc0de; --accent-soft: #15313b; --warn: #e6b45c; --warn-soft: #33290f;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--fg); font-family: var(--font-body);
+  font-size: 15px; line-height: 1.7;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--band); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+pre {
+  margin: 14px 0 0; padding: 12px 16px; border-radius: 8px;
+  background: var(--band); border: 1px solid var(--line);
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.65;
+  overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; }
+section { margin-top: 64px; scroll-margin-top: 24px; }
+section > p, .prose { max-width: 48em; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; padding-top: 40px; font-size: 13.5px; }
+nav.toc p { margin: 0 0 8px; font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+nav.toc li.sub a { padding-left: 22px; font-size: 13px; }
+nav.toc a { display: block; padding: 3px 10px; border-left: 2px solid var(--line); color: var(--muted); text-decoration: none; }
+nav.toc a:hover { color: var(--fg); border-left-color: var(--accent); }
+main { min-width: 0; padding-top: 40px; }
+header.top { display: grid; gap: 12px; margin-bottom: 36px; }
+.eyebrow { font-size: 12px; letter-spacing: 0.1em; color: var(--accent); font-weight: 600; margin: 0; }
+h1 { font-size: 34px; line-height: 1.25; margin: 0; text-wrap: balance; font-weight: 700; }
+h2 { font-size: 24px; line-height: 1.35; margin: 0 0 14px; text-wrap: balance; font-weight: 700; }
+h3 { font-size: 18.5px; line-height: 1.4; margin: 0; text-wrap: balance; font-weight: 600; }
+.lead { font-size: 16.5px; max-width: 46em; margin: 0; }
+.muted { color: var(--muted); }
+
+.keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 24px 0 0; padding: 0; list-style: none; }
+.keys li { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; min-width: 0; }
+.keys li strong { display: block; font-size: 15.5px; margin-bottom: 6px; }
+.keys li span { font-size: 14px; color: var(--muted); }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+
+figure { margin: 22px 0 0; }
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--muted); }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 10px; max-width: 54em; }
+figcaption b { color: var(--fg); font-weight: 600; }
+
+/* SVG parts, themed through tokens */
+.bx { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.bx-acc { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+.bx-ext { fill: var(--bg); stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.bx-con { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+.bx-band { fill: var(--band); stroke: none; }
+.bx-loop { fill: none; stroke: var(--warn); stroke-width: 1.3; stroke-dasharray: 6 4; }
+.t { fill: var(--fg); font-family: var(--font-body); font-size: 13.5px; font-weight: 600; }
+.ta { fill: var(--accent); font-family: var(--font-body); font-size: 13.5px; font-weight: 700; }
+.s { fill: var(--muted); font-family: var(--font-body); font-size: 11.5px; }
+.sm { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.lb { fill: var(--fg); font-family: var(--font-mono); font-size: 11px; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.lbj { fill: var(--fg); font-family: var(--font-body); font-size: 11.5px; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.lw { fill: var(--warn); font-family: var(--font-body); font-size: 12px; font-weight: 600; }
+.ln { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+.ln-d { stroke: var(--muted); stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+.ln-acc { stroke: var(--accent); stroke-width: 1.8; fill: none; }
+.life { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 3 4; }
+.ah { fill: var(--muted); }
+.ah-acc { fill: var(--accent); }
+
+/* Module cards */
+.mod { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; margin-top: 20px; min-width: 0; }
+.grid-2 > * { margin-top: 0; }
+.mod-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; }
+.mod-head .path { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+.tag { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: var(--band); color: var(--muted); letter-spacing: 0.02em; }
+.tag.hot { background: var(--accent-soft); color: var(--accent); }
+.point { margin: 14px 0 0; padding: 10px 14px; border-radius: 8px; background: var(--accent-soft); font-size: 14.5px; }
+.point b { color: var(--accent); margin-right: 6px; }
+.facts { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); gap: 6px 16px; margin: 16px 0 0; font-size: 14px; }
+.facts dt { color: var(--muted); font-weight: 500; }
+.facts dd { margin: 0; min-width: 0; }
+.status { margin-top: 12px; font-size: 13px; color: var(--warn); background: var(--warn-soft); padding: 6px 12px; border-radius: 6px; }
+
+.tbl { overflow-x: auto; margin-top: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+th { font-weight: 600; background: var(--band); white-space: nowrap; }
+td code { white-space: nowrap; }
+.matrix th, .matrix td { text-align: center; font-family: var(--font-mono); font-size: 12px; }
+.matrix th:first-child, .matrix td:first-child { text-align: left; }
+.matrix td.y { color: var(--accent); font-weight: 700; font-size: 14px; }
+.matrix td.n { color: var(--line); }
+.rules { margin: 16px 0 0; padding-left: 1.3em; max-width: 48em; }
+.rules li { margin: 4px 0; }
+.steps { margin: 16px 0 0; padding-left: 1.5em; max-width: 48em; }
+.steps li { margin: 8px 0; }
+.steps li::marker { color: var(--accent); font-weight: 700; }
+.sub-h { font-size: 15.5px; font-weight: 600; margin: 26px 0 0; }
+.mod .prose { margin: 10px 0 0; font-size: 14.5px; }
+.mod .rules { font-size: 14.5px; }
+.tree { margin: 0; padding: 0; background: none; border: none; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65; color: var(--fg); white-space: pre; }
+.refs { margin: 14px 0 0; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+details {
+  margin-top: 16px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px 16px;
+}
+summary { cursor: pointer; font-weight: 600; color: var(--accent); font-size: 14.5px; }
+details > *:not(summary) { font-size: 14.5px; }
+details > p:first-of-type { margin-top: 10px; }
+footer.doc-foot {
+  margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line);
+  font-size: 13.5px; color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.toc { position: static; padding-top: 24px; }
+  nav.toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  main { padding-top: 24px; }
+  .keys, .grid-2 { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  h1 { font-size: 27px; }
+  .facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .facts dt { margin-top: 8px; }
+  .mod { padding: 18px 16px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body { background: #ffffff; padding: 0; font-size: 10pt; }
+  .wrap { display: block; }
+  nav.toc { display: none; }
+  main { padding-top: 0; }
+  .diagram svg { min-width: 0; }
+  .diagram, .tbl { overflow: visible; }
+  figure, .mod, details, tr { break-inside: avoid; }
+  h2, h3, summary { break-after: avoid; }
+  thead { display: table-header-group; }
+  details::details-content { display: block; content-visibility: visible; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#one-run">Tracing a single run</a></li>
+    <li><a href="#layers">Package layers</a></li>
+    <li><a href="#modules">By module</a></li>
+    <li class="sub"><a href="#m-core">core</a></li>
+    <li class="sub"><a href="#m-runtime">runtime</a></li>
+    <li class="sub"><a href="#m-protocol">protocol / shared-types</a></li>
+    <li class="sub"><a href="#m-storage">storage</a></li>
+    <li class="sub"><a href="#m-config">config / metadata</a></li>
+    <li class="sub"><a href="#m-cli">cli</a></li>
+    <li class="sub"><a href="#m-tui">crates/tui</a></li>
+    <li class="sub"><a href="#m-telemetry">telemetry</a></li>
+    <li class="sub"><a href="#m-others">Others</a></li>
+    <li><a href="#where">Where to change code</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <p class="eyebrow">CODELIA · ARCHITECTURE</p>
+  <h1>Codelia Architecture</h1>
+  <p class="lead">Codelia consists of a TypeScript agent SDK (<code>core</code>), the host that actually drives it (<code>runtime</code>), and a Rust terminal UI (<code>crates/tui</code>). Three ideas capture the whole design:</p>
+  <ol class="keys">
+    <li><strong>Three processes</strong><span>The CLI launches the TUI, and the TUI spawns the runtime. The TUI and runtime talk exclusively over stdio JSON-RPC.</span></li>
+    <li><strong>Boundary logic lives in runtime</strong><span>Tools, permissions, sandboxing, auth, and sessions belong to <code>runtime</code>. <code>core</code> performs no I/O of its own.</span></li>
+    <li><strong>The agent is a for-loop</strong><span>Call the LLM → execute returned <code>tool_calls</code> → append results to history, repeating until no <code>tool_calls</code> remain.</span></li>
+  </ol>
+</header>
+
+<section id="overview">
+  <h2>Overview: processes and boundaries</h2>
+  <p>When a user runs <code>codelia</code> in a terminal, the Node CLI locates the OS-specific TUI binary and launches it, and the TUI spawns <code>runtime</code> as a child process. Only <code>runtime</code> touches LLM APIs, MCP servers, the OS shell, and local disk storage. The TUI stays focused on screen rendering and user input.</p>
+  <figure>
+    <div class="diagram">
+    <svg viewBox="0 0 980 400" role="img" aria-label="The CLI launches the TUI, and the TUI spawns the runtime. TUI and runtime communicate over stdio JSON-RPC, while only the runtime connects to external LLMs, MCP servers, OS shells, and local storage.">
+      <defs>
+        <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="a1c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <!-- CLI -->
+      <rect class="bx" x="20" y="64" width="140" height="96" rx="8"/>
+      <text class="t" x="90" y="96" text-anchor="middle">codelia</text>
+      <text class="sm" x="90" y="118" text-anchor="middle">@codelia/cli · Node</text>
+      <text class="s" x="90" y="140" text-anchor="middle">Launch · update · auth</text>
+      <line class="ln" x1="160" y1="112" x2="216" y2="112" marker-end="url(#a1)"/>
+      <text class="lbj" x="188" y="104" text-anchor="middle">spawn</text>
+      <!-- TUI -->
+      <rect class="bx" x="220" y="64" width="180" height="96" rx="8"/>
+      <text class="t" x="310" y="96" text-anchor="middle">codelia-tui</text>
+      <text class="sm" x="310" y="118" text-anchor="middle">crates/tui · Rust</text>
+      <text class="s" x="310" y="140" text-anchor="middle">UI · input · child lifecycle</text>
+      <!-- TUI <-> runtime -->
+      <line class="ln-acc" x1="400" y1="96" x2="516" y2="96" marker-end="url(#a1c)"/>
+      <text class="lb" x="458" y="88" text-anchor="middle">run.start, etc.</text>
+      <line class="ln-acc" x1="516" y1="128" x2="404" y2="128" marker-end="url(#a1c)"/>
+      <text class="lb" x="458" y="146" text-anchor="middle">agent.event, etc.</text>
+      <text class="sm" x="458" y="182" text-anchor="middle">stdio · JSON-RPC</text>
+      <!-- embedded host -->
+      <rect class="bx-ext" x="220" y="292" width="180" height="70" rx="8"/>
+      <text class="t" x="310" y="321" text-anchor="middle">Desktop / Embedded</text>
+      <text class="s" x="310" y="343" text-anchor="middle">Non-TUI hosts</text>
+      <line class="ln-d" x1="400" y1="327" x2="496" y2="327" marker-end="url(#a1)"/>
+      <text class="lb" x="448" y="318" text-anchor="middle">runtime/sdk</text>
+      <!-- runtime container -->
+      <rect class="bx-con" x="500" y="20" width="260" height="360" rx="10"/>
+      <text class="ta" x="630" y="46" text-anchor="middle">runtime process</text>
+      <text class="sm" x="630" y="64" text-anchor="middle">@codelia/runtime · Bun / Node</text>
+      <rect class="bx" x="520" y="80" width="220" height="46" rx="6"/>
+      <text class="t" x="630" y="102" text-anchor="middle">rpc/</text>
+      <text class="s" x="630" y="118" text-anchor="middle">Requests, responses &amp; notices</text>
+      <rect class="bx" x="520" y="140" width="220" height="46" rx="6"/>
+      <text class="t" x="630" y="162" text-anchor="middle">agent-factory</text>
+      <text class="s" x="630" y="178" text-anchor="middle">Assemble config, auth &amp; tools</text>
+      <rect class="bx-acc" x="520" y="200" width="220" height="46" rx="6"/>
+      <text class="t" x="630" y="222" text-anchor="middle">core Agent</text>
+      <text class="s" x="630" y="238" text-anchor="middle">LLM ↔ tool loop</text>
+      <rect class="bx" x="520" y="260" width="220" height="46" rx="6"/>
+      <text class="t" x="630" y="282" text-anchor="middle">tools · permissions</text>
+      <text class="s" x="630" y="298" text-anchor="middle">Execute with approval &amp; sandbox</text>
+      <rect class="bx" x="520" y="320" width="220" height="46" rx="6"/>
+      <text class="t" x="630" y="342" text-anchor="middle">storage</text>
+      <text class="s" x="630" y="358" text-anchor="middle">Persist sessions &amp; credentials</text>
+      <!-- externals -->
+      <line class="ln" x1="760" y1="68" x2="816" y2="68" marker-end="url(#a1)"/>
+      <rect class="bx-ext" x="820" y="40" width="145" height="56" rx="8"/>
+      <text class="t" x="892" y="64" text-anchor="middle">LLM API</text>
+      <text class="s" x="892" y="83" text-anchor="middle">HTTPS / WebSocket</text>
+      <line class="ln" x1="760" y1="158" x2="816" y2="158" marker-end="url(#a1)"/>
+      <rect class="bx-ext" x="820" y="130" width="145" height="56" rx="8"/>
+      <text class="t" x="892" y="154" text-anchor="middle">MCP servers</text>
+      <text class="s" x="892" y="173" text-anchor="middle">stdio / HTTP</text>
+      <line class="ln" x1="760" y1="248" x2="816" y2="248" marker-end="url(#a1)"/>
+      <rect class="bx-ext" x="820" y="220" width="145" height="56" rx="8"/>
+      <text class="t" x="892" y="244" text-anchor="middle">OS shell</text>
+      <text class="s" x="892" y="263" text-anchor="middle">Seatbelt / Bubblewrap</text>
+      <line class="ln" x1="760" y1="338" x2="816" y2="338" marker-end="url(#a1)"/>
+      <rect class="bx-ext" x="820" y="310" width="145" height="56" rx="8"/>
+      <text class="t" x="892" y="334" text-anchor="middle">~/.codelia</text>
+      <text class="s" x="892" y="353" text-anchor="middle">sessions · credentials</text>
+    </svg>
+    </div>
+    <figcaption><b>Every external connection leaves from the runtime.</b> Swapping out the TUI (for example for a future Desktop host) leaves tool execution and permission policy unchanged. Embedded hosts boot the runtime through the side-effect-free <code>@codelia/runtime/sdk</code> entrypoint, supplying environment presets and custom adapters (the Desktop shell itself is planned).</figcaption>
+  </figure>
+</section>
+
+<section id="one-run">
+  <h2>Tracing a single run</h2>
+  <p>As a concrete example, follow what happens when a user asks in the TUI: “Find why this test fails and fix it.” The flow includes the LLM calling a read tool first, then asking the user for confirmation before editing or executing a protected action.</p>
+  <figure>
+    <div class="diagram">
+    <svg viewBox="0 0 980 660" role="img" aria-label="TUI sends run.start to runtime rpc, which calls Agent.runStream. Agent invokes the LLM, checks permissions via canExecuteTool, runs tools, appends ToolMessage to history, and loops until no tool_calls remain. Events stream to TUI as agent.event notifications and append to storage.">
+      <defs>
+        <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <!-- headers -->
+      <rect class="bx" x="15" y="14" width="110" height="46" rx="6"/><text class="t" x="70" y="34" text-anchor="middle">TUI</text><text class="sm" x="70" y="51" text-anchor="middle">crates/tui</text>
+      <rect class="bx" x="155" y="14" width="110" height="46" rx="6"/><text class="t" x="210" y="34" text-anchor="middle">rpc/run.ts</text><text class="sm" x="210" y="51" text-anchor="middle">runtime</text>
+      <rect class="bx-acc" x="295" y="14" width="110" height="46" rx="6"/><text class="t" x="350" y="34" text-anchor="middle">Agent</text><text class="sm" x="350" y="51" text-anchor="middle">core</text>
+      <rect class="bx" x="435" y="14" width="110" height="46" rx="6"/><text class="t" x="490" y="34" text-anchor="middle">LLM adapter</text><text class="sm" x="490" y="51" text-anchor="middle">core/llm</text>
+      <rect class="bx" x="575" y="14" width="110" height="46" rx="6"/><text class="t" x="630" y="34" text-anchor="middle">permissions</text><text class="sm" x="630" y="51" text-anchor="middle">runtime</text>
+      <rect class="bx" x="715" y="14" width="110" height="46" rx="6"/><text class="t" x="770" y="34" text-anchor="middle">tools</text><text class="sm" x="770" y="51" text-anchor="middle">runtime</text>
+      <rect class="bx" x="855" y="14" width="110" height="46" rx="6"/><text class="t" x="910" y="34" text-anchor="middle">storage</text><text class="sm" x="910" y="51" text-anchor="middle">packages</text>
+      <!-- lifelines -->
+      <line class="life" x1="70" y1="60" x2="70" y2="645"/>
+      <line class="life" x1="210" y1="60" x2="210" y2="645"/>
+      <line class="life" x1="350" y1="60" x2="350" y2="645"/>
+      <line class="life" x1="490" y1="60" x2="490" y2="645"/>
+      <line class="life" x1="630" y1="60" x2="630" y2="645"/>
+      <line class="life" x1="770" y1="60" x2="770" y2="645"/>
+      <line class="life" x1="910" y1="60" x2="910" y2="645"/>
+      <!-- 1 -->
+      <line class="ln" x1="70" y1="94" x2="206" y2="94" marker-end="url(#a2)"/>
+      <text class="lb" x="140" y="87" text-anchor="middle">run.start {input}</text>
+      <!-- 2 -->
+      <line class="ln" x1="210" y1="130" x2="346" y2="130" marker-end="url(#a2)"/>
+      <text class="lb" x="280" y="123" text-anchor="middle">runStream(input)</text>
+      <text class="s" x="214" y="150">getAgent() reuses cached instance</text>
+      <!-- 3 -->
+      <line class="ln" x1="350" y1="178" x2="486" y2="178" marker-end="url(#a2)"/>
+      <text class="lb" x="420" y="171" text-anchor="middle">ainvoke(msgs, tools)</text>
+      <!-- 4 -->
+      <line class="ln-d" x1="490" y1="212" x2="354" y2="212" marker-end="url(#a2)"/>
+      <text class="lb" x="420" y="205" text-anchor="middle">BaseMessage[]</text>
+      <!-- 5 -->
+      <line class="ln-d" x1="350" y1="246" x2="214" y2="246" marker-end="url(#a2)"/>
+      <text class="lb" x="280" y="239" text-anchor="middle">AgentEvent</text>
+      <line class="ln" x1="210" y1="280" x2="74" y2="280" marker-end="url(#a2)"/>
+      <text class="lb" x="140" y="273" text-anchor="middle">agent.event</text>
+      <line class="ln" x1="210" y1="310" x2="906" y2="310" marker-end="url(#a2)"/>
+      <text class="lb" x="560" y="303" text-anchor="middle">append run events (append-only)</text>
+      <!-- loop -->
+      <rect class="bx-loop" x="22" y="332" width="836" height="236" rx="8"/>
+      <text class="lw" x="34" y="352">loop: while tool_calls present</text>
+      <line class="ln" x1="350" y1="378" x2="626" y2="378" marker-end="url(#a2)"/>
+      <text class="lb" x="490" y="371" text-anchor="middle">canExecuteTool(call)</text>
+      <line class="ln" x1="630" y1="414" x2="74" y2="414" marker-end="url(#a2)"/>
+      <text class="lb" x="350" y="407" text-anchor="middle">ui.confirm.request (only when approval needed)</text>
+      <line class="ln-d" x1="70" y1="448" x2="626" y2="448" marker-end="url(#a2)"/>
+      <text class="lb" x="350" y="441" text-anchor="middle">allow / deny</text>
+      <line class="ln" x1="350" y1="484" x2="766" y2="484" marker-end="url(#a2)"/>
+      <text class="lb" x="560" y="477" text-anchor="middle">execute(input, ctx)</text>
+      <line class="ln-d" x1="770" y1="518" x2="354" y2="518" marker-end="url(#a2)"/>
+      <text class="lb" x="560" y="511" text-anchor="middle">ToolResult → ToolMessage</text>
+      <line class="ln" x1="350" y1="552" x2="486" y2="552" marker-end="url(#a2)"/>
+      <text class="lb" x="420" y="545" text-anchor="middle">next ainvoke</text>
+      <!-- end -->
+      <line class="ln" x1="210" y1="596" x2="906" y2="596" marker-end="url(#a2)"/>
+      <text class="lb" x="560" y="589" text-anchor="middle">save session state (resume checkpoint)</text>
+      <line class="ln-d" x1="210" y1="630" x2="74" y2="630" marker-end="url(#a2)"/>
+      <text class="lb" x="140" y="623" text-anchor="middle">run.status: completed</text>
+    </svg>
+    </div>
+    <figcaption><b>Agent does not know how permissions are decided.</b> It simply calls the <code>canExecuteTool</code> hook wired in at assembly time; confirmation prompts, remembered rules, and Auto approve checks all live inside <code>runtime</code>. Events flow both to TUI notifications and to storage, and the loop stops once a turn returns no <code>tool_calls</code>.</figcaption>
+  </figure>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Stage</th><th>Implementation</th><th>What is decided here</th></tr></thead>
+      <tbody>
+        <tr><td>Param validation</td><td><a href="../packages/runtime/src/rpc/protocol.ts"><code>runtime/src/rpc/protocol.ts</code></a></td><td>Reject requests that do not match the catalog Zod schemas with <code>INVALID_PARAMS</code></td></tr>
+        <tr><td>Request admission</td><td><a href="../packages/runtime/src/rpc/run.ts"><code>runtime/src/rpc/run.ts</code></a></td><td>Active-run exclusion, session resume binding, attachment resolution, cancellation</td></tr>
+        <tr><td>Agent assembly</td><td><a href="../packages/runtime/src/agent-factory.ts"><code>runtime/src/agent-factory.ts</code></a></td><td>Resolved model, credentials, composed tools, and wired permission hooks</td></tr>
+        <tr><td>Loop body</td><td><a href="../packages/core/src/agent/agent.ts"><code>core/src/agent/agent.ts</code></a></td><td>Message ordering, event emission sequence, compaction triggers, retries</td></tr>
+        <tr><td>Tool admission</td><td><a href="../packages/runtime/src/permissions/"><code>runtime/src/permissions/</code></a></td><td>Allow, deny, prompt human, and effective sandbox mode</td></tr>
+        <tr><td>Telemetry</td><td><a href="../packages/runtime/src/telemetry.ts"><code>runtime/src/telemetry.ts</code></a></td><td>Emit <code>run.metrics</code> per LLM call and <code>run.summary</code> at run end; runtime owns session totals</td></tr>
+        <tr><td>Persistence</td><td><a href="../packages/storage/src/"><code>storage/src/</code></a></td><td>Append run events, save resume checkpoints, and append canonical conversation records</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="layers">
+  <h2>Package layers and dependencies</h2>
+  <p>Workspace packages sit in four layers with strictly one-way dependencies from top to bottom. Higher layers interact with the outside world; lower layers hold pure schemas, contracts, and domain logic.</p>
+  <figure>
+    <div class="diagram">
+    <svg viewBox="0 0 980 340" role="img" aria-label="Apps layer holds cli and crates/tui; runtime host layer holds runtime; integration layer holds storage, config-loader, and model-metadata; foundation layer holds core, protocol, config, shared-types, and logger. Dependencies point downward only.">
+      <defs>
+        <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <rect class="bx-band" x="10" y="10" width="960" height="66" rx="8"/>
+      <rect class="bx-band" x="10" y="90" width="960" height="66" rx="8"/>
+      <rect class="bx-band" x="10" y="170" width="960" height="66" rx="8"/>
+      <rect class="bx-band" x="10" y="250" width="960" height="66" rx="8"/>
+      <text class="t" x="26" y="38">Apps</text><text class="s" x="26" y="58">UI · input · launch</text>
+      <text class="t" x="26" y="118">Runtime host</text><text class="s" x="26" y="138">Boundary hub</text>
+      <text class="t" x="26" y="198">Integration</text><text class="s" x="26" y="218">Store · config · metadata</text>
+      <text class="t" x="26" y="278">Foundation</text><text class="s" x="26" y="298">Types · Agent · logger</text>
+      <!-- apps -->
+      <rect class="bx" x="190" y="22" width="190" height="42" rx="6"/><text class="t" x="285" y="48" text-anchor="middle">@codelia/cli</text>
+      <rect class="bx" x="400" y="22" width="190" height="42" rx="6"/><text class="t" x="495" y="48" text-anchor="middle">crates/tui (Rust)</text>
+      <rect class="bx" x="610" y="22" width="345" height="42" rx="6"/><text class="t" x="782" y="48" text-anchor="middle">packages/tui/* — per-OS TUI binaries</text>
+      <!-- runtime -->
+      <rect class="bx-acc" x="190" y="102" width="400" height="42" rx="6"/><text class="t" x="390" y="128" text-anchor="middle">@codelia/runtime</text>
+      <rect class="bx" x="610" y="102" width="345" height="42" rx="6"/><text class="t" x="782" y="128" text-anchor="middle">runtime/sdk — embedding entrypoint</text>
+      <!-- integration -->
+      <rect class="bx" x="190" y="182" width="245" height="42" rx="6"/><text class="t" x="312" y="208" text-anchor="middle">storage</text>
+      <rect class="bx" x="450" y="182" width="245" height="42" rx="6"/><text class="t" x="572" y="208" text-anchor="middle">config-loader</text>
+      <rect class="bx" x="710" y="182" width="245" height="42" rx="6"/><text class="t" x="832" y="208" text-anchor="middle">model-metadata</text>
+      <!-- domain -->
+      <rect class="bx-acc" x="190" y="262" width="145" height="42" rx="6"/><text class="t" x="262" y="288" text-anchor="middle">core</text>
+      <rect class="bx" x="343" y="262" width="145" height="42" rx="6"/><text class="t" x="415" y="288" text-anchor="middle">protocol</text>
+      <rect class="bx" x="496" y="262" width="145" height="42" rx="6"/><text class="t" x="568" y="288" text-anchor="middle">config</text>
+      <rect class="bx" x="649" y="262" width="145" height="42" rx="6"/><text class="t" x="721" y="288" text-anchor="middle">shared-types</text>
+      <rect class="bx" x="802" y="262" width="153" height="42" rx="6"/><text class="t" x="878" y="288" text-anchor="middle">logger</text>
+      <!-- arrows -->
+      <line class="ln" x1="285" y1="64" x2="285" y2="100" marker-end="url(#a3)"/>
+      <text class="lbj" x="292" y="86">import</text>
+      <line class="ln-d" x1="495" y1="64" x2="495" y2="100" marker-end="url(#a3)"/>
+      <text class="lbj" x="502" y="86">spawn</text>
+    </svg>
+    </div>
+    <figcaption><b><code>runtime</code> depends on both lower layers, keeping everything else minimal.</b> The two arrows from Apps to <code>runtime</code> show static imports (solid) and process spawning (dashed, not a build-time edge). Edges inside Integration and Foundation appear in the matrix below. <code>logger</code> has zero workspace dependencies so <code>core</code> and <code>storage</code> can use it for debug topic gating.</figcaption>
+  </figure>
+  <div class="tbl">
+    <table class="matrix">
+      <thead><tr><th>Depends on → / Package ↓</th><th>shared-types</th><th>config</th><th>protocol</th><th>core</th><th>logger</th><th>config-loader</th><th>storage</th><th>model-metadata</th><th>runtime</th></tr></thead>
+      <tbody>
+        <tr><td>core</td><td class="y">●</td><td class="y">●</td><td class="n">·</td><td class="n">—</td><td class="y">●</td><td class="n">·</td><td class="n">·</td><td class="n">·</td><td class="n">·</td></tr>
+        <tr><td>protocol</td><td class="y">●</td><td class="n">·</td><td class="n">—</td><td class="n">·</td><td class="n">·</td><td class="n">·</td><td class="n">·</td><td class="n">·</td><td class="n">·</td></tr>
+        <tr><td>config-loader</td><td class="n">·</td><td class="y">●</td><td class="n">·</td><td class="n">·</td><td class="n">·</td><td class="n">—</td><td class="y">●</td><td class="n">·</td><td class="n">·</td></tr>
+        <tr><td>storage</td><td class="y">●</td><td class="n">·</td><td class="n">·</td><td class="y">●</td><td class="y">●</td><td class="n">·</td><td class="n">—</td><td class="n">·</td><td class="n">·</td></tr>
+        <tr><td>model-metadata</td><td class="n">·</td><td class="n">·</td><td class="n">·</td><td class="y">●</td><td class="n">·</td><td class="n">·</td><td class="y">●</td><td class="n">—</td><td class="n">·</td></tr>
+        <tr><td>runtime</td><td class="y">●</td><td class="y">●</td><td class="y">●</td><td class="y">●</td><td class="y">●</td><td class="y">●</td><td class="y">●</td><td class="y">●</td><td class="n">—</td></tr>
+        <tr><td>cli</td><td class="n">·</td><td class="n">·</td><td class="y">●</td><td class="n">·</td><td class="n">·</td><td class="y">●</td><td class="y">●</td><td class="n">·</td><td class="y">●</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="font-size:13.5px;margin-top:8px">Derived from workspace entries in each package's <code>package.json</code> <code>dependencies</code> (excluding platform-specific <code>@codelia/tui-*</code> <code>optionalDependencies</code>). <code>bun run check:deps</code> verifies acyclic edges and blocks cross-package deep imports in CI.</p>
+  <h3 style="margin-top:28px">Dependency invariants</h3>
+  <ul class="rules">
+    <li><code>protocol</code> must not depend on <code>core</code>; wire types live in <code>protocol</code> or <code>shared-types</code>.</li>
+    <li>Add new RPC methods in <code>catalog.ts</code> as Zod schemas — never hand-write duplicate TS/Rust method types or JSON strings.</li>
+    <li><code>shared-types</code> has zero workspace dependencies.</li>
+    <li><code>cli</code> must never call <code>core</code> directly; route through <code>runtime</code>.</li>
+    <li>Built-in tools and sandboxing belong exclusively to <code>runtime</code>, never leaking back into <code>core</code> tool contracts.</li>
+  </ul>
+  <p class="muted" style="font-size:13.5px">Canonical references: <a href="./reference-architecture.md"><code>dev-docs/reference-architecture.md</code></a> · <a href="../AGENTS.md"><code>AGENTS.md</code></a></p>
+</section>
+
+<section id="modules">
+  <h2>By module</h2>
+  <p>Ordered roughly by architectural weight. Reading the “Takeaway” box of each card tells you what that module owns.</p>
+
+  <article class="mod" id="m-core">
+    <div class="mod-head"><h3>core</h3><span class="path">packages/core</span><span class="tag hot">Core SDK</span></div>
+    <p class="point"><b>Takeaway</b>The SDK kernel containing the Agent loop, tool abstractions, and LLM provider adapters. It owns no file I/O, auth, RPC, or OS-specific code — external capabilities enter through DI (<code>AgentServices</code>) and hooks.</p>
+    <figure>
+      <div class="diagram">
+      <svg viewBox="0 0 980 330" role="img" aria-label="One core iteration: build model input from history, invoke LLM adapter, handle ordered output messages, execute tools via permission hook, and append results back to history. Compaction, tool-output-cache, and usage services run alongside.">
+        <defs>
+          <marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+        </defs>
+        <rect class="bx" x="20" y="30" width="165" height="72" rx="8"/><text class="t" x="102" y="60" text-anchor="middle">history/</text><text class="s" x="102" y="82" text-anchor="middle">Message history</text>
+        <rect class="bx" x="225" y="30" width="165" height="72" rx="8"/><text class="t" x="307" y="60" text-anchor="middle">model-context</text><text class="s" x="307" y="82" text-anchor="middle">Materialize images &amp; files</text>
+        <rect class="bx-acc" x="430" y="30" width="165" height="72" rx="8"/><text class="t" x="512" y="60" text-anchor="middle">llm/ adapters</text><text class="s" x="512" y="82" text-anchor="middle">ainvoke · retry</text>
+        <rect class="bx" x="635" y="30" width="150" height="72" rx="8"/><text class="t" x="710" y="60" text-anchor="middle">model-output</text><text class="s" x="710" y="82" text-anchor="middle">Process in sequence</text>
+        <rect class="bx" x="825" y="30" width="140" height="72" rx="8"/><text class="t" x="895" y="60" text-anchor="middle">tool-execution</text><text class="s" x="895" y="82" text-anchor="middle">Hook check → run</text>
+        <line class="ln" x1="185" y1="66" x2="221" y2="66" marker-end="url(#a5)"/>
+        <line class="ln" x1="390" y1="66" x2="426" y2="66" marker-end="url(#a5)"/>
+        <line class="ln" x1="595" y1="66" x2="631" y2="66" marker-end="url(#a5)"/>
+        <line class="ln" x1="785" y1="66" x2="821" y2="66" marker-end="url(#a5)"/>
+        <path class="ln" d="M895 102 V150 H102 V106" marker-end="url(#a5)"/>
+        <text class="lbj" x="498" y="154" text-anchor="middle">Append ToolMessage and repeat (stop when no tool_calls remain)</text>
+        <text class="s" x="20" y="200">services/ — context management invoked from the loop</text>
+        <rect class="bx" x="20" y="212" width="300" height="56" rx="8"/><text class="t" x="34" y="236">compaction</text><text class="s" x="34" y="256">Summarize history at threshold (85% default)</text>
+        <rect class="bx" x="340" y="212" width="300" height="56" rx="8"/><text class="t" x="354" y="236">tool-output-cache</text><text class="s" x="354" y="256">Replace large tool output with ref IDs</text>
+        <rect class="bx" x="660" y="212" width="305" height="56" rx="8"/><text class="t" x="674" y="236">usage</text><text class="s" x="674" y="256">Aggregate tokens across all LLM calls</text>
+        <text class="sm" x="20" y="306">llm/ adapters: openai · anthropic · google · openrouter · moonshot · zai · xai · deepseek · responses (shared)</text>
+      </svg>
+      </div>
+      <figcaption><b>Provider differences are normalized inside adapters.</b> Each adapter returns an ordered <code>BaseMessage[]</code> sequence (text, reasoning, tool_calls), which <code>Agent</code> processes in order. Backoff budget lives in <code>llm/retry.ts</code>, while connect/request/stream-idle timeouts belong to each transport with SDK retries disabled.</figcaption>
+    </figure>
+    <dl class="facts">
+      <dt>Key folders</dt><dd><code>agent/</code> loop · <code>llm/</code> providers · <code>models/</code> static specs &amp; <code>DEFAULT_MODEL_REGISTRY</code> · <code>tools/</code> <code>defineTool</code> (Zod → JSON Schema) · <code>di/</code> service interfaces · <code>types/events</code> AgentEvent</dd>
+      <dt>Excludes</dt><dd>RPC, auth &amp; permissions, sandboxing, filesystem tools, storage backends, UI</dd>
+      <dt>Dependencies</dt><dd><code>shared-types</code>, <code>config</code>, <code>logger</code> (debug topic checks only; external: openai, @anthropic-ai/sdk, @google/genai, zod)</dd>
+    </dl>
+    <p class="status">Planned direction: extract provider connectors into separate <code>providers-*</code> packages later; currently they live inside <code>core</code>.</p>
+  </article>
+
+  <article class="mod" id="m-runtime">
+    <div class="mod-head"><h3>runtime</h3><span class="path">packages/runtime</span><span class="tag hot">Largest · Boundary hub</span></div>
+    <p class="point"><b>Takeaway</b>Both the composition root that builds the Agent and the sole arbiter of security boundaries. Built-in tools, permission checks, OS sandboxes, auth, MCP, sessions, and the JSON-RPC server all live here.</p>
+    <figure>
+      <div class="diagram">
+      <svg viewBox="0 0 980 375" role="img" aria-label="Inside runtime: entrypoints feed rpc handlers, rpc obtains the cached Agent via getAgent and agent-factory, and agent-factory wires models, auth, permissions, sandbox, instructions, and tools. Execution services handle tasks, subagents, lanes, images, and attachments.">
+        <defs>
+          <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+          <marker id="a4c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L10,5 L0,10 z"/></marker>
+        </defs>
+        <text class="s" x="20" y="24">Entrypoints</text>
+        <rect class="bx" x="20" y="36" width="170" height="52" rx="6"/><text class="t" x="34" y="58">index.ts</text><text class="s" x="34" y="77">Auto-start stdio server</text>
+        <rect class="bx" x="20" y="102" width="170" height="52" rx="6"/><text class="t" x="34" y="124">sdk.ts</text><text class="s" x="34" y="143">Embed · no side effects</text>
+        <rect class="bx" x="20" y="168" width="170" height="52" rx="6"/><text class="t" x="34" y="190">environment.ts</text><text class="s" x="34" y="209">Contract &amp; presets</text>
+        <line class="ln" x1="190" y1="62" x2="236" y2="62" marker-end="url(#a4)"/>
+        <line class="ln" x1="190" y1="128" x2="236" y2="128" marker-end="url(#a4)"/>
+        <text class="s" x="240" y="24">Request handling</text>
+        <rect class="bx" x="240" y="36" width="175" height="184" rx="6"/>
+        <text class="t" x="254" y="60">rpc/</text>
+        <text class="sm" x="254" y="82">run · session · history</text>
+        <text class="sm" x="254" y="100">model · auth · config</text>
+        <text class="sm" x="254" y="118">permissions · sandbox</text>
+        <text class="sm" x="254" y="136">context · goals · image</text>
+        <text class="sm" x="254" y="154">attachment · auto-review</text>
+        <text class="sm" x="254" y="172">telemetry · shell</text>
+        <text class="s" x="254" y="204">State in runtime-state.ts</text>
+        <line class="ln-acc" x1="415" y1="128" x2="456" y2="128" marker-end="url(#a4c)"/>
+        <text class="lb" x="436" y="118" text-anchor="middle">getAgent</text>
+        <text class="s" x="460" y="24">Composition</text>
+        <rect class="bx-acc" x="460" y="36" width="190" height="184" rx="6"/>
+        <text class="t" x="474" y="60">agent-factory.ts</text>
+        <text class="s" x="474" y="86">1. Resolve config &amp; auth</text>
+        <text class="s" x="474" y="108">2. Create chat model</text>
+        <text class="s" x="474" y="130">3. Compose tool set</text>
+        <text class="s" x="474" y="152">4. Wire permission hooks</text>
+        <text class="s" x="474" y="174">5. Instantiate core Agent</text>
+        <text class="s" x="474" y="200">Cached &amp; reused across runs</text>
+        <text class="s" x="700" y="24">Composed parts</text>
+        <rect class="bx" x="700" y="36" width="265" height="40" rx="6"/><text class="t" x="714" y="61">model-factory · auth/</text>
+        <rect class="bx" x="700" y="84" width="265" height="40" rx="6"/><text class="t" x="714" y="109">permissions/ · sandbox/</text>
+        <rect class="bx" x="700" y="132" width="265" height="40" rx="6"/><text class="t" x="714" y="157">skills/ · agents/ (AGENTS.md)</text>
+        <rect class="bx" x="700" y="180" width="265" height="40" rx="6"/><text class="t" x="714" y="205">tool-composition · tools/ · mcp/</text>
+        <line class="ln" x1="650" y1="56" x2="696" y2="56" marker-end="url(#a4)"/>
+        <line class="ln" x1="650" y1="104" x2="696" y2="104" marker-end="url(#a4)"/>
+        <line class="ln" x1="650" y1="152" x2="696" y2="152" marker-end="url(#a4)"/>
+        <line class="ln" x1="650" y1="200" x2="696" y2="200" marker-end="url(#a4)"/>
+        <line class="ln" x1="327" y1="220" x2="327" y2="294" marker-end="url(#a4)"/>
+        <text class="lb" x="334" y="262">task.* / shell.*</text>
+        <line class="ln" x1="832" y1="220" x2="832" y2="294" marker-end="url(#a4)"/>
+        <text class="lbj" x="839" y="262">Used by tools</text>
+        <text class="s" x="20" y="288">Execution services</text>
+        <rect class="bx" x="20" y="298" width="176" height="56" rx="6"/><text class="t" x="32" y="322">tasks/</text><text class="s" x="32" y="342">Background shells</text>
+        <rect class="bx" x="211" y="298" width="176" height="56" rx="6"/><text class="t" x="223" y="322">subagents/</text><text class="s" x="223" y="342">Child agents (depth 1)</text>
+        <rect class="bx" x="402" y="298" width="176" height="56" rx="6"/><text class="t" x="414" y="322">lanes/</text><text class="s" x="414" y="342">worktree + tmux/zellij</text>
+        <rect class="bx" x="593" y="298" width="176" height="56" rx="6"/><text class="t" x="605" y="322">image-generation/</text><text class="s" x="605" y="342">Images · decisions/</text>
+        <rect class="bx" x="784" y="298" width="181" height="56" rx="6"/><text class="t" x="796" y="322">attachments/</text><text class="s" x="796" y="342">Upload &amp; ownership</text>
+      </svg>
+      </div>
+      <figcaption><b><code>agent-factory</code> is the central hub.</b> RPC handlers never construct an <code>Agent</code> inline — they call <code>getAgent()</code>. Model switches, login changes, or config updates simply drop the cache so the next run rebuilds cleanly. Storage implementations enter through DI interfaces such as <code>RunEventStoreFactory</code>.</figcaption>
+    </figure>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Directory</th><th>Responsibility</th><th>Key invariants</th></tr></thead>
+        <tbody>
+          <tr><td><code>rpc/</code></td><td>JSON-RPC method handlers</td><td>At most one reply per request ID; release any claimed run slot if <code>run.start</code> setup fails.</td></tr>
+          <tr><td><code>tools/</code></td><td>Built-in tools (shell, read, write, edit, apply_patch, search, todo_*, webfetch, etc.)</td><td>Descriptions and Zod schemas must be self-sufficient; <code>write</code>/<code>edit</code> guard races with <code>expected_hash</code>.</td></tr>
+          <tr><td><code>permissions/</code></td><td>Tool admission, shell analysis, confirmations, Auto approve reviewer (<a href="./specs/command-approval-implementation.html">illustrated design</a>)</td><td>Approval and sandbox mode are independent; macOS defaults to Seatbelt (MXC opt-in), Linux defaults to MXC Bubblewrap (gVisor fallback).</td></tr>
+          <tr><td><code>sandbox/</code></td><td>Sandbox modes (<code>readonly</code> / <code>workspace-write</code> / <code>full-access</code>) &amp; file mutations</td><td>Path policy violations return as tool errors rather than bypassing checks.</td></tr>
+          <tr><td><code>auth/</code></td><td>API keys and OAuth flows (including Codex device code)</td><td>Status endpoints never leak credentials; auth updates invalidate the cached Agent.</td></tr>
+          <tr><td><code>mcp/</code></td><td>External MCP connections and wrapped tools</td><td>Tokens bind to destination metadata and are never replayed to another server.</td></tr>
+          <tr><td><code>subagents/</code> · <code>tasks/</code></td><td>Subagents and background shell tasks</td><td>Children belong to the parent session; writes and shell invocations route back through parent enforcement.</td></tr>
+          <tr><td><code>telemetry.ts</code> · <code>rpc/run-metrics.ts</code></td><td>LLM, tool, compaction diagnostics and run/session totals</td><td>Only runtime aggregates totals; clients display received values verbatim, surviving Agent rebuilds.</td></tr>
+          <tr><td><code>model-factory.ts</code> · <code>model-reasoning.ts</code></td><td>Provider instantiation and reasoning-effort mapping</td><td>Must not depend on <code>RuntimeState</code> or RPC handlers.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <dl class="facts">
+      <dt>Excludes</dt><dd>UI rendering logic and hand-rolled wire types (always import <code>@codelia/protocol</code>)</dd>
+      <dt>Environments</dt><dd>Defaults to <code>tui-local</code> when omitted. Embedded hosts can select presets such as <code>embedded-no-local-tools</code> to disable local files, processes, and MCP.</dd>
+    </dl>
+  </article>
+
+  <article class="mod" id="m-protocol">
+    <div class="mod-head"><h3>protocol / shared-types</h3><span class="path">packages/protocol · packages/shared-types</span><span class="tag hot">Wire contract · Single source</span></div>
+    <p class="point"><b>Takeaway</b>The sole definition of every message spoken between a UI client and the runtime. All methods are declared as Zod schemas in <code>catalog.ts</code>, which drives TypeScript types, runtime validation, and the generated Rust crate <code>crates/protocol</code>.</p>
+    <figure>
+      <div class="diagram">
+      <svg viewBox="0 0 980 300" role="img" aria-label="Zod schemas from shared-types and protocol feed catalog.ts, which runtime reads directly at runtime and tools/protocol-codegen compiles into crates/protocol/src/generated.rs, JSON Schema, methods.md, and shared fixtures. CI check:protocol catches any drift.">
+        <defs>
+          <marker id="a7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+          <marker id="a7c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L10,5 L0,10 z"/></marker>
+        </defs>
+        <text class="s" x="20" y="24">Single source (hand-edited only here)</text>
+        <rect class="bx" x="20" y="36" width="200" height="56" rx="8"/><text class="t" x="34" y="60">shared-types</text><text class="s" x="34" y="80">AgentEvent &amp; stored shapes</text>
+        <rect class="bx" x="20" y="104" width="200" height="56" rx="8"/><text class="t" x="34" y="128">protocol modules</text><text class="s" x="34" y="148">params · result · notify</text>
+        <rect class="bx-acc" x="270" y="36" width="190" height="124" rx="8"/>
+        <text class="t" x="284" y="62">catalog.ts</text>
+        <text class="s" x="284" y="86">Binds method name,</text>
+        <text class="s" x="284" y="104">direction, params, result,</text>
+        <text class="s" x="284" y="122">and capability flag</text>
+        <text class="sm" x="284" y="146">Source of ProtocolMethod</text>
+        <line class="ln" x1="220" y1="64" x2="266" y2="78" marker-end="url(#a7)"/>
+        <line class="ln" x1="220" y1="132" x2="266" y2="118" marker-end="url(#a7)"/>
+        <line class="ln-acc" x1="460" y1="98" x2="526" y2="98" marker-end="url(#a7c)"/>
+        <text class="lb" x="493" y="90" text-anchor="middle">generate</text>
+        <rect class="bx" x="530" y="60" width="160" height="76" rx="8"/>
+        <text class="t" x="544" y="86">protocol-codegen</text>
+        <text class="sm" x="544" y="106">tools/protocol-codegen</text>
+        <text class="sm" x="544" y="124">bun run generate:protocol</text>
+        <text class="s" x="740" y="24">Generated artifacts (commit; never hand-edit)</text>
+        <rect class="bx" x="740" y="36" width="225" height="40" rx="6"/><text class="t" x="754" y="61">crates/protocol (Rust)</text>
+        <rect class="bx" x="740" y="84" width="225" height="40" rx="6"/><text class="t" x="754" y="109">protocol.schema.json</text>
+        <rect class="bx" x="740" y="132" width="225" height="40" rx="6"/><text class="t" x="754" y="157">methods.md · fixtures</text>
+        <line class="ln" x1="690" y1="80" x2="736" y2="56" marker-end="url(#a7)"/>
+        <line class="ln" x1="690" y1="100" x2="736" y2="104" marker-end="url(#a7)"/>
+        <line class="ln" x1="690" y1="120" x2="736" y2="152" marker-end="url(#a7)"/>
+        <rect class="bx" x="270" y="216" width="190" height="60" rx="8"/><text class="t" x="284" y="240">runtime rpc/protocol.ts</text><text class="s" x="284" y="260">Validate params after gates</text>
+        <line class="ln" x1="365" y1="160" x2="365" y2="212" marker-end="url(#a7)"/>
+        <text class="lb" x="372" y="192">import (Zod at runtime)</text>
+        <rect class="bx" x="740" y="216" width="225" height="60" rx="8"/><text class="t" x="754" y="240">TUI · Future Desktop</text><text class="s" x="754" y="260">Consume via path dep</text>
+        <path class="ln" d="M965 56 H975 V246 H969" marker-end="url(#a7)"/>
+        <text class="lb" x="960" y="200" text-anchor="end">path dep</text>
+        <line class="ln-d" x1="610" y1="212" x2="610" y2="140" marker-end="url(#a7)"/>
+        <text class="lb" x="617" y="184">--check</text>
+        <rect class="bx-ext" x="530" y="216" width="160" height="60" rx="8"/><text class="t" x="544" y="240">CI check:protocol</text><text class="s" x="544" y="260">Fail on regenerated diff</text>
+      </svg>
+      </div>
+      <figcaption><b><code>runtime</code> reads the catalog live; UI clients import generated Rust types.</b> Because both sides stem from one Zod source, schema drift fails immediately in CI (<code>check:protocol</code>) or shared fixture tests. Dynamic extension slots like <code>tool_result.result</code> and <code>tool_call.args</code> stay intentionally typed as <code>unknown</code>.</figcaption>
+    </figure>
+    <dl class="facts">
+      <dt>Four channels</dt><dd>UI → runtime requests (<code>run.start</code>, <code>run.cancel</code>, <code>session.open</code>, <code>model.set</code>, …), UI → runtime notices (<code>ui.context.update</code>), runtime → UI notices (<code>agent.event</code>, <code>run.status</code>, <code>run.metrics</code>, <code>run.summary</code>), runtime → UI requests (<code>ui.confirm.request</code>, <code>ui.pick.request</code>, <code>client.tool.call</code>)</dd>
+      <dt>Runtime order</dt><dd>Unknown-method check → capability/state gates → Zod <code>safeParse</code> → handler. Failures return <code>INVALID_PARAMS</code> without echoing invalid values. UI responses are likewise validated via <code>parseUiResult</code>.</dd>
+      <dt>Rust crate</dt><dd><code>crates/protocol</code> (<code>codelia-protocol</code>, Rust 1.93.1+). Pairs generated <code>generated.rs</code> with hand-written <code>lib.rs</code> (<code>IncomingMessage::classify</code>, <code>request_line</code>, etc.). Malformed known methods surface as <code>DecodeError</code> diagnostics without crashing subsequent messages; <code>Unknown</code> is reserved for unrecognized methods and tag values.</dd>
+      <dt>Negotiation</dt><dd><code>initialize</code> advertises client capabilities (e.g., <code>supports_text_delta</code> opts into streaming text/reasoning deltas); unadvertised channels stay silent.</dd>
+      <dt>Dependencies</dt><dd><code>protocol</code> → <code>shared-types</code>, zod. <code>shared-types</code> has zero workspace dependencies (zod only).</dd>
+      <dt>Specs</dt><dd><a href="./specs/ui-protocol.md">ui-protocol.md</a> · <a href="./specs/protocol-codegen.md">protocol-codegen.md</a> · <a href="../packages/protocol/schema/methods.md">methods.md (generated method table)</a></dd>
+    </dl>
+  </article>
+
+  <article class="mod" id="m-storage">
+    <div class="mod-head"><h3>storage</h3><span class="path">packages/storage</span><span class="tag">Integration</span></div>
+    <p class="point"><b>Takeaway</b>All concrete local persistence: layout resolution (<code>~/.codelia/</code> by default), conversation history and session index, run logs, credentials, and caches for tool output, images, attachments, and tasks. <code>runtime</code> binds through <code>core</code> interfaces so embedded hosts can swap backends.</p>
+
+    <h4 class="sub-h">On-disk layout</h4>
+    <p class="prose">The default is a single home layout under <code>~/.codelia/</code>. Setting <code>CODELIA_LAYOUT=xdg</code> splits config into <code>~/.config/codelia/</code>, caches into <code>~/.cache/codelia/</code>, and sessions/logs into <code>~/.local/state/codelia/</code> (respecting <code>XDG_*_HOME</code>). All path resolution goes through <code>resolveStoragePaths()</code> in <code>paths.ts</code>.</p>
+    <div class="diagram"><pre class="tree">~/.codelia/
+├─ config.json                      Global settings (versioned JSON)
+├─ projects.json                    Per-project sandbox mode &amp; protected paths (0600)
+├─ credentials/                     Mode 0700; hidden from shells &amp; built-in file tools
+│  ├─ auth.json                     Provider credentials (when using file backend)
+│  ├─ mcp-auth.json                 MCP OAuth tokens (when using file backend)
+│  ├─ storage-state.json            Backend ownership &amp; migration state (no secrets)
+│  └─ .auth-store-lock.sqlite       Cross-process write lock
+├─ cache/tool-output/               Full blobs for oversized tool results
+├─ sessions/
+│  ├─ messages/&lt;session_id&gt;.jsonl   Canonical conversation journal (append-only)
+│  ├─ contexts/&lt;session_id&gt;.json    Active context checkpoint for fast resume
+│  ├─ state/&lt;session_id&gt;.json       Legacy state snapshots (migrated lazily on read)
+│  ├─ state.db                      SQLite session &amp; run index
+│  ├─ YYYY/MM/DD/&lt;run_id&gt;.jsonl     Run event log (older runs compressed to .jsonl.gz)
+│  ├─ diagnostics/YYYY/MM/DD/…      Full raw dumps (only under CODELIA_DEBUG=session-dump)
+│  ├─ active-runs/…                 PID markers protecting active writers from retention
+│  ├─ attachments/                  Original uploaded/pasted attachments
+│  └─ image-artifacts/&lt;scope&gt;/      Immutable generated/attached images per workspace
+├─ usage/YYYY/MM/DD/&lt;run_id&gt;.jsonl  Independent token usage log (kept if run logs prune)
+├─ tasks/&lt;task_id&gt;.json             Background shell &amp; subagent task registry
+└─ logs/                            Plaintext runtime logs</pre></div>
+
+    <h4 class="sub-h">Three-layer conversation persistence</h4>
+    <p class="prose">Each session splits persistence across three files with distinct roles so compaction never destroys history while resume stays fast.</p>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Layer</th><th>Location</th><th>Contents &amp; guarantees</th><th>Owner</th></tr></thead>
+        <tbody>
+          <tr><td>Journal</td><td><code>sessions/messages/</code></td><td>Accepted user / assistant / reasoning / tool records appended line by line. Never rewritten on compaction; writes are awaited before calling the Agent.</td><td><code>session-state.ts</code> · <code>conversation-archive.ts</code></td></tr>
+          <tr><td>Active context</td><td><code>sessions/contexts/</code></td><td>Messages sent on the next LLM call plus the byte offset covered in the journal; strips ephemeral startup system prompts.</td><td><code>SessionStateStoreImpl</code></td></tr>
+          <tr><td>Index</td><td><code>sessions/state.db</code></td><td>Metadata for session listing/resume pickers, session → run-log mapping, goals, and applied Steer approval evidence.</td><td><code>session-state.ts</code> · <code>session-run-index.ts</code> · <code>session-goals.ts</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="prose">The journal is searchable inside the same session via <code>conversation_search</code> and <code>conversation_read</code>. Record IDs correspond to stable byte offsets, and truncated tail lines fail cleanly.</p>
+
+    <h4 class="sub-h">SQLite schema (<code>state.db</code>)</h4>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Table</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>session_state</code></td><td>Per-session last update, latest <code>run_id</code>, message count, last user prompt, <code>workspace_root</code>, pin/archive flags</td></tr>
+          <tr><td><code>session_runs</code></td><td>Session → run-log file index populated whenever a run header is written</td></tr>
+          <tr><td><code>session_run_checks</code> · <code>session_run_rescans</code></td><td>One-time backfill tracking for run logs written before indexing existed</td></tr>
+          <tr><td><code>session_goals</code> · <code>goal_continuations</code></td><td>Session goals state and continuation run bindings</td></tr>
+          <tr><td><code>session_approval_steers</code></td><td>Recorded applied Steers used as verifiable evidence by Auto Review</td></tr>
+          <tr><td><code>storage_meta</code></td><td>One-time migration and backfill completion markers</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="prose">Opened lazily on first use in WAL mode with a 5-second <code>busy_timeout</code>, backed by <code>bun:sqlite</code> under Bun and <code>better-sqlite3</code> under Node via <code>sqlite.ts</code>.</p>
+
+    <h4 class="sub-h">Run logs and usage logs</h4>
+    <ul class="rules">
+      <li>Each run writes one JSONL record per event (<code>header</code>, <code>run.start</code>, <code>agent.event</code>, <code>llm.usage</code>, <code>run.end</code>) to <code>sessions/YYYY/MM/DD/&lt;run_id&gt;.jsonl</code> via <code>SessionStoreWriterImpl</code> and <code>RunEventStoreFactoryImpl</code>.</li>
+      <li>Normal logs omit full raw LLM payloads and raw tool outputs; full diagnostic dumps are written separately under <code>sessions/diagnostics/</code> only when <code>CODELIA_DEBUG=session-dump</code> is set explicitly.</li>
+      <li>Token usage is mirrored independently under <code>usage/</code> so cost/token aggregation survives run-log compression.</li>
+      <li>Startup retention (<code>run-log-retention.ts</code>) compacts unpinned run logs older than 30 days (or on archive) to <code>.jsonl.gz</code>, dropping heavy diagnostic records while preserving conversation and lifecycle events. Journals, active contexts, <code>state.db</code>, tasks, and usage logs are untouched.</li>
+      <li>Active writers register PID + process-identity markers in <code>active-runs/</code> so retention skips in-flight logs.</li>
+    </ul>
+
+    <h4 class="sub-h">Credentials</h4>
+    <ul class="rules">
+      <li>Backend selection follows <code>auth.storage</code> (<code>auto</code> | <code>keyring</code> | <code>file</code>, overridable via <code>CODELIA_AUTH_STORAGE</code>). On macOS, <code>auto</code>/<code>keyring</code> uses Keychain (<code>codelia.auth</code> / <code>codelia.mcp-auth</code>); elsewhere credentials live in <code>credentials/*.json</code>.</li>
+      <li>File writes stage into a same-directory temp file with mode <code>0600</code>, <code>fsync</code>, and atomic rename (<code>atomic-file.ts</code>); Windows validates owner/SYSTEM ACLs (<code>windows-acl.ts</code>).</li>
+      <li>Concurrent updates from CLI and runtime serialize through SQLite <code>BEGIN IMMEDIATE</code> locks in <code>auth-lock.ts</code> (35 s wait budget).</li>
+      <li>Switching backends or migrating legacy root <code>auth.json</code> files records intent in <code>storage-state.json</code> first so interrupted migrations never leave split brains (<code>credential-backend.ts</code> · <code>credential-migration.ts</code>).</li>
+      <li>MCP tokens bind to connection metadata (<code>resource_uri</code>, issuer, token endpoint, <code>client_id</code>); unbound legacy entries are discarded so users re-authenticate safely (<code>mcp-auth-store.ts</code>).</li>
+    </ul>
+
+    <h4 class="sub-h">Other stores</h4>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Store</th><th>Location</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td><code>ToolOutputCacheStoreImpl</code></td><td><code>cache/tool-output/</code></td><td>Stores large tool outputs outside prompt context, returning ref IDs and truncated previews (bounded reads at 64 KB / 1,000 chars per line with continuation hints).</td></tr>
+          <tr><td><code>ImageArtifactStore</code></td><td><code>sessions/image-artifacts/</code></td><td>Immutable storage for generated/attached images with SHA-256 and dimension verification on read; not auto-pruned.</td></tr>
+          <tr><td><code>FileAttachmentStore</code></td><td><code>sessions/attachments/</code></td><td>Canonical attachment bytes with session ownership tracking.</td></tr>
+          <tr><td><code>TaskRegistryStore</code></td><td><code>tasks/</code></td><td>One file per background shell or subagent task, preserving status and mailboxes across runtime restarts.</td></tr>
+          <tr><td><code>ProjectsPolicyStore</code></td><td><code>projects.json</code></td><td>User-owned sandbox modes, trust flags, and protected paths; verifies ownership and mode before trusting.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4 class="sub-h">Connection with runtime</h4>
+    <p class="prose">At startup, <code>runtime</code> inspects <code>environment.adapters.stores</code> and uses supplied adapters when embedded or falls back to concrete <code>storage</code> implementations. Under <code>persistence.mode = "volatile"</code>, everything switches to in-memory stores with zero disk writes.</p>
+
+    <dl class="facts">
+      <dt>Dependencies</dt><dd><code>core</code> (types/interfaces), <code>shared-types</code>, <code>logger</code> (external: better-sqlite3, sharp, image-size)</dd>
+      <dt>Rules</dt><dd>Always resolve paths via <code>resolveStoragePaths()</code>; never rewrite canonical message journals; resolve session runs via <code>session_runs</code> instead of scanning JSONL headers.</dd>
+      <dt>Specs</dt><dd><a href="./specs/storage-layout.md">storage-layout.md</a> · <a href="./specs/session-store.md">session-store.md</a> · <a href="./specs/conversation-archive.md">conversation-archive.md</a> · <a href="./specs/auth.md">auth.md</a></dd>
+    </dl>
+  </article>
+
+  <article class="mod" id="m-config">
+    <div class="mod-head"><h3>config / config-loader / model-metadata / logger</h3><span class="path">packages/*</span><span class="tag">Support</span></div>
+    <p class="point"><b>Takeaway</b>Focused support packages separating configuration schemas from file discovery/merging and enriching the static model registry with cached external limits.</p>
+    <dl class="facts">
+      <dt>config</dt><dd>Config schemas, parsers, and defaults. Zero dependencies.</dd>
+      <dt>config-loader</dt><dd>Config discovery, loading, global + project merge, and guarded writes (uses <code>storage</code> lock helpers).</dd>
+      <dt>model-metadata</dt><dd>Fetches and caches context limits from <code>models.dev</code> to augment the static registry; falls back cleanly to static limits when offline.</dd>
+      <dt>logger</dt><dd>Stderr logger and unified debug parser for <code>CODELIA_DEBUG=&lt;topics&gt;</code> (<code>rpc</code>, <code>perf</code>, <code>provider-log</code>, <code>session-dump</code>, etc.) and <code>CODELIA_DEBUG_DIR</code>.</dd>
+    </dl>
+  </article>
+
+  <article class="mod" id="m-cli">
+    <div class="mod-head"><h3>cli</h3><span class="path">packages/cli</span><span class="tag">App</span></div>
+    <p class="point"><b>Takeaway</b>The product entrypoint — thin by rule, with zero agent or tool logic. It locates and spawns the OS-appropriate TUI binary and exposes management subcommands (<code>auth</code>, <code>mcp</code>, <code>session</code>, <code>update</code>).</p>
+    <dl class="facts">
+      <dt>Key files</dt><dd><code>tui/launcher.ts</code> (resolves <code>@codelia/tui-&lt;os&gt;-&lt;arch&gt;</code>) · <code>commands/</code> · <code>update/</code> (self-update)</dd>
+      <dt>Handoff to TUI</dt><dd>Passes CLI version, bundled runtime command, update notice, and startup confirmations via a single <code>--internal-launch-context=&lt;json&gt;</code> argument — never env vars — so internal metadata cannot leak into shells or subagents.</dd>
+      <dt>Priority rule</dt><dd>TUI implementation takes priority over temporary CLI workarounds.</dd>
+    </dl>
+  </article>
+
+  <article class="mod" id="m-tui">
+    <div class="mod-head"><h3>crates/tui</h3><span class="path">crates/tui · Rust (ratatui + crossterm)</span><span class="tag hot">Primary UI</span></div>
+    <p class="point"><b>Takeaway</b>Follows a pragmatic TEA (The Elm Architecture) loop over <code>AppState</code>. Runtime messages, terminal events, and local task completions enter as typed <code>Msg</code> variants, <code>update</code> mutates state, and side effects leave cleanly as <code>RuntimeTx</code> writes and returned <code>Effect</code> values — without re-implementing runtime domain policy.</p>
+    <figure>
+      <div class="diagram">
+      <svg viewBox="0 0 980 280" role="img" aria-label="Inside TUI: runtime stdout, terminal input, local completions, and ticks become Msg variants passed to event_loop/update.rs. update updates AppState through handlers, writes RPC lines synchronously via RuntimeTx, and returns Effect values executed by entry/run_loop.rs. AppState renders via view and render.">
+        <defs>
+          <marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+          <marker id="a6c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L10,5 L0,10 z"/></marker>
+        </defs>
+        <text class="s" x="20" y="14">Inputs (all become Msg)</text>
+        <rect class="bx-ext" x="20" y="22" width="200" height="50" rx="8"/><text class="t" x="34" y="44">runtime stdout</text><text class="sm" x="34" y="62">parser.rs → RuntimeMsg</text>
+        <rect class="bx-ext" x="20" y="86" width="200" height="50" rx="8"/><text class="t" x="34" y="108">Terminal input</text><text class="sm" x="34" y="126">crossterm → TerminalInput</text>
+        <rect class="bx-ext" x="20" y="150" width="200" height="50" rx="8"/><text class="t" x="34" y="172">Local task results</text><text class="sm" x="34" y="190">preview · clipboard, etc.</text>
+        <rect class="bx-ext" x="20" y="214" width="200" height="50" rx="8"/><text class="t" x="34" y="236">tick</text><text class="sm" x="34" y="254">PreDrawTick · PostInputTick</text>
+        <line class="ln" x1="220" y1="47" x2="276" y2="47" marker-end="url(#a6)"/>
+        <line class="ln" x1="220" y1="111" x2="276" y2="111" marker-end="url(#a6)"/>
+        <line class="ln" x1="220" y1="175" x2="276" y2="175" marker-end="url(#a6)"/>
+        <line class="ln" x1="220" y1="239" x2="276" y2="239" marker-end="url(#a6)"/>
+        <rect class="bx-acc" x="280" y="22" width="230" height="242" rx="8"/>
+        <text class="t" x="296" y="48">event_loop/update.rs</text>
+        <text class="sm" x="296" y="68">update(app, msg, tx)</text>
+        <text class="s" x="296" y="102">Dispatch by Msg kind</text>
+        <text class="s" x="296" y="120">into handlers/</text>
+        <text class="sm" x="296" y="148">runtime_response/ ·</text>
+        <text class="sm" x="296" y="166">command/ · confirm ·</text>
+        <text class="sm" x="296" y="184">panels · shell_rules</text>
+        <text class="s" x="296" y="222">Returns UpdateResult</text>
+        <text class="sm" x="296" y="242">effects · redraw · exit</text>
+        <line class="ln-acc" x1="510" y1="52" x2="566" y2="52" marker-end="url(#a6c)"/><text class="lbj" x="538" y="44" text-anchor="middle">mutate</text>
+        <line class="ln" x1="510" y1="143" x2="566" y2="143" marker-end="url(#a6)"/><text class="lbj" x="538" y="135" text-anchor="middle">send</text>
+        <line class="ln" x1="510" y1="234" x2="566" y2="234" marker-end="url(#a6)"/><text class="lbj" x="538" y="226" text-anchor="middle">return</text>
+        <rect class="bx-acc" x="570" y="22" width="190" height="60" rx="8"/><text class="t" x="584" y="46">AppState</text><text class="s" x="584" y="68">PendingRpcs · OverlayState</text>
+        <rect class="bx" x="570" y="113" width="190" height="60" rx="8"/><text class="t" x="584" y="137">RuntimeTx</text><text class="s" x="584" y="159">Sync write 1 RPC line</text>
+        <rect class="bx" x="570" y="204" width="190" height="60" rx="8"/><text class="t" x="584" y="228">Effect</text><text class="s" x="584" y="250">Side effects as values</text>
+        <line class="ln" x1="760" y1="52" x2="796" y2="52" marker-end="url(#a6)"/>
+        <line class="ln" x1="760" y1="143" x2="796" y2="143" marker-end="url(#a6)"/>
+        <line class="ln" x1="760" y1="234" x2="796" y2="234" marker-end="url(#a6)"/>
+        <rect class="bx" x="800" y="22" width="165" height="60" rx="8"/><text class="t" x="814" y="46">view · render</text><text class="s" x="814" y="68">Draw via draw_frame</text>
+        <rect class="bx-ext" x="800" y="113" width="165" height="60" rx="8"/><text class="t" x="814" y="137">runtime stdin</text><text class="s" x="814" y="159">Handler rolls back fail</text>
+        <rect class="bx" x="800" y="204" width="165" height="60" rx="8"/><text class="t" x="814" y="228">entry/run_loop.rs</text><text class="s" x="814" y="250">Terminal · clipboard</text>
+      </svg>
+      </div>
+      <figcaption><b>Only <code>update</code> mutates state.</b> RPC lines go out synchronously over <code>RuntimeTx</code> so handlers can roll back cleanly on write errors, while mouse capture, clipboard copies, and self-update launches return as <code>Effect</code> data executed by <code>entry/run_loop.rs</code>. Each loop tick drains up to 300 runtime lines → processes local completions → runs <code>PreDrawTick</code> → renders → waits up to 50 ms for input → runs <code>PostInputTick</code>. Because <code>run_loop</code> is generic over ratatui's <code>Backend</code>, tests run deterministically on <code>TestBackend</code>.</figcaption>
+    </figure>
+    <dl class="facts">
+      <dt>Startup</dt><dd><code>main.rs</code> (wiring) → <code>entry/</code> (<code>cli.rs</code> arg parse, <code>launch_context.rs</code> CLI handoff, <code>terminal.rs</code> raw mode) → <code>entry/run_loop.rs</code></dd>
+      <dt>State pillars</dt><dd><code>PendingRpcs</code>: unified in-flight RPC map (one slot per kind; Steer allows multiple). <code>OverlayState</code>: three-tier overlay model (<code>RuntimeDialogs</code> with independent confirm/prompt/pick slots, local panels, queue/steer pickers). <code>PasteTarget</code>: single routing decision for pasted input.</dd>
+      <dt>Module layering</dt><dd><code>entry</code> → <code>event_loop</code> → <code>app</code>; inside <code>app</code>, <code>handlers</code> / <code>view</code> / <code>render</code> / <code>runtime</code> → <code>state</code> one-way. Import guards in <code>main_tests.rs</code> catch boundary violations.</dd>
+      <dt>Wire types</dt><dd>Consumes <code>crates/protocol</code> (<code>codelia-protocol</code>) via path dependency using <code>send_request::&lt;methods::X&gt;</code> and <code>decode_result::&lt;methods::X&gt;</code>; decode failures emit a diagnostic line cleanly.</dd>
+      <dt>Client tools</dt><dd>TUI-local tools callable by the model (<code>tui_ask_user_choice</code>, <code>tui_open_selector</code>, etc.) live in <code>app/runtime/client.rs</code> and register via <code>run.start.tools</code>.</dd>
+      <dt>Runtime path</dt><dd>Precedence: <code>CODELIA_RUNTIME_CMD</code> / <code>CODELIA_RUNTIME_ARGS</code> (dev override) → bundled runtime in CLI launch context → source checkout default (<code>bun packages/runtime/src/index.ts</code>).</dd>
+      <dt>Specs</dt><dd><a href="./specs/tui-tea-architecture.md">tui-tea-architecture.md</a> · <a href="./specs/tui-architecture.md">tui-architecture.md</a></dd>
+    </dl>
+    <p class="status">TUI-specific layer: notification-to-log projection in <code>app/runtime/parser/</code> (~4,400 non-test lines) is specific to TUI scrollback formatting. Future Desktop clients will need to decide what to share vs render natively.</p>
+  </article>
+
+  <article class="mod" id="m-telemetry">
+    <div class="mod-head"><h3>telemetry (metrics &amp; UI)</h3><span class="path">core → runtime → protocol → crates/tui</span><span class="tag hot">Cross-cutting · Always on</span></div>
+    <p class="point"><b>Takeaway</b>Telemetry is always active and aggregated solely by <code>runtime</code>. <code>core</code> records raw per-call timing and token usage; <code>runtime</code> emits <code>run.metrics</code> per call, <code>run.summary</code> on run completion, and serves <code>telemetry.get</code> on demand. The TUI displays these totals without recomputing them.</p>
+    <figure>
+      <div class="diagram">
+      <svg viewBox="0 0 980 300" role="img" aria-label="core records usage and timings; runtime builds per-call run.metrics and run/session summaries in telemetry.ts and serves telemetry.get; TUI stores values in state/telemetry.rs and state/perf.rs and renders Status Info, Status Telemetry, Perf bar, and /stats panel.">
+        <defs>
+          <marker id="a8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+          <marker id="a8c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L10,5 L0,10 z"/></marker>
+        </defs>
+        <text class="s" x="20" y="20">Record</text>
+        <rect class="bx" x="20" y="30" width="200" height="120" rx="8"/>
+        <text class="t" x="34" y="54">core</text>
+        <text class="sm" x="34" y="78">services/usage</text>
+        <text class="sm" x="34" y="96">agent.ts (stage timing)</text>
+        <text class="sm" x="34" y="114">tool-execution.ts</text>
+        <text class="s" x="34" y="136">Tokens · latency · retries</text>
+        <line class="ln" x1="220" y1="90" x2="266" y2="90" marker-end="url(#a8)"/>
+        <text class="s" x="270" y="20">Aggregate (sole owner)</text>
+        <rect class="bx-acc" x="270" y="30" width="230" height="120" rx="8"/>
+        <text class="t" x="284" y="54">runtime</text>
+        <text class="sm" x="284" y="78">rpc/run-metrics.ts</text>
+        <text class="s" x="284" y="96">Build per-call metrics</text>
+        <text class="sm" x="284" y="118">telemetry.ts</text>
+        <text class="s" x="284" y="136">Totals · last 64 · startup</text>
+        <text class="s" x="550" y="20">Wire</text>
+        <rect class="bx" x="550" y="30" width="190" height="34" rx="6"/><text class="t" x="562" y="52">run.metrics</text><text class="sm" x="728" y="52" text-anchor="end">per call</text>
+        <rect class="bx" x="550" y="73" width="190" height="34" rx="6"/><text class="t" x="562" y="95">run.summary</text><text class="sm" x="728" y="95" text-anchor="end">end of run</text>
+        <rect class="bx" x="550" y="116" width="190" height="34" rx="6"/><text class="t" x="562" y="138">telemetry.get</text><text class="sm" x="728" y="138" text-anchor="end">pull</text>
+        <line class="ln" x1="500" y1="47" x2="546" y2="47" marker-end="url(#a8)"/>
+        <line class="ln" x1="500" y1="90" x2="546" y2="90" marker-end="url(#a8)"/>
+        <line class="ln-d" x1="500" y1="133" x2="546" y2="133" marker-end="url(#a8)"/>
+        <text class="s" x="790" y="20">TUI state</text>
+        <rect class="bx" x="790" y="30" width="175" height="120" rx="8"/>
+        <text class="t" x="804" y="54">crates/tui</text>
+        <text class="sm" x="804" y="78">state/telemetry.rs</text>
+        <text class="s" x="804" y="96">Store received totals</text>
+        <text class="sm" x="804" y="118">state/perf.rs</text>
+        <text class="s" x="804" y="136">Frame time · RSS</text>
+        <line class="ln" x1="740" y1="47" x2="786" y2="60" marker-end="url(#a8)"/>
+        <line class="ln" x1="740" y1="90" x2="786" y2="90" marker-end="url(#a8)"/>
+        <line class="ln-d" x1="740" y1="133" x2="786" y2="120" marker-end="url(#a8)"/>
+        <text class="s" x="20" y="194">UI surfaces</text>
+        <path class="ln-acc" d="M877 150 V180 H128"/>
+        <line class="ln-acc" x1="128" y1="180" x2="128" y2="210" marker-end="url(#a8c)"/>
+        <line class="ln-acc" x1="371" y1="180" x2="371" y2="210" marker-end="url(#a8c)"/>
+        <line class="ln-acc" x1="614" y1="180" x2="614" y2="210" marker-end="url(#a8c)"/>
+        <line class="ln-acc" x1="857" y1="180" x2="857" y2="210" marker-end="url(#a8c)"/>
+        <rect class="bx" x="20" y="214" width="216" height="64" rx="8"/><text class="t" x="34" y="238">Status row: Info</text><text class="s" x="34" y="260">Model · TPS · context left</text>
+        <rect class="bx" x="263" y="214" width="216" height="64" rx="8"/><text class="t" x="277" y="238">Status row: Telemetry</text><text class="s" x="277" y="260">Alt+H · TTFT · cache · cost</text>
+        <rect class="bx" x="506" y="214" width="216" height="64" rx="8"/><text class="t" x="520" y="238">Perf bar (2 rows)</text><text class="s" x="520" y="260">Alt+P · LLM row &amp; TUI row</text>
+        <rect class="bx" x="749" y="214" width="216" height="64" rx="8"/><text class="t" x="763" y="238">/stats panel</text><text class="s" x="763" y="260">Totals · breakdown · recent calls</text>
+      </svg>
+      </div>
+      <figcaption><b>Two push notifications and one pull RPC.</b> <code>run.metrics</code> and <code>run.summary</code> always emit without capability gating, while <code>telemetry.get</code> requires <code>supports_telemetry</code> (dashed). Passing <code>--diagnostics</code> or <code>CODELIA_DEBUG=diagnostics</code> expands those events into transcript lines as well.</figcaption>
+    </figure>
+    <dl class="facts">
+      <dt>Per LLM call</dt><dd>Provider and model (including served model), latency &amp; TTFT, output TPS, tokens (reasoning, image, cache read/create), cache hit/miss/unknown &amp; rate, <code>cost_usd</code> with source (<code>api_list</code> / <code>unavailable</code>), retry count &amp; wait, and context window utilization</dd>
+      <dt>Aggregates</dt><dd><code>TelemetrySummary</code>: call count, token breakdown, cache hit/miss/unknown counts, cost, retries, tool execution &amp; wait times, compaction count/duration, per-model breakdown — tracked for both the current run and full session (surviving Agent rebuilds)</dd>
+      <dt>Runtime health</dt><dd>Startup and assembly phase timings, process memory, active subagents, and RPC backpressure metrics inside <code>telemetry.get.runtime</code></dd>
+      <dt>TUI health</dt><dd>Zero-allocation ring buffers tracking frame render, stream flush, and wrap-cache timings alongside TUI + runtime RSS</dd>
+      <dt>Invariant</dt><dd>Every new provider or transport must verify normalized usage and timing through <code>buildRunMetrics</code> across reasoning and tool turns (<code>runtime/tests/provider-metrics.test.ts</code>); missing metrics stay unavailable rather than clearing prior TPS or context state.</dd>
+      <dt>Spec</dt><dd><a href="./specs/llm-call-diagnostics.md">llm-call-diagnostics.md</a></dd>
+    </dl>
+  </article>
+
+  <article class="mod" id="m-others">
+    <div class="mod-head"><h3>Other directories</h3><span class="path">crates/* · examples/* · tools/* · dev-docs/*</span><span class="tag">Supporting</span></div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Location</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td><code>crates/mxc-launcher</code></td><td>Rust helper built on the MXC SDK for isolating approved commands: default Bubblewrap backend on Linux x64/arm64, opt-in Seatbelt backend on macOS arm64 via <code>CODELIA_MAC_SHELL_BACKEND=mxc</code>.</td></tr>
+          <tr><td><code>crates/protocol</code></td><td>Shared Rust wire crate generated from <code>@codelia/protocol</code> plus JSON-RPC envelope helpers. See the protocol card above.</td></tr>
+          <tr><td><code>packages/tui/*</code></td><td>Platform-specific npm wrapper packages distributing native TUI binaries (darwin / linux / win32).</td></tr>
+          <tr><td><code>examples/basic-cli</code> · <code>basic-web</code></td><td>Minimal SDK usage examples driving <code>core</code> directly, separate from the product CLI/TUI path.</td></tr>
+          <tr><td><code>tools/protocol-codegen</code></td><td>Generates JSON Schema, <code>methods.md</code>, shared fixtures, and <code>crates/protocol</code> Rust types from <code>catalog.ts</code> (and validates them via <code>--check</code>).</td></tr>
+          <tr><td><code>tools/terminal-bench*</code></td><td>Terminal-Bench Harbor integration, headless runner, ATIF artifact output, and local run viewer.</td></tr>
+          <tr><td><code>dev-docs/specs/</code></td><td>Feature contracts with status tracking in <a href="./specs/README.md"><code>specs/README.md</code></a> (see also <a href="./specs/command-approval-implementation.html">command-approval-implementation.html</a>).</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<section id="where">
+  <h2>Where to change code</h2>
+  <p>Quick lookup from common tasks to the starting files and companion places to update.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Goal</th><th>Start here</th><th>Update alongside</th></tr></thead>
+      <tbody>
+        <tr><td>Add a new LLM provider</td><td><code>packages/core/src/llm/&lt;provider&gt;/</code></td><td><code>packages/core/src/models/</code>, <code>packages/runtime/src/model-factory.ts</code>, provider metrics tests</td></tr>
+        <tr><td>Expose a new model ID</td><td><code>packages/core/src/models/&lt;provider&gt;.ts</code></td><td><code>packages/runtime/src/model-reasoning.ts</code></td></tr>
+        <tr><td>Add or modify a built-in tool</td><td><code>packages/runtime/src/tools/</code></td><td><code>packages/runtime/src/tool-composition.ts</code>, permission admission</td></tr>
+        <tr><td>Change approval or sandbox behavior</td><td><code>packages/runtime/src/permissions/</code></td><td><code>packages/runtime/src/sandbox/</code>, TUI confirmation dialogs</td></tr>
+        <tr><td>Add a TUI ↔ runtime RPC method</td><td><code>packages/protocol/src/catalog.ts</code> (+ schema file)</td><td>Run <code>bun run generate:protocol</code> &amp; commit generated files → <code>runtime/src/rpc/</code> handler → TUI <code>send_request</code> / <code>decode_result</code> &amp; <code>handlers/runtime_response/</code></td></tr>
+        <tr><td>Change TUI layout or keybindings</td><td><code>crates/tui/src/app/view/</code> · <code>event_loop/input.rs</code></td><td><code>crates/tui/src/app/state/</code></td></tr>
+        <tr><td>Add a TUI state transition</td><td><code>crates/tui/src/event_loop/update.rs</code> (<code>Msg</code>)</td><td><code>app/handlers/</code>; terminal/clipboard work via <code>app/effect.rs</code></td></tr>
+        <tr><td>Add telemetry fields or UI counters</td><td><code>runtime/src/telemetry.ts</code> · <code>rpc/run-metrics.ts</code></td><td><code>protocol/src/run.ts</code> · <code>telemetry.ts</code>, TUI <code>app/state/telemetry.rs</code> &amp; <code>view/ui/status.rs</code></td></tr>
+        <tr><td>Change persistence format</td><td><code>packages/storage/src/</code></td><td><code>dev-docs/specs/storage-layout.md</code></td></tr>
+        <tr><td>Change Agent loop ordering or compaction</td><td><code>packages/core/src/agent/agent.ts</code></td><td><code>packages/core/src/services/</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <footer class="doc-foot">Updated 2026-11-28 against <code>main</code> (v0.1.92, <code>2c2abc11</code>) and <code>dev-docs/</code>. Treat <a href="./reference-architecture.md"><code>reference-architecture.md</code></a>, <a href="./specs/README.md"><code>dev-docs/specs/</code></a>, and the source tree as authoritative.</footer>
+</section>
+</main>
+</div>
+
+</body>
+</html>

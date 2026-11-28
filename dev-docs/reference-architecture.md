@@ -1,7 +1,8 @@
 # codelia Architecture Overview
 
 This document summarizes the core architecture of codelia and the package
-boundaries used in this monorepo.
+boundaries used in this monorepo. For an illustrated walkthrough (open locally
+in a browser), see [`architecture.html`](./architecture.html).
 
 Image generation follows the existing dependency arrows: shared-types owns
 `ImageArtifactRef`/metadata; core owns reference ContentParts, request-only

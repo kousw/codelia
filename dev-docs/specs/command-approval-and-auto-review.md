@@ -2,7 +2,7 @@
 
 Codelia defaults to `workspace-write` with explicit confirmation. The sandbox setting determines what a running command and its descendants can access. Command approval determines whether the runtime may start that invocation. This document describes the **implemented local runtime**. The [permission request proposal](./permission-model.md) covers one-command escalation and its rollout.
 
-For settings and examples, see the [English guide](../../docs/command-approval.md) or [Japanese guide](../../docs/command-approval.ja.md). For a walkthrough of the runtime, executors and OS boundary, see the [illustrated design (Japanese)](./command-approval-implementation.ja.html).
+For settings and examples, see the [English guide](../../docs/command-approval.md) or [Japanese guide](../../docs/command-approval.ja.md). For a walkthrough of the runtime, executors and OS boundary, see the [illustrated design](./command-approval-implementation.html) ([Japanese](./command-approval-implementation.ja.html)).
 
 ## Running a command
 

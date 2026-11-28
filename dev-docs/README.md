@@ -10,6 +10,7 @@ These docs may include planned or partially implemented behavior.
 
 Start here:
 - module dependency diagram and package architecture: [`reference-architecture.md`](./reference-architecture.md)
+- illustrated architecture guide (HTML, open in a local browser): [`architecture.html`](./architecture.html)
 - status-aware spec index: [`specs/README.md`](./specs/README.md)
 - `CODELIA_*` environment variable registry: [`environment-variables.md`](./environment-variables.md)
 - config write-target policy: [`config-write-policy.md`](./config-write-policy.md)

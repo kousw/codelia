@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Codelia Sandbox &amp; Command Approval</title>
+<style>
+/* Layout: sticky table of contents on the left, one reading column on the right; diagrams span the column. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --band: #eceff3;
+  --fg: #1b2230;
+  --muted: #5b6475;
+  --line: #c3cad5;
+  --accent: #0f6e8c;
+  --accent-soft: #e1f0f5;
+  --warn: #9a5b00;
+  --warn-soft: #fbf0dc;
+  --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161d; --surface: #1a2029; --band: #202733; --fg: #e4e8ef; --muted: #9aa4b5;
+    --line: #3a4455; --accent: #5cc0de; --accent-soft: #15313b; --warn: #e6b45c; --warn-soft: #33290f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161d; --surface: #1a2029; --band: #202733; --fg: #e4e8ef; --muted: #9aa4b5;
+  --line: #3a4455; --accent: #5cc0de; --accent-soft: #15313b; --warn: #e6b45c; --warn-soft: #33290f;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--fg); font-family: var(--font-body);
+  font-size: 15px; line-height: 1.7;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--band); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+pre {
+  margin: 14px 0 0; padding: 12px 16px; border-radius: 8px;
+  background: var(--band); border: 1px solid var(--line);
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.65;
+  overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; }
+section { margin-top: 64px; scroll-margin-top: 24px; }
+section > p, .prose { max-width: 48em; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; padding-top: 40px; font-size: 13.5px; }
+nav.toc p { margin: 0 0 8px; font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+nav.toc li.sub a { padding-left: 22px; font-size: 13px; }
+nav.toc a { display: block; padding: 3px 10px; border-left: 2px solid var(--line); color: var(--muted); text-decoration: none; }
+nav.toc a:hover { color: var(--fg); border-left-color: var(--accent); }
+main { min-width: 0; padding-top: 40px; }
+header.top { display: grid; gap: 12px; margin-bottom: 36px; }
+.eyebrow { font-size: 12px; letter-spacing: 0.1em; color: var(--accent); font-weight: 600; margin: 0; }
+h1 { font-size: 34px; line-height: 1.25; margin: 0; text-wrap: balance; font-weight: 700; }
+h2 { font-size: 24px; line-height: 1.35; margin: 0 0 14px; text-wrap: balance; font-weight: 700; }
+h3 { font-size: 18.5px; line-height: 1.4; margin: 0; text-wrap: balance; font-weight: 600; }
+.lead { font-size: 16.5px; max-width: 48em; margin: 0; }
+.muted { color: var(--muted); }
+
+.keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 24px 0 0; padding: 0; list-style: none; }
+.keys li { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; min-width: 0; }
+.keys li strong { display: block; font-size: 15.5px; margin-bottom: 6px; }
+.keys li span { font-size: 14px; color: var(--muted); }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+
+figure { margin: 22px 0 0; }
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--muted); }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 10px; max-width: 54em; }
+figcaption b { color: var(--fg); font-weight: 600; }
+
+/* SVG parts, themed through tokens */
+.bx { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.bx-acc { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+.bx-ext { fill: var(--bg); stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.bx-con { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+.bx-band { fill: var(--band); stroke: none; }
+.bx-loop { fill: none; stroke: var(--warn); stroke-width: 1.3; stroke-dasharray: 6 4; }
+.t { fill: var(--fg); font-family: var(--font-body); font-size: 13.5px; font-weight: 600; }
+.ta { fill: var(--accent); font-family: var(--font-body); font-size: 13.5px; font-weight: 700; }
+.s { fill: var(--muted); font-family: var(--font-body); font-size: 11.5px; }
+.sm { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.lb { fill: var(--fg); font-family: var(--font-mono); font-size: 11px; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.lbj { fill: var(--fg); font-family: var(--font-body); font-size: 11.5px; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.lw { fill: var(--warn); font-family: var(--font-body); font-size: 12px; font-weight: 600; }
+.ln { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+.ln-d { stroke: var(--muted); stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+.ln-acc { stroke: var(--accent); stroke-width: 1.8; fill: none; }
+.life { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 3 4; }
+.ah { fill: var(--muted); }
+.ah-acc { fill: var(--accent); }
+
+/* Module cards */
+.mod { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; margin-top: 20px; min-width: 0; }
+.grid-2 > * { margin-top: 0; }
+.mod-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; }
+.mod-head .path { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+.tag { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: var(--band); color: var(--muted); letter-spacing: 0.02em; }
+.tag.hot { background: var(--accent-soft); color: var(--accent); }
+.point { margin: 14px 0 0; padding: 10px 14px; border-radius: 8px; background: var(--accent-soft); font-size: 14.5px; }
+.point b { color: var(--accent); margin-right: 6px; }
+.facts { display: grid; grid-template-columns: 11em minmax(0, 1fr); gap: 6px 16px; margin: 16px 0 0; font-size: 14px; }
+.facts dt { color: var(--muted); font-weight: 500; }
+.facts dd { margin: 0; min-width: 0; }
+.status { margin-top: 12px; font-size: 13px; color: var(--warn); background: var(--warn-soft); padding: 6px 12px; border-radius: 6px; }
+
+.tbl { overflow-x: auto; margin-top: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+th { font-weight: 600; background: var(--band); white-space: nowrap; }
+td code { white-space: nowrap; }
+.rules { margin: 16px 0 0; padding-left: 1.3em; max-width: 48em; }
+.rules li { margin: 4px 0; }
+.steps { margin: 16px 0 0; padding-left: 1.5em; max-width: 48em; }
+.steps li { margin: 8px 0; }
+.steps li::marker { color: var(--accent); font-weight: 700; }
+.sub-h { font-size: 15.5px; font-weight: 600; margin: 26px 0 0; }
+.refs { margin: 14px 0 0; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+details {
+  margin-top: 16px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px 16px;
+}
+summary { cursor: pointer; font-weight: 600; color: var(--accent); font-size: 14.5px; }
+details > *:not(summary) { font-size: 14.5px; }
+details > p:first-of-type, details > ul:first-of-type, details > dl:first-of-type, details > .tbl:first-of-type { margin-top: 10px; }
+.module td:first-child { width: 21%; }
+.module td:last-child { width: 34%; }
+footer.doc-foot {
+  margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line);
+  font-size: 13.5px; color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.toc { position: static; padding-top: 24px; }
+  nav.toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  main { padding-top: 24px; }
+  .keys, .grid-2 { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  h1 { font-size: 27px; }
+  .facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .facts dt { margin-top: 8px; }
+  .mod { padding: 18px 16px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body { background: #ffffff; padding: 0; font-size: 10pt; }
+  .wrap { display: block; }
+  nav.toc { display: none; }
+  main { padding-top: 0; }
+  .diagram svg { min-width: 0; }
+  .diagram, .tbl { overflow: visible; }
+  figure, .mod, details, tr { break-inside: avoid; }
+  h2, h3, summary { break-after: avoid; }
+  thead { display: table-header-group; }
+  details::details-content { display: block; content-visibility: visible; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#structure">Execution architecture</a></li>
+    <li><a href="#access">What the sandbox protects</a></li>
+    <li><a href="#rollout">OS enforcement &amp; limits</a></li>
+    <li><a href="#sequence">Approval sequence</a></li>
+    <li><a href="#auto-approve-routing">When confirmation asks</a></li>
+    <li><a href="#review">Auto approve &amp; latency</a></li>
+    <li><a href="#walkthrough">Code walkthrough</a></li>
+    <li><a href="#lifecycle">Retries &amp; reaping</a></li>
+    <li><a href="#modules">Module layout</a></li>
+    <li><a href="#impact">Legacy migration</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <p class="eyebrow">CODELIA · SANDBOX &amp; COMMAND APPROVAL</p>
+  <h1>Sandbox &amp; Command Approval Implementation</h1>
+  <p class="lead">When you ask Codelia to “fix this file and run the tests,” the runtime checks what the command touches, decides whether startup is admitted, and lets the OS confine writes and network access for the shell and every child it spawns.</p>
+  <ol class="keys">
+    <li><strong>Sandbox = access ceiling</strong><span>Controls which files, local IPC, and network sockets a running command and its descendants can reach.</span></li>
+    <li><strong>Approval = launch gate</strong><span>Controls whether the runtime may start this invocation under that mode. Both axes are independent.</span></li>
+    <li><strong>Single launch path</strong><span>Confined shells check policy, bind effective authority, re-verify before launch, and consume a single grant.</span></li>
+  </ol>
+</header>
+
+<section id="structure">
+  <h2>Execution architecture</h2>
+  <p>Confined local shell commands are admitted in the Codelia runtime and dispatched through OS backends — Seatbelt on macOS (or MXC opt-in), the packaged MXC Bubblewrap helper on Linux (or rootless gVisor fallback), and MXC ProcessContainer under qualification on Windows. Choosing explicit <code>full-access</code> or an approved one-shot escalation still routes through runtime admission, then runs the shell unconfined as the login user.</p>
+  <figure>
+    <div class="diagram">
+    <svg viewBox="0 0 980 390" role="img" aria-label="TUI or Agent calls Codelia runtime, which verifies caller, authority, and route (optionally consulting an external Auto approve reviewer model). Confined requests pass through a common Rust helper into MXC SDK or native Seatbelt/gVisor and run inside OS boundaries on macOS, Linux, and Windows.">
+      <defs>
+        <marker id="ca1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="ca1c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <rect class="bx-con" x="20" y="18" width="600" height="202" rx="10"/>
+      <text class="ta" x="36" y="42">Local host · Admission &amp; launch</text>
+      <rect class="bx" x="36" y="62" width="160" height="62" rx="8"/>
+      <text class="t" x="116" y="89" text-anchor="middle">Caller</text>
+      <text class="s" x="116" y="109" text-anchor="middle">TUI · Agent · RPC</text>
+      <line class="ln" x1="196" y1="93" x2="246" y2="93" marker-end="url(#ca1)"/>
+      <rect class="bx" x="250" y="62" width="350" height="62" rx="8"/>
+      <text class="t" x="425" y="89" text-anchor="middle">Codelia runtime</text>
+      <text class="s" x="425" y="109" text-anchor="middle">Bind owner, effective authority &amp; admission route</text>
+      <line class="ln-acc" x1="425" y1="124" x2="425" y2="148" marker-end="url(#ca1c)"/>
+      <rect class="bx-acc" x="250" y="152" width="350" height="52" rx="8"/>
+      <text class="t" x="425" y="176" text-anchor="middle">OS sandbox backend / MXC helper</text>
+      <text class="s" x="425" y="194" text-anchor="middle">Common Rust launcher (MXC SDK) or native driver</text>
+
+      <!-- External reviewer -->
+      <text class="s" x="660" y="42">External provider (optional)</text>
+      <rect class="bx-ext" x="660" y="62" width="300" height="62" rx="8"/>
+      <text class="t" x="810" y="89" text-anchor="middle">Auto approve model</text>
+      <text class="s" x="810" y="109" text-anchor="middle">Propose rule or review escalation</text>
+      <line class="ln-d" x1="600" y1="81" x2="656" y2="81" marker-end="url(#ca1)"/>
+      <line class="ln-d" x1="660" y1="106" x2="604" y2="106" marker-end="url(#ca1)"/>
+      <text class="s" x="660" y="168">full-access or approved escalation launches</text>
+      <text class="s" x="660" y="186">unconfined as the login user after admission</text>
+
+      <!-- OS boundary -->
+      <rect class="bx-ext" x="20" y="242" width="940" height="134" rx="10"/>
+      <text class="t" x="36" y="268">OS boundary applied to shell and all descendants</text>
+      <path class="ln-acc" d="M425 204 V230 H175 V284" marker-end="url(#ca1c)"/>
+      <path class="ln-acc" d="M425 230 V284" marker-end="url(#ca1c)"/>
+      <path class="ln-acc" d="M425 230 H785 V284" marker-end="url(#ca1c)"/>
+      <rect class="bx" x="36" y="288" width="278" height="68" rx="8"/>
+      <text class="t" x="175" y="316" text-anchor="middle">macOS · Seatbelt</text>
+      <text class="s" x="175" y="338" text-anchor="middle">Direct default; MXC helper opt-in (arm64)</text>
+      <rect class="bx-acc" x="349" y="288" width="282" height="68" rx="8"/>
+      <text class="t" x="490" y="316" text-anchor="middle">Linux · Bubblewrap (MXC)</text>
+      <text class="s" x="490" y="338" text-anchor="middle">Default on x64/arm64; gVisor fallback</text>
+      <rect class="bx-ext" x="664" y="288" width="276" height="68" rx="8"/>
+      <text class="t" x="802" y="316" text-anchor="middle">Windows · MXC</text>
+      <text class="s" x="802" y="338" text-anchor="middle">ProcessContainer (under qualification)</text>
+    </svg>
+    </div>
+    <figcaption><b>Runtime passes an admitted request once to its executor.</b> The selected OS backend enforces filesystem, network, and IPC restrictions across the spawned shell and any child processes it creates. <a href="#rollout">See per-OS coverage below.</a></figcaption>
+  </figure>
+  <div class="grid-2">
+    <article class="mod">
+      <div class="mod-head"><h3>What the sandbox decides</h3></div>
+      <p class="prose">Effective access to files, direct network connections, and host IPC. Even if a sandboxed test spawns compilers or worker subprocesses, descendants inherit the same boundary.</p>
+    </article>
+    <article class="mod">
+      <div class="mod-head"><h3>What approval decides</h3></div>
+      <p class="prose">Whether runtime may start this invocation under the requested conditions. Commands admitted by Auto approve still run under the same write roots and network blocks.</p>
+    </article>
+  </div>
+</section>
+
+<section id="access">
+  <h2>What the sandbox protects</h2>
+  <p>In <code>workspace-write</code>, ordinary user-readable files are readable broadly within the login account's OS permissions. Workspace source files and an un-protected <code>.env.local</code> inside the workspace are writable, while <code>.git/config</code> stays read-only. To hide specific files or directories from both reads and writes, mark them in <code>protected_paths</code>. <a href="../../docs/command-approval.md#shell-execution">Settings &amp; examples</a> · <a href="command-approval-reference.ja.md#他のローカルエージェントはどこまで読めるか">Comparison with other local agents (Japanese)</a></p>
+
+  <h3 class="sub-h">Authority ceiling by sandbox mode</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th scope="col">Launch mode</th><th scope="col">Read</th><th scope="col">Write</th><th scope="col">Direct network</th></tr></thead>
+      <tbody>
+        <tr><th scope="row"><code>readonly</code></th><td>Ordinary user-readable files, including outside tree</td><td>Private scratch space</td><td>Blocked</td></tr>
+        <tr><th scope="row"><code>workspace-write</code></th><td>Same as above</td><td>Approved workspace, allowed Git metadata, and private scratch space</td><td>Blocked</td></tr>
+        <tr><th scope="row"><code>full-access</code></th><td>Login user's access</td><td>Login user's access</td><td>Same as host</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose">Even inside <code>workspace-write</code>, read-only inspection calls with closed stdin select the tighter <code>investigation</code> profile and drop workspace write access, whereas project test/build runs receive <code>development</code>. Startup probes and stdio MCP subprocesses stay confined appropriately. <a href="../../packages/runtime/src/permissions/shell-approval.ts">Profile selection logic</a></p>
+
+  <h3 class="sub-h">Visibility from a development shell</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th scope="col">Target</th><th scope="col">Allowed behavior and rationale</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Sources, build outputs &amp; SDKs</th><td>Ordinary reads span outside the workspace so toolchains and libraries work. Edits inside the workspace apply live on disk; a failed test leaves partial writes in place. Ordinary files outside the tree stay read-only by default.</td></tr>
+        <tr><th scope="row">Git metadata</th><td>Readable so <code>git status</code> and diffs work (including remotes in config). On backends declaring <code>supportsAbsentPathDenial</code> (macOS Seatbelt/MXC), workspace-root Git directories (and verified linked worktree common dirs) are writable (<code>gitWriteRoots</code>) while <code>gitProtectedPaths</code> (<code>config</code>, <code>config.worktree</code>, <code>hooks/</code>, <code>commondir</code>, <code>gitdir</code>, <code>objects/info/(http-)alternates</code>, <code>remotes/</code>, <code>branches/</code>, <code>modules/</code>, <code>worktrees/*/{gitdir,commondir,config.worktree}</code>, linked worktree <code>.git</code> marker) remain read-only. Backends without absent-path denial (such as Linux gVisor) keep <code>.git</code> read-only.</td></tr>
+        <tr><th scope="row">Project <code>.codelia/</code></th><td>Readable by the agent, but read-only to confined shells and built-in tools; project config writes happen only in runtime via management actions. If designated in <code>protected_paths</code>, reads are blocked too.</td></tr>
+        <tr><th scope="row">User-designated private paths &amp; home dotfiles</th><td>Paths in <code>protected_paths</code> (<code>projects.json</code>) or host <code>approvalProtectedPaths</code> deny both reads and writes. When <code>~</code> is granted as the workspace root, top-level dot-entries (<code>~/.*</code>, existing and absent, plus symlink targets) and macOS <code>~/Library</code> remain read-only by default across Seatbelt, Linux gVisor, and built-in file tools.</td></tr>
+        <tr><th scope="row">Codelia credentials &amp; config</th><td>Codelia's own credential store (<code>&lt;configDir&gt;/credentials/</code>, plus legacy root <code>auth.json</code> and <code>mcp-auth.json</code>) is included in default protected paths (denied to confined shells and built-in file tools). <code>config.json</code> and <code>projects.json</code> stay protected from agent writes. Other user-readable files (e.g., <code>.env</code>, <code>~/.ssh</code>) follow normal OS read rules unless configured private.</td></tr>
+        <tr><th scope="row">Network &amp; host IPC</th><td>Direct outbound network is blocked for confined shells and descendants. Host Unix sockets and named pipes follow per-OS backend rules. Auto approve reviewer calls originate outside the sandbox in runtime; remote MCP tools follow their server's own authority.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="refs"><a href="../../packages/runtime/src/permissions/shell-backend.ts">shell-backend.ts</a> <a href="../../packages/runtime/src/permissions/git-metadata.ts">git-metadata.ts</a> <a href="../../packages/runtime/src/permissions/workspace-config-paths.ts">workspace-config-paths.ts</a></p>
+  <p class="prose">Command discovery inherits <code>PATH</code> from the launching environment (or SDK <code>shellPath</code>) so tools like Bun and Cargo resolve without hardcoded paths. Confined shells preserve login <code>HOME</code> (read-only outside explicit grants) while giving private <code>TMPDIR</code> and <code>XDG_CACHE_HOME</code> scratch directories. <a href="../../packages/runtime/src/permissions/shell-path.ts">Command lookup &amp; rule matching</a></p>
+
+  <h3 class="sub-h">Cases where paths alone are not enough</h3>
+  <details><summary>Launching from the user's home directory</summary><p>Even if the workspace is <code>~</code> itself, verified user-owned <code>projects.json</code> resolves both the sandbox mode and protected paths (for instance, <code>readonly</code> for home combined with private directories), while keeping <code>~/.*</code> top-level dot-entries and <code>~/Library</code> read-only. Alias checks against runtime-owned <code>config.json</code> inspect only canonical config targets rather than crawling session logs or old worktrees. <a href="../../packages/runtime/tests/protected-path-policy.test.ts">Home-workspace regression test</a></p></details>
+  <details open><summary>Two names pointing to the same file</summary><p>Symlinks resolve through their targets; hard links share the same inode. Because an in-place edit to an ordinary workspace file modifies its underlying inode, a pre-existing hard link outside the workspace sees that update. Protected targets check hard-link aliases as well: on macOS, if a protected path's alias cannot be isolated cleanly, launching a development shell is blocked upfront.</p><p>The deliberate exception is shared Git objects inside standard macOS development shells so shared clones can run tests, while built-in file tools still reject writes targeting Git metadata aliases. <a href="#shared-clone">See the shared-clone diagram below</a></p></details>
+  <details><summary>Absent protected files or case-insensitive names</summary><p>Even if <code>.codelia/</code> or a private config does not exist yet, its name is reserved so later user config writes stay safe. Built-in file tools verify existing files by device + inode and check parent directories when targets are absent or differ in casing, erring on protection when ambiguous. On macOS, confined shells also prevent moving or deleting parent directories anchoring protected paths.</p><p class="refs"><a href="../../packages/runtime/src/permissions/resource-paths.ts">resource-paths.ts</a> <a href="../../packages/runtime/src/permissions/shell-backend.ts">Parent directory guards</a></p></details>
+  <details><summary>Targets changed after approval, or isolation cannot be enforced</summary><p>If an approved file creation races with an external editor creating that path before dispatch, built-in tools re-verify and abort before writing. Confined shells likewise re-check backend capability immediately before launch and fail with <code>sandbox_unavailable</code> if enforcement cannot hold; disabling OS isolation always requires explicit <code>full-access</code> or an approved one-shot escalation.</p><p class="refs"><a href="../../packages/runtime/src/sandbox/file-mutations.ts">file-mutations.ts</a> <a href="../../packages/runtime/src/permissions/shell-approval.ts">Pre-launch re-verification</a></p></details>
+</section>
+
+<section id="rollout">
+  <h2>OS enforcement and limits</h2>
+  <p>MXC provides a shared launch helper API, while effective confinement for live workspace edits combined with protected paths depends on each OS backend and host kernel configuration.</p>
+
+  <h3 class="sub-h">macOS · Path grants and pre-existing alias checks</h3>
+  <p class="prose">Default execution uses direct Seatbelt; on arm64, <code>CODELIA_MAC_SHELL_BACKEND=mxc</code> selects the packaged Rust MXC helper. Both apply Codelia's custom profile blocking host workspace Unix sockets and TCP loopback (whereas upstream MXC's stock profile permitted host workspace Unix sockets during evaluation).</p>
+  <p class="prose">Tests creating files across shared clones, packed clones, and linked worktrees pass on both Seatbelt and MXC paths. Alias indexing caps at 4,096 entries per protected directory; exceeding that cap may block development-shell launches rather than weakening protection. Full descendant reaping on abnormal helper crashes remains under tracking before considering MXC as macOS default.</p>
+  <p class="prose">Child processes spawned inside the sandbox can signal their own descendants, and username lookup permits Open Directory libinfo services (<code>whoami</code> and Node <code>os.userInfo()</code> succeed on macOS 26.2 arm64 under both Seatbelt and MXC; stock <code>/bin/ps</code> returns <code>EPERM</code> even for child PIDs).</p>
+
+  <h3 class="sub-h">Linux · Absent protected secrets inside writable trees</h3>
+  <p class="prose">Consider a protected file such as <code>.env.local</code> inside a writable workspace when a user creates it from an editor while a confined agent run is active: source edits must propagate live, yet the newly created secret must stay invisible to confined processes.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th scope="col">Backend</th><th scope="col">Behavior for absent protected paths</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Packaged MXC / Bubblewrap (default on x64 &amp; arm64)</th><td>Runs unprivileged user/network/PID namespaces, seccomp, and private <code>/tmp</code> + <code>/run</code> with <code>bwrap &gt;= 0.5.0</code>. Overlays empty files/dirs onto existing protected entries, while masking absent names in a writable workspace requires either parent masking or an OS policy layer (private overlays would block live source edits).</td></tr>
+        <tr><th scope="row">Rootless gVisor fallback (<code>CODELIA_LINUX_SHELL_BACKEND=gvisor</code>)</th><td>Overmounts empty files/dirs and blocks pathname Unix sockets (<code>--host-uds=none</code>), FIFOs, and direct network. Keeps <code>.git</code> read-only and rejects shell/create operations before launch if a required absent protected mountpoint has no existing parent mask.</td></tr>
+        <tr><th scope="row">MXC + AppArmor (evaluated)</th><td>When an administrator loads an AppArmor profile on the VM, absent protected filenames stay blocked without creating placeholder stubs on the host, while normal workspace edits stay live. Host policy distribution remains outside core runtime.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="sub-h">Windows · Evaluating pre-existing host ACLs</h3>
+  <p class="prose">In MXC ProcessContainer evaluation, existing host ACLs granted to principals like <code>ALL_APPLICATION_PACKAGES</code> affect effective access, and named pipes carry their own ACLs independent of network blocks. On Windows 11 ARM CI, a minimal console binary launched cleanly while Node exited with <code>0xC0000142</code> at DLL init; Server 2025 x64 lacked the required host capabilities. No default confined Windows host configuration is qualified yet.</p>
+  <p class="refs"><a href="../../packages/runtime/src/permissions/linux-shell-backend.ts">linux-shell-backend.ts</a> <a href="../../packages/runtime/src/permissions/protected-aliases.ts">protected-aliases.ts</a> <a href="windows-mxc-qualification.md">windows-mxc-qualification.md</a> <a href="command-approval-reference.ja.md#mxc-evaluation">OS evaluation notes (Japanese)</a></p>
+
+  <details><summary>Packaging the common helper and per-OS acceptance gates</summary>
+    <p>The macOS arm64 / Linux helper binds Microsoft's official Rust MXC SDK and is invocable from both Bun and Node (<code>createMacMxcShellBackend()</code> is available to SDK hosts).</p>
+    <ol class="steps">
+      <li><strong>Freeze the helper IPC contract.</strong> Pass one request with executable, args, cwd, and effective authority; distinguish launch ack, startup failure, and exit result while separating control messages from child stdio.</li>
+      <li><strong>Ship binaries cleanly.</strong> Bundle the platform helper and license inside per-OS/arch CLI packages while resolving standalone runtime installs too; verify host capabilities before every launch.</li>
+      <li><strong>Pass shared acceptance tests per OS.</strong> Cover outside-tree reads, live workspace writes, protected entries, network/IPC blocks, descendant inheritance, cancellation, and crash reaping alongside OS-specific gates (like Windows ACL checks).</li>
+      <li><strong>Promote only after qualification.</strong> Keep <code>sandbox_unavailable</code> explicit whenever a host lacks required isolation; never downgrade silently to <code>full-access</code>.</li>
+    </ol>
+  </details>
+
+  <h3 class="sub-h">Out of scope for local confinement</h3>
+  <p class="prose">Cloud gVisor workers, destination-scoped HTTP/egress proxies, and selective snapshot diff rollback belong to future phases. SDK hosts can already supply additional <code>approvalProtectedPaths</code>.</p>
+  <p class="refs"><a href="command-approval-reference.ja.md#ローカル開発環境で残る検証">Remaining Linux checks (Japanese)</a> <a href="command-approval-reference.ja.md#mxc-evaluation">MXC evaluation details (Japanese)</a> <a href="windows-mxc-qualification.md">Windows qualification</a> <a href="backlog.md#cloud-gvisor">Cloud gVisor backlog</a> <a href="https://github.com/microsoft/mxc/blob/v1.1.0/README.md">Microsoft MXC v1.1.0</a></p>
+</section>
+
+<section id="sequence">
+  <h2>Command approval sequence</h2>
+  <figure>
+    <div class="diagram">
+    <svg viewBox="0 0 980 515" role="img" aria-label="Sequence with Auto approve enabled in workspace-write: Agent runs cargo test -p parser, runtime parses and checks authority, permission router approves locally with zero model calls or prompts, and executor launches once after re-verification.">
+      <defs>
+        <marker id="ca2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <rect class="bx" x="45" y="16" width="180" height="44" rx="8"/><text class="t" x="135" y="43" text-anchor="middle">Agent</text>
+      <line class="life" x1="135" y1="60" x2="135" y2="500"/>
+      <rect class="bx" x="285" y="16" width="180" height="44" rx="8"/><text class="t" x="375" y="43" text-anchor="middle">runtime</text>
+      <line class="life" x1="375" y1="60" x2="375" y2="500"/>
+      <rect class="bx-acc" x="525" y="16" width="180" height="44" rx="8"/><text class="t" x="615" y="43" text-anchor="middle">Permission router</text>
+      <line class="life" x1="615" y1="60" x2="615" y2="500"/>
+      <rect class="bx" x="765" y="16" width="180" height="44" rx="8"/><text class="t" x="855" y="43" text-anchor="middle">Executor · OS</text>
+      <line class="life" x1="855" y1="60" x2="855" y2="500"/>
+
+      <line class="ln" x1="135" y1="100" x2="371" y2="100" marker-end="url(#ca2)"/>
+      <text class="lb" x="255" y="92" text-anchor="middle">cargo test -p parser</text>
+      <path class="ln" d="M375 156 H430 V176 H379" marker-end="url(#ca2)"/>
+      <text class="lbj" x="366" y="169" text-anchor="end">Parse &amp; check ceiling</text>
+      <line class="ln" x1="375" y1="220" x2="611" y2="220" marker-end="url(#ca2)"/>
+      <text class="lbj" x="495" y="212" text-anchor="middle">Verify caller &amp; effective authority</text>
+      <line class="ln-d" x1="615" y1="280" x2="379" y2="280" marker-end="url(#ca2)"/>
+      <text class="lbj" x="495" y="272" text-anchor="middle">Immediate confined allow</text>
+      <line class="ln" x1="375" y1="342" x2="851" y2="342" marker-end="url(#ca2)"/>
+      <text class="lbj" x="615" y="334" text-anchor="middle">Re-verify request &amp; consume 1 grant</text>
+      <line class="ln-d" x1="855" y1="402" x2="379" y2="402" marker-end="url(#ca2)"/>
+      <text class="lbj" x="615" y="394" text-anchor="middle">stdout · stderr · exit status</text>
+      <line class="ln-d" x1="375" y1="464" x2="139" y2="464" marker-end="url(#ca2)"/>
+      <text class="lbj" x="255" y="456" text-anchor="middle">Tool result</text>
+    </svg>
+    </div>
+    <figcaption><b>Auto approve inside the current sandbox takes one launch, zero model calls, and zero prompts.</b> The parent shell executes directly within the already-granted OS boundary.</figcaption>
+  </figure>
+
+  <h3 class="sub-h">Admission precedence</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th scope="col">Order</th><th scope="col">Condition</th><th scope="col">Runtime outcome</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">1. Reject upfront</th><td>Owner mismatch, unregistered tool, explicit <code>deny</code>, host ceiling exceeded, or required sandbox unavailable.</td><td>Rejected before confirmation; 0 launches.</td></tr>
+        <tr><th scope="row">2. Escalation / extra write roots</th><td>Request needs existing directory-scoped <code>additional_write_roots</code> or one-shot <code>escalation: "unsandboxed"</code> from <code>readonly</code> / <code>workspace-write</code> within host ceilings.</td><td>Routes through Auto Review when active (for qualifying parsed/non-destructive requests); otherwise prompts human once. Remembered rules never grant extra write roots or unsandboxed escalation.</td></tr>
+        <tr><th scope="row">3. Local allow</th><td>Ordinary read, owned task lookup, or matching saved/configured allowance under explicit confirmation.</td><td>Decided locally with zero model calls.</td></tr>
+        <tr><th scope="row">4. Confined parent shell</th><td>Unremembered test/build command staying inside enforced confinement whose mandatory rules can be checked.</td><td>Allowed immediately if workspace Auto approve is enabled; otherwise prompts human.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="sub-h">Finite shell loop example</h3>
+  <pre><code>for f in a.txt b.txt; do wc -l "$f"; done</code></pre>
+  <p class="prose">Static analysis resolves both <code>a.txt</code> and <code>b.txt</code> across the finite loop. When both satisfy investigation rules, runtime starts the original shell once without writing extra rules. Pipelines and conditionals are evaluated as one whole program; shell functions, command substitutions, and unsupported dialects count as opaque and require fallback treatment.</p>
+  <p class="prose">Commands run repeatedly in the same directory (like <code>cargo test</code> or <code>npm run build</code>) can be saved per session or per project when executable + args match cleanly. Re-execution re-checks cwd, binary, and authority. Choosing trailing-arg wildcard allows e.g. <code>cargo test --release</code> under the same conditions, while legacy exact rules stay exact.</p>
+
+  <details><summary>How non-shell tools check authority</summary>
+    <ul>
+      <li><code>apply_patch --dry_run</code> needs only workspace read access; full guarded patches reject moves into paths vacated by an earlier hunk before touching disk.</li>
+      <li><code>image_export</code> verifies output destination permissions right before writing, even after reading the source image.</li>
+      <li>Local stdio MCP servers and CLI <code>mcp test</code> share one launch path, passing configured secret env values over an input pipe rather than CLI args or confirmation prompts.</li>
+      <li>Five registered native TUI client UI tools (such as selectors and user-choice prompts) skip command confirmation, while general client tools follow their registration approval policy.</li>
+    </ul>
+    <p class="refs"><a href="../../packages/runtime/tests/prepared-tool-approval.test.ts">Patch &amp; client-tool tests</a> <a href="../../packages/runtime/tests/image-rpc.test.ts">Image export tests</a> <a href="../../packages/runtime/src/mcp/protected-stdio.ts">Shared MCP launcher</a></p>
+  </details>
+  <p class="refs"><a href="command-approval-reference.ja.md">Shell grammar &amp; rule persistence (Japanese)</a> <a href="../../packages/runtime/src/permissions/route.ts">route.ts</a></p>
+</section>
+
+<section id="auto-approve-routing">
+  <h2>When confirmation asks a human</h2>
+  <p>Commands whose full program passes mandatory rules and stays within the current sandbox resolve locally. Requests requiring extra write roots or unsandboxed escalation route to Auto Review (when eligible) or prompt the user once. Under explicit confirmation, simple bound commands can also propose reusable rules.</p>
+  <figure id="interactive-allowance">
+    <div class="diagram">
+    <svg viewBox="0 0 980 296" role="img" aria-label="Explicit confirmation gives three choices: Decline (stop), Run once (launch with current authority), or Set up future allowance (reviewer model proposes rule, runtime validates against invocation, human confirms scope before saving and launching).">
+      <defs>
+        <marker id="ca3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="ca3c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <path class="ln" d="M204 118 H238 V44 H272" marker-end="url(#ca3)"/>
+      <line class="ln" x1="204" y1="118" x2="272" y2="118" marker-end="url(#ca3)"/>
+      <path class="ln" d="M238 118 V198 H272" marker-end="url(#ca3)"/>
+      <line class="ln" x1="470" y1="44" x2="516" y2="44" marker-end="url(#ca3)"/>
+      <line class="ln" x1="470" y1="118" x2="516" y2="118" marker-end="url(#ca3)"/>
+      <line class="ln-acc" x1="470" y1="198" x2="516" y2="198" marker-end="url(#ca3c)"/>
+      <line class="ln-acc" x1="714" y1="198" x2="758" y2="198" marker-end="url(#ca3c)"/>
+
+      <rect class="bx" x="20" y="81" width="184" height="74" rx="8"/>
+      <text class="t" x="112" y="112" text-anchor="middle">Awaiting confirmation</text>
+      <text class="s" x="112" y="134" text-anchor="middle">Command &amp; reason shown</text>
+
+      <rect class="bx" x="276" y="19" width="194" height="50" rx="8"/><text class="t" x="373" y="49" text-anchor="middle">Decline</text>
+      <rect class="bx" x="276" y="93" width="194" height="50" rx="8"/><text class="t" x="373" y="123" text-anchor="middle">Run once</text>
+      <rect class="bx" x="276" y="173" width="194" height="50" rx="8"/><text class="t" x="373" y="203" text-anchor="middle">Set up future allowance</text>
+
+      <rect class="bx-ext" x="520" y="19" width="194" height="50" rx="8"/><text class="s" x="617" y="49" text-anchor="middle">Do not launch; return</text>
+      <rect class="bx" x="520" y="93" width="194" height="50" rx="8"/><text class="s" x="617" y="123" text-anchor="middle">Launch with shown authority</text>
+      <rect class="bx-acc" x="520" y="168" width="194" height="60" rx="8"/>
+      <text class="t" x="617" y="194" text-anchor="middle">Model suggests rule</text>
+      <text class="s" x="617" y="214" text-anchor="middle">runtime validates match</text>
+
+      <rect class="bx" x="762" y="162" width="198" height="72" rx="8"/>
+      <text class="t" x="861" y="192" text-anchor="middle">Human confirms scope</text>
+      <text class="s" x="861" y="214" text-anchor="middle">Save rule &amp; launch</text>
+
+      <text class="s" x="490" y="274" text-anchor="middle">Future runs match the saved rule locally — zero model calls on a match.</text>
+    </svg>
+    </div>
+    <figcaption><b>Unshareable previews or composite shell programs skip rule suggestions</b> and stay one-time decisions. Even if suggestion generation fails, an eligible bound command still offers an exact-match rule — and nothing persists until the human confirms.</figcaption>
+  </figure>
+  <p class="prose">Grant rules, authority expiration, and re-prompt triggers are documented further in <a href="permission-model.md"><code>permission-model.md</code></a>.</p>
+  <p class="refs"><a href="command-approval-and-auto-review.md#confirmation-and-review">Spec body &amp; acceptance gates</a></p>
+</section>
+
+<section id="review">
+  <h2>Auto approve models and latency</h2>
+  <p>Selecting <strong>Enable in this workspace</strong> under <code>/auto-approve</code> enables confined launches for that workspace. <strong>Follow chat provider</strong> follows the active built-in chat provider, while <strong>Custom model</strong> pins a registered provider/model pair using existing credentials with no extra per-session transmission prompt.</p>
+  <div class="grid-2">
+    <article class="mod">
+      <div class="mod-head"><h3>Delegated reviewer evidence</h3></div>
+      <p class="prose">Includes the accepted user input (or active <code>/goal</code> objective), applied Steers, command + args, cwd, and effective write/network scope. Raw attachments, unrelated history, and secret env values are excluded before dispatch.</p>
+    </article>
+    <article class="mod">
+      <div class="mod-head"><h3>Latency characteristics</h3></div>
+      <p class="prose">Evidence is assembled only once a request routes to review. Independent reads/status checks can proceed concurrently while awaiting review. No artificial 5 s cutoff, per-run quota cap, or separate dollar budget is imposed.</p>
+    </article>
+  </div>
+  <details>
+    <summary>Provisional reviewer model assignments (8 built-in providers)</summary>
+    <div class="tbl">
+      <table>
+        <thead><tr><th scope="col">Provider</th><th scope="col">Reviewer model</th><th scope="col">Provider</th><th scope="col">Reviewer model</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">OpenAI</th><td><code>gpt-6-luna</code></td><th scope="row">Anthropic</th><td><code>claude-haiku-5-5</code></td></tr>
+          <tr><th scope="row">Google</th><td><code>gemini-4-hydrogen</code></td><th scope="row">DeepSeek</th><td><code>deepseek-flash</code></td></tr>
+          <tr><th scope="row">xAI</th><td><code>grok-4.7</code></td><th scope="row">Moonshot</th><td><code>kimi-k3.1-pro</code></td></tr>
+          <tr><th scope="row">Z.ai</th><td><code>glm-5.3</code></td><th scope="row">OpenRouter</th><td><code>openai/gpt-6-luna</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Assignments are experimental and side-by-side false-positive benchmarks remain pending. Follow mode does not infer a reviewer for arbitrary named Responses endpoints. Config or auth changes invalidate pending review decisions.</p>
+  </details>
+  <p class="point"><b>Authority matters:</b> The exact same prompt executes automatically inside an Auto-approved <code>workspace-write</code> sandbox, whereas in <code>full-access</code> an arbitrary project script prompts the human for confirmation.</p>
+  <p class="refs"><a href="../../packages/runtime/src/permissions/reviewer-models.ts">reviewer-models.ts</a> <a href="../../packages/runtime/src/permissions/review-evidence.ts">review-evidence.ts</a></p>
+</section>
+
+<section id="walkthrough">
+  <h2>Code walkthrough: test launch and <code>write</code></h2>
+  <p>Consider running in the local macOS TUI inside a clone with <code>workspace-write</code> and Auto approve enabled when asked to fix and re-run a failing test: <code>shell</code> runs the test runner while built-in <code>write</code> fixes the test file.</p>
+
+  <h3 class="sub-h">Launching the test command</h3>
+  <ol class="steps">
+    <li><strong>Bind the exact invocation.</strong> The parent agent's <code>shell</code> call passes the raw program, <code>cwd</code>, and <code>stdin</code> mode into <code>createShellAuthorizer</code>. <code>bun test ./development.test.ts</code> runs project code, selecting the <code>development</code> profile rather than fragmenting the program for piece-by-piece execution. <a href="../../packages/runtime/src/permissions/shell-approval.ts">shell-approval.ts</a></li>
+    <li><strong>Resolve OS-enforceable protection.</strong> <code>workspacePathProtection</code> combines Git protected metadata, project <code>.codelia/</code>, Codelia credentials, and configured private paths. If the backend cannot enforce that set, launch fails immediately with <code>sandbox_unavailable</code> — reviewer models cannot override missing sandbox protection. <a href="../../packages/runtime/src/permissions/shell-backend.ts">shell-backend.ts</a></li>
+    <li><strong>Route admission.</strong> <code>routeApproval</code> checks deny rules, ceilings, saved allowances, and workspace confinement. Because this is a confined parent shell under workspace Auto approve, it resolves directly via <code>confined_auto_launch</code> without prompting. Extra write roots route to Auto Review or human confirmation. <a href="../../packages/runtime/src/permissions/route.ts">route.ts</a> · <a href="../../packages/runtime/src/permissions/dispatch.ts">dispatch.ts</a></li>
+    <li><strong>Re-verify and launch once.</strong> Right before execution, runtime re-verifies the request against live state, calls <code>consume</code> on the single-use grant, and passes the invocation to <code>backend.launch</code>. Bun and any subprocesses share the confined sandbox, leaving any edited test files live in the workspace. <a href="../../packages/runtime/src/tools/shell.ts">shell.ts</a> · <a href="../../packages/runtime/src/tasks/shell-executor.ts">shell-executor.ts</a></li>
+  </ol>
+
+  <h3 class="sub-h" id="shared-clone">Why clones with shared Git objects still run tests</h3>
+  <figure>
+    <div class="diagram">
+    <svg viewBox="0 0 980 215" role="img" aria-label="In a shared local clone, development.test.ts maps to its own writable file inode, whereas clone and source .git/objects entries share the same Git object inode.">
+      <text class="s" x="20" y="26">File names (paths)</text>
+      <text class="s" x="595" y="26">On-disk inodes</text>
+
+      <rect class="bx" x="20" y="42" width="400" height="40" rx="6"/>
+      <text class="t" x="38" y="67">clone's development.test.ts</text>
+      <rect class="bx" x="20" y="100" width="400" height="40" rx="6"/>
+      <text class="t" x="38" y="125">clone's .git/objects/&lt;hash&gt;</text>
+      <rect class="bx" x="20" y="158" width="400" height="40" rx="6"/>
+      <text class="t" x="38" y="183">source repo's .git/objects/&lt;hash&gt;</text>
+
+      <rect class="bx" x="595" y="42" width="355" height="40" rx="6"/>
+      <text class="t" x="615" y="67">clone's test source inode</text>
+      <rect class="bx-acc" x="595" y="122" width="355" height="54" rx="6"/>
+      <text class="t" x="615" y="154">Shared Git object inode</text>
+
+      <line class="ln" x1="420" y1="62" x2="595" y2="62"/>
+      <path class="ln-acc" d="M420 120 H495 L535 149 H595"/>
+      <path class="ln-acc" d="M420 178 H495 L535 149"/>
+    </svg>
+    </div>
+    <figcaption><b>Editing the test file affects only the clone,</b> whereas editing a pre-existing writable hard-linked object inode affects both clones. Built-in file tools explicitly block writes targeting Git metadata aliases, and Git config/hooks/refs stay protected on both paths.</figcaption>
+  </figure>
+
+  <details><summary>How much does macOS startup scan?</summary><p>For standard macOS development shells without extra write roots, runtime inspects Git metadata to locate the linked objects directory and skips recursively walking the object store, while checking credentials, config files, Git protected entries (<code>config</code>, <code>hooks</code>, <code>refs</code>, <code>alternates</code>), and explicit <code>protected_paths</code> aliases synchronously. <a href="../../packages/runtime/src/permissions/git-metadata.ts">git-metadata.ts</a> · <a href="../../packages/runtime/src/permissions/protected-aliases.ts">protected-aliases.ts</a> · <a href="../../packages/runtime/tests/command-approval-seatbelt.test.ts">Shared-clone Seatbelt test</a></p></details>
+
+  <h3 class="sub-h">Using built-in <code>write</code> in the same task</h3>
+  <p class="prose">For built-in file tools, operation and target path are explicit upfront. Runtime checks the exact file identity and dispatches differently depending on whether the target already exists; normal writes inside an approved workspace need no reviewer model call.</p>
+  <div class="grid-2">
+    <article class="mod">
+      <div class="mod-head"><h3>Editing an existing test</h3></div>
+      <p class="prose"><code>writeSelectedFile</code> opens the target via <code>withSelectedFile</code>, re-verifies inode identity and protected-path rules, rejects Git metadata aliases, and truncates/writes in place — so pre-existing external hard links stay consistent.</p>
+    </article>
+    <article class="mod">
+      <div class="mod-head"><h3>Creating a new test file</h3></div>
+      <p class="prose">When absent, runtime re-verifies the parent directory and target name and invokes <code>createDirectoryMutationBroker</code>, scoping macOS write allowances tightly to that path and failing if a racing file appears first.</p>
+    </article>
+  </div>
+  <p class="refs"><a href="../../packages/runtime/src/tools/write.ts">write.ts</a> <a href="../../packages/runtime/src/sandbox/context.ts">context.ts</a> <a href="../../packages/runtime/src/sandbox/file-mutations.ts">file-mutations.ts</a></p>
+
+  <details><summary>Where to diagnose failures when a test does not run</summary>
+    <dl class="facts">
+      <dt><code>sandbox_unavailable</code></dt><dd>Selected backend cannot enforce the required profile; check OS support, requested protected paths, and Git metadata layout.</dd>
+      <dt><code>review_evidence_unavailable</code> / <code>review_unavailable</code></dt><dd>Evidence could not be assembled safely, or the reviewer model failed/timed out; the agent receives the structured refusal reason without fallback execution.</dd>
+      <dt><code>approval_expired</code></dt><dd>Pending decision was invalidated by cancellation, Steer, or authority change before grant consumption.</dd>
+      <dt>Post-launch exit</dt><dd>Check exit code and stderr: failures may come from the test itself or an OS sandbox denial mid-run (leaving partial writes on disk).</dd>
+    </dl>
+  </details>
+</section>
+
+<section id="lifecycle">
+  <h2>Retries, cancellation, and descendant reaping</h2>
+  <p>“Admitted,” “spawned,” and “completed” are separate lifecycle states. A command that fails after partial execution is never replayed automatically.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th scope="col">Phase</th><th scope="col">Current runtime handling</th><th scope="col">MXC helper contract requirement</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Waiting for prompt / review</th><td>Identical retries from the same caller/ID/payload coalesce onto the active request; decisions invalidated by cancel, Steer, or authority changes are dropped before use.</td><td>Re-check live state right before handing off to the helper so expired requests cause 0 spawns.</td></tr>
+        <tr><th scope="row">Just before launch</th><td>Consume one single-use grant bound to caller, raw shell or argv, cwd, and effective authority.</td><td>Separate spawn ack from command completion; never fall back to another backend after a spawn failure.</td></tr>
+        <tr><th scope="row">While running</th><td>Executor manages stdin, stdout, stderr, exit status, and signals; cancellation signals the process group or child handle and escalates if needed.</td><td>Propagate stdin close, streams, and cancellation cleanly and confirm descendant termination per OS.</td></tr>
+        <tr><th scope="row">Disconnect / crash</th><td>Live edits remain on disk; cancelling or dropping an RPC channel does not undo external side effects or guarantee descendant death.</td><td>Unlike early Node prototypes where killing the helper left grandchildren alive, the Rust MXC helper verifies SDK termination status and reports unconfirmed reaping if the worker died unexpectedly.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="refs"><a href="../../packages/runtime/src/permissions/request-receipts.ts">request-receipts.ts</a> <a href="../../packages/runtime/src/permissions/dispatch.ts">dispatch.ts</a> <a href="../../packages/runtime/src/tasks/shell-executor.ts">shell-executor.ts</a></p>
+</section>
+
+<section id="modules">
+  <h2>Module layout and boundaries</h2>
+  <figure>
+    <div class="diagram">
+    <svg viewBox="0 0 980 300" role="img" aria-label="UI clients talk to runtime management RPCs (sandbox.get, sandbox.set, auto_review.configure), which feed tool/shell approval, routing/dispatch, optional local-reviewer adapters, and downstream file-mutations, shell-backend, and task executors.">
+      <defs>
+        <marker id="ca5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="ca5c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <rect class="bx" x="20" y="18" width="280" height="60" rx="8"/><text class="t" x="160" y="45" text-anchor="middle">UI &amp; protocol</text><text class="sm" x="160" y="65" text-anchor="middle">TUI / Desktop / SDK</text>
+      <rect class="bx" x="330" y="18" width="630" height="60" rx="8"/><text class="t" x="645" y="45" text-anchor="middle">Runtime management RPC</text><text class="sm" x="645" y="65" text-anchor="middle">sandbox.get / sandbox.set · auto_review.configure</text>
+      <line class="ln" x1="300" y1="48" x2="326" y2="48" marker-end="url(#ca5)"/>
+
+      <rect class="bx-acc" x="20" y="114" width="280" height="60" rx="8"/><text class="t" x="160" y="141" text-anchor="middle">Admission &amp; parsing</text><text class="sm" x="160" y="161" text-anchor="middle">tool-approval / shell-approval</text>
+      <rect class="bx-acc" x="330" y="114" width="290" height="60" rx="8"/><text class="t" x="475" y="141" text-anchor="middle">Routing &amp; consumption</text><text class="sm" x="475" y="161" text-anchor="middle">route / dispatch</text>
+      <rect class="bx-ext" x="660" y="114" width="300" height="60" rx="8"/><text class="t" x="810" y="141" text-anchor="middle">Model reviewer</text><text class="sm" x="810" y="161" text-anchor="middle">local-reviewer / adapters</text>
+      <path class="ln" d="M645 78 V96 H160 V110" marker-end="url(#ca5)"/>
+      <line class="ln-acc" x1="300" y1="144" x2="326" y2="144" marker-end="url(#ca5c)"/>
+      <line class="ln-d" x1="620" y1="144" x2="656" y2="144" marker-end="url(#ca5)"/>
+
+      <rect class="bx" x="20" y="216" width="280" height="60" rx="8"/><text class="t" x="160" y="243" text-anchor="middle">Built-in file operations</text><text class="sm" x="160" y="263" text-anchor="middle">sandbox / file-mutations</text>
+      <rect class="bx" x="330" y="216" width="290" height="60" rx="8"/><text class="t" x="475" y="243" text-anchor="middle">Confined shell launch</text><text class="sm" x="475" y="263" text-anchor="middle">shell-backend / MXC</text>
+      <rect class="bx" x="660" y="216" width="300" height="60" rx="8"/><text class="t" x="810" y="243" text-anchor="middle">Running task control</text><text class="sm" x="810" y="263" text-anchor="middle">tasks / shell-executor</text>
+      <path class="ln-acc" d="M475 174 V194 H160 V212" marker-end="url(#ca5c)"/>
+      <line class="ln-acc" x1="475" y1="174" x2="475" y2="212" marker-end="url(#ca5c)"/>
+      <line class="ln" x1="620" y1="246" x2="656" y2="246" marker-end="url(#ca5)"/>
+    </svg>
+    </div>
+    <figcaption><b>Arrows carry resolved configuration, approval grants, and execution handles.</b> Platform-specific isolation details sit in the bottom launch layer without leaking into routing or UI code.</figcaption>
+  </figure>
+
+  <div class="tbl">
+    <table class="module">
+      <thead><tr><th scope="col">Layer</th><th scope="col">Responsibility &amp; boundary</th><th scope="col">Primary files</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Settings &amp; UI</th><td>Resolves sandbox mode, Auto approve settings, and management RPCs without leaking OS launch details into UI code.</td><td><a href="../../packages/runtime/src/sandbox/mode.ts">mode.ts</a><br><a href="../../packages/runtime/src/rpc/sandbox.ts">sandbox.ts</a><br><a href="../../packages/protocol/src/permissions.ts">permissions.ts</a><br><a href="../../crates/tui/src/app/handlers/command/auto_review.rs">auto_review.rs</a></td></tr>
+        <tr><th scope="row">Tool &amp; shell intake</th><td>Verifies registered callers/owners and parses whole shell programs into executable, args, cwd, and profile evidence.</td><td><a href="../../packages/runtime/src/permissions/tool-approval.ts">tool-approval.ts</a><br><a href="../../packages/runtime/src/permissions/shell-approval.ts">shell-approval.ts</a><br><a href="../../packages/runtime/src/permissions/shell-analysis.ts">shell-analysis.ts</a></td></tr>
+        <tr><th scope="row">Routing &amp; persistence</th><td>Evaluates ceilings and rules, issues single-use grants, validates reviewer decisions, and persists remembered rules.</td><td><a href="../../packages/runtime/src/permissions/route.ts">route.ts</a><br><a href="../../packages/runtime/src/permissions/dispatch.ts">dispatch.ts</a><br><a href="../../packages/runtime/src/permissions/runtime-approval.ts">runtime-approval.ts</a><br><a href="../../packages/runtime/src/permissions/launch-rules.ts">launch-rules.ts</a></td></tr>
+        <tr><th scope="row">Model review</th><td>Resolves Follow / Custom reviewer targets and queries registered provider adapters using existing auth.</td><td><a href="../../packages/runtime/src/permissions/local-reviewer.ts">local-reviewer.ts</a><br><a href="../../packages/runtime/src/permissions/review-evidence.ts">review-evidence.ts</a><br><a href="../../packages/runtime/src/permissions/reviewer-models.ts">reviewer-models.ts</a></td></tr>
+        <tr><th scope="row">Path protection</th><td>Classifies Git metadata, <code>.codelia/</code> config paths, private entries, and hard-link aliases; re-checks targets for built-in writes.</td><td><a href="../../packages/runtime/src/permissions/git-metadata.ts">git-metadata.ts</a><br><a href="../../packages/runtime/src/permissions/protected-aliases.ts">protected-aliases.ts</a><br><a href="../../packages/runtime/src/sandbox/file-mutations.ts">file-mutations.ts</a></td></tr>
+        <tr><th scope="row">Confined execution</th><td>Platform backend probing, sandboxed spawning, stdio transport, cancellation, and reaping across executors and local MCP.</td><td><a href="../../packages/runtime/src/permissions/shell-backend.ts">shell-backend.ts</a><br><a href="../../packages/runtime/src/permissions/linux-shell-backend.ts">linux-shell-backend.ts</a><br><a href="../../packages/runtime/src/tasks/shell-executor.ts">shell-executor.ts</a><br><a href="../../packages/runtime/src/mcp/stdio-client.ts">stdio-client.ts</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="sub-h">Management RPCs for Desktop clients</h3>
+  <p class="prose">Clients advertise <code>supports_sandbox_mode_management</code> during <code>initialize</code> and call <code>sandbox.get</code> to inspect the next run's mode, its resolution source, active run/agent state, choices, and lock reason. <code>sandbox.set({scope:"project", mode:"workspace-write"})</code> persists idle workspace updates and drops the cached Agent for the next run (rejecting if busy or locked by CLI/env). <a href="ui-protocol.md#workspace-sandbox-rpc">Desktop RPC contract</a></p>
+</section>
+
+<section id="impact">
+  <h2>Migration from legacy settings</h2>
+  <div class="tbl">
+    <table>
+      <thead><tr><th scope="col">Area</th><th scope="col">What changed</th><th scope="col">Effect on users &amp; callers</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Mode</th><td>Split legacy approval modes into sandbox ceiling + independent launch confirmation.</td><td>Default is <code>workspace-write</code> with explicit confirmation; disabling OS isolation requires explicit new <code>full-access</code>.</td></tr>
+        <tr><th scope="row">Shell matching</th><td>Replaced string prefix splitting with whole-program AST analysis and single-grant execution.</td><td>Finite <code>for / do / done</code> loops check every operand; any matching deny stops the entire program before iteration 1.</td></tr>
+        <tr><th scope="row">Allow lists</th><td>Preserved legacy denies and personal allows; shared project <code>.codelia/config.json</code> allows activate when trusted (<code>/permissions trust</code>) or inherited from legacy <code>trusted</code>, revocable with <code>/permissions untrust</code>.</td><td>Legacy <code>command: "cargo test"</code> also matches <code>cargo test --release</code> under the same conditions; composite programs evaluate separately.</td></tr>
+        <tr><th scope="row">Tool entrypoints</th><td>Verified registered identity, caller ownership, and operation effect across parent, child, and direct RPC calls.</td><td>Ordinary reads resolve locally; children stay capped by delegated authority.</td></tr>
+        <tr><th scope="row">Isolation failure</th><td>Backend capability is checked before launching confined runs.</td><td>Missing isolation fails cleanly with a reason; runtime never downgrades silently to <code>full-access</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <details><summary>Where remembered permissions are stored</summary>
+    <ul>
+      <li><strong>Shared team allowances</strong> live under <code>permissions.allow</code> in repo <code>.codelia/config.json</code> and apply when legacy-trusted or explicitly trusted via <code>/permissions trust</code>.</li>
+      <li><strong>Personal tool allowances</strong> (like <code>webfetch</code>) live in user-owned <code>projects.json</code> under <code>remembered_tool_allows</code> without affecting teammates or other projects.</li>
+      <li><strong>Interactive shell rules</strong> persist in the session or under user state <code>launch-approvals/</code>, bound to executable, arg matching, cwd, and effective authority.</li>
+    </ul>
+    <p>Inspect active state anytime in the TUI with <code>/permissions list</code>.</p>
+  </details>
+
+  <h3 class="sub-h">Legacy mode resolution table</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th scope="col">Legacy setting</th><th scope="col">Resolved sandbox</th><th scope="col">Behavior after migration</th></tr></thead>
+      <tbody>
+        <tr><th scope="row"><code>minimal</code></th><td><code>readonly</code></td><td>Reads ordinary files outside tree; blocks workspace writes and direct network.</td></tr>
+        <tr><th scope="row"><code>trusted</code></th><td><code>workspace-write</code></td><td>Allows live workspace edits and carries forward trust in existing shared project allows; blocks credential writes and direct network.</td></tr>
+        <tr><th scope="row"><code>full-access</code></th><td><code>workspace-write</code></td><td>Notifies user on startup; removing confinement requires selecting new <code>--sandbox-mode full-access</code> or <code>sandbox_mode</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose">Precedence resolves CLI → environment → project config → global default, preferring new spelling within the same layer. <a href="../../docs/command-approval.md#existing-settings">User-facing migration guide</a></p>
+
+  <footer class="doc-foot">Updated 2026-11-28 against <code>main</code> (v0.1.92, <code>2c2abc11</code>). Authoritative references: <a href="command-approval-and-auto-review.md">command-approval-and-auto-review.md</a> · <a href="../architecture.html">architecture.html</a> · <a href="command-approval-reference.ja.md">command-approval-reference.ja.md (Japanese)</a> · <a href="command-approval-implementation.ja.html">command-approval-implementation.ja.html (Japanese)</a></footer>
+</section>
+</main>
+</div>
+
+</body>
+</html>
