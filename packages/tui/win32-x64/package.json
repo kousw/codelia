@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/tui-win32-x64",
-	"version": "0.1.91",
+	"version": "0.1.92",
 	"license": "MIT",
 	"description": "Platform binary package for codelia TUI (win32 x64)",
 	"files": [

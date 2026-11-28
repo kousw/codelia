@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/storage",
-	"version": "0.1.91",
+	"version": "0.1.92",
 	"license": "MIT",
 	"type": "module",
 	"engines": {
@@ -24,16 +24,16 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/core": "0.1.91",
-		"@codelia/logger": "0.1.91",
-		"@codelia/shared-types": "0.1.91",
+		"@codelia/core": "0.1.92",
+		"@codelia/logger": "0.1.92",
+		"@codelia/shared-types": "0.1.92",
 		"better-sqlite3": "^12.6.2",
 		"image-size": "^2.0.2",
 		"sharp": "^0.34.5"
 	},
 	"optionalDependencies": {
-		"@codelia/tui-darwin-arm64": "0.1.91",
-		"@codelia/tui-darwin-x64": "0.1.91"
+		"@codelia/tui-darwin-arm64": "0.1.92",
+		"@codelia/tui-darwin-x64": "0.1.92"
 	},
 	"publishConfig": {
 		"access": "public"

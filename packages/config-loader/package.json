@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/config-loader",
-	"version": "0.1.91",
+	"version": "0.1.92",
 	"license": "MIT",
 	"type": "module",
 	"files": [
@@ -21,8 +21,8 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/config": "0.1.91",
-		"@codelia/storage": "0.1.91",
+		"@codelia/config": "0.1.92",
+		"@codelia/storage": "0.1.92",
 		"cosmiconfig": "^9.0.0"
 	},
 	"publishConfig": {
