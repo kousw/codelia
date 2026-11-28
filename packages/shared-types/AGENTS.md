@@ -1,42 +1,6 @@
 # @codelia/shared-types
 
-Package containing stable types shared by `core/protocol/runtime/storage`.
+Zero-dependency package for stable cross-boundary types shared by `core`, `protocol`, `runtime`, and `storage`.
 
-Design principles:
-- Minimal dependencies (no dependencies on external SDKs/other workspace packages).
-- Limit types to those that require long-term compatibility for persistence/RPC/UI playback.
-- Do not include provider-specific or implementation-specific internal types.
-
-Current target:
-- `ImageArtifactMetadata` distinguishes attachments (`kind: attachment`) from
-  generated PNGs (legacy absent kind is supported). `ImageArtifactRef` identifies
-  immutable PNG/JPEG/WebP/GIF bytes; format support for generation is a separate
-  runtime contract, not implied by storage/vision support. Optional `model_view`
-  pins a versioned hashed model-input representation; absence means original bytes.
-  It belongs on new history references, never retroactively on legacy refs.
-- `ProviderName`
-  - canonical provider identifier union used by shared events and re-exported by Core's LLM boundary
-  - provider-specific error categories and transport details remain in Core provider modules
-- `LlmCallTiming` is the optional monotonic first-output/generation interval
-  shared by completion/session/protocol metrics; it carries no provider payload.
-  Optional generation_start_ms/source identifies an observed reasoning-item or
-  thought-step activity marker, separately from first observable output latency.
-- `ModelReasoningLevel` and `MODEL_REASONING_LEVELS`
-  - canonical cross-package reasoning levels used by core, protocol, and runtime
-  - provider-specific supported subsets remain in provider/runtime modules
-- `AgentEvent` series
-	- `llm.status` carries allowlisted informational verification/buffering status;
-	  it contains no opaque provider payload and must never become assistant text.
-  - includes structured permission preflight events: `permission.preview` / `permission.ready`
-  - `permission.preview` supports optional `language` and `file_path` hints for UI diff syntax highlighting
-  - provisional `text.delta` / `reasoning.delta` (`delta`, `stream_id` per model attempt, per-kind provisional block `index`, a grouping key that does not identify complete events); never persisted, complete `text`/`reasoning`/`final` stay authoritative and replace all provisional text of the `stream_id`
-- `SessionStateSummary`
-- `Skill*` type used for skills catalog/search
-  - schema-first: `src/skills/schema.ts` (Zod) + `src/skills/index.ts` (infer types)
-
-- `ModelFastMode` carries backward-compatible booleans plus explicit "ultrafast" across RPC/session/child boundaries; provider capability policy stays in runtime.
-
-
-- `RunErrorInfo` is the safe failure-only contract shared by status notifications and retained run errors. No raw bodies, credentials or stacks belong in this wire type.
-`context-usage.ts` holds `ContextUsage` (core `Agent.getContextUsage()` → runtime `context.usage` / `run.context.usage`).
-`task.ts` also holds `TaskProgress` (subagent step/phase/tool-name progress; no tool args/results).
+- Keep provider-specific error categories, transport fields, and implementation internals out of this package.
+- Keep `ImageArtifactRef` / `ImageArtifactMetadata` (`model_view` is admission-time only — never retroactively attach to legacy refs), `ProviderName` (canonical union re-exported by Core), `LlmCallTiming` (`generation_start_ms`/`source` separate from first output), `ModelReasoningLevel`, `ModelFastMode`, `AgentEvent` (`llm.status`, `permission.preview`/`ready`, provisional `text.delta`/`reasoning.delta`), `SessionStateSummary`, schema-first `Skill*` (`src/skills/schema.ts`), `RunErrorInfo`, `ContextUsage`, and `TaskProgress` backward-compatible across persistence, RPC, and replay.

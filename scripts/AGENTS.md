@@ -1,30 +1,11 @@
 # scripts
 
-Windows ProcessContainer qualification uses `node scripts/qualify-windows-mxc.mjs <isolated-sdk-prefix>` with the official MXC 1.1.0 package. The JSON records observations for the tested host. See [the qualification procedure](../dev-docs/specs/windows-mxc-qualification.md) for installation, positive controls, and pending acceptance.
-
-## Notes
-- `bun run check:deps` scans declared workspace packages, including `src`, `tests`, and `scripts` files in TypeScript/JavaScript variants. Declared public package exports are allowed; other cross-package subpaths are rejected. Unsupported workspace glob syntax fails explicitly. Run `bun run test:deps` for its fixture tests.
-- The preview PTY check also exercises `/image-model` command RPC and
-  `/image-artifact` byte transfer against the fake peer. It matches fixture RGB
-  output, not welcome-logo halfblocks. DSR responses must parse across PTY read
-  boundaries and answer every query; a cursor-query timeout is not evidence that
-  the permission handler rejected Esc. Inputs wait for cursor show plus final
-  cursor movement and a bounded output-quiet period to drain follow-up inline
-  draws/DSR exchanges. The test child clears inherited NO_COLOR and declares
-  truecolor so RGB assertions are independent of the runner's log preferences.
-  `--repeat <n> --read-size <bytes>` stresses repeated runs and fragmented reads;
-  `python3 scripts/check-tui-image-preview_test.py` checks synchronization without
-  a binary. Real paid generation is a separate gated
-  `packages/runtime/tests/image-generation-live.test.ts` check.
-- `scripts/check-tui-image-preview.py <tui-binary>` runs the production TUI against a fake protocol peer in a macOS/Linux PTY. It checks local preview lifecycle, runtime-dialog preemption, no model submission, error recovery, protocol policy/cache cleanup, and terminal restoration. It does not verify real native pixels or use a real account.
-- `scripts/check-tui-scrollback.mjs <capture.json> <dependency-directory>` replays the Rust `inline_native_scrollback_ansi_capture` fixture through pinned `@xterm/headless` installed outside the repo. It compares all buffer rows (including declared footer/padding), code styles, composer and cursor, not filtered markers. CI also runs `node --test scripts/check-tui-scrollback.test.mjs` with `CODELIA_TUI_CAPTURE_PATH` and `CODELIA_TUI_EMULATOR_DIR` set; negative controls ensure corrupted output fails. See `dev-docs/specs/tui-inline-scrollback-validation.md`.
-- scripts/load-env.sh is a source-only helper to export variables from a .env file into the current shell: `source scripts/load-env.sh [path]`.
-- scripts/setup-worktree.sh is a one-shot helper for freshly created/switched git worktrees; it resolves the repo root from the script location and runs `bun install`.
-- scripts/setup-codelia-dev-alias.sh writes a managed alias block (default: `codelia-dev`) into `.bashrc`/`.zshrc` or a custom rc file.
-- scripts/bump-workspace-version.mjs bumps all package versions under `packages/`, syncs workspace internal dependency versions, and updates `crates/tui/Cargo.toml` in one shot.
-- scripts/release-workspace.mjs automates `bump:version` + `check:versions` + release commit + optional push (`--no-push`, `--allow-dirty`) and includes `crates/tui/Cargo.toml` in staged release-version changes.
-- release-smoke.mjs includes the logger package in its tarball list so npm install doesn't fall back to the registry.
-- release-smoke.mjs runs npm.cmd via a Windows shell to avoid spawnSync EINVAL on Windows runners.
-- `tui-platforms.mjs` defines the supported package paths, binary names, and MXC launcher inclusion for TUI staging, verification, and release smoke.
-- Release smoke drives the installed Auto approve picker by choice ID. It verifies the current workspace's enable and disable separately from reviewer configuration.
-- scripts/debug-openai-responses.mjs is a standalone OpenAI Responses repro helper; run it via `bun run debug:openai:responses -- --model gpt-5.4 --input test` to inspect raw `id/status/output_text/output/usage` outside Codelia.
+- **Dependency & release checks**:
+  - `check-workspace-deps.mjs` (`bun run check:deps` / `bun run test:deps`): scans workspace `src`, `tests`, and `scripts` for undeclared/unused workspace deps and deep imports; fails explicitly on unsupported workspace glob syntax.
+  - `bump-workspace-version.mjs` / `release-workspace.mjs` / `sync-workspace-versions.mjs`: keep `packages/*` and `crates/tui/Cargo.toml` versions synchronized.
+  - `release-smoke.mjs` / `tui-platforms.mjs`: must pack `@codelia/logger` in tarballs, invoke `npm.cmd` via Windows shell (avoids `spawnSync` `EINVAL`), and drive Auto approve by choice ID (verifying workspace enable/disable separately from reviewer setup).
+- **PTY & scrollback harnesses**:
+  - `check-tui-image-preview.py` (`check-tui-image-preview_test.py`): drives real `codelia-tui` against a fake peer; DSR responses must parse across PTY read boundaries; wait for cursor show + final cursor movement + bounded quiet drain; clear `NO_COLOR` and declare truecolor in child when asserting ANSI RGB (`--repeat <n> --read-size <bytes>` stresses fragmented reads).
+  - `check-tui-scrollback.mjs` (`check-tui-scrollback.test.mjs`): replays `inline_native_scrollback_ansi_capture` via external `@xterm/headless`, checking all buffer rows, styles, composer, and cursor plus negative controls (`dev-docs/specs/tui-inline-scrollback-validation.md`).
+- **Windows MXC qualification**: `node scripts/qualify-windows-mxc.mjs <isolated-sdk-prefix>` uses the pinned V1 contract, verifies native library identity, uses disposable ACL/IPC resources, runs host network positive controls, and separates missing platform observations from measured access (`dev-docs/specs/windows-mxc-qualification.md`).
+- **Utilities**: `load-env.sh` (non-secret `.env` only), `setup-worktree.sh`, `setup-codelia-dev-alias.sh`, `debug-openai-responses.mjs` (`bun run debug:openai:responses`).

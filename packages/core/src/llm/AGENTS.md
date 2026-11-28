@@ -1,36 +1,25 @@
-# LLM adapters
+# LLM Adapters (`packages/core/src/llm/`)
 
-`stream-timing.ts` owns provider-neutral monotonic observed-stream timing.
-Create a fresh tracker per transport attempt; observe nonempty output deltas and
-freeze on the terminal event. Attach optional `timing` to the completion before
-debug/final-response postprocessing. See diagnostics spec section 4.2 and
-`packages/core/tests/stream-timing-adapters.test.ts` for WS fallback and initial-wait invariants.
+Provider contracts: `dev-docs/specs/providers/README.md`.
 
-Responses hidden reasoning starts its generation interval at the first reasoning
-item-added event; first-delta latency remains separate. Preserve reasoning token
-counts in normalized usage so metrics can reject an unmatched hidden-token rate.
-Google Interactions marks `step.start` of a `thought` with `thought_step`;
-its tracker starts before awaiting SDK request setup. Both activity markers are
-observed starts, not server decode timestamps. Provider admission requires
-adapter-to-runtime metrics fixtures; see `packages/runtime/tests/provider-metrics.test.ts`
-and `google-metrics.test.ts`.
+## Cross-Provider Rules
 
-Provider-specific auth, requests, retry classification and response restoration
-remain in the provider directories.
+- **Stream timing (`stream-timing.ts`)**: Create a fresh monotonic tracker per attempt *before* starting/awaiting transport; freeze on terminal event. Record observed reasoning activity (`reasoning_item` for Responses, `thought_step` for Google) separately from first nonempty output; never infer tokens or completion from unknown metadata, treat lifecycle/signature events as output, substitute total request latency, or reuse timing across retries/fallbacks. Every builtin provider must stay covered in `packages/runtime/tests/provider-metrics.test.ts` (or dedicated metrics fixtures like `google-metrics.test.ts`).
+- **Live deltas (`ChatInvokeInput.onDelta`)**: Observe in the same stream loop as `LlmStreamTiming` with zero extra work when absent; keep canonical completion events authoritative.
+- **Errors & debug**: `error-diagnostics.ts` allows only static causes and allowlisted transport codes (extract HTTP `statusCode` as well as `status`; never surface raw bodies/headers/stacks). Preserve trusted same-provider `ProviderFailureError` inside bounded cycle-safe SDK cause chains (e.g. OAuth `apiKey` callbacks). Debug dumps use `CODELIA_DEBUG=provider-log` + `CODELIA_DEBUG_DIR`.
 
-`provider-status.ts` forwards optional model-context progress while awaiting the
-existing retry iterator. Keep retry ownership in `retry.ts`; progress must not
-start another request or alter model history. Close cancels pending inference.
+## Provider Invariants
 
-
-Live output forwarding coalesces adjacent deltas without prefix/tail loss. Do not add arbitrary queue eviction: TUI retains the full response during generation and relies on canonical events only for final reconciliation and persistence.
-
-`error-diagnostics.ts` supplies static trusted parser causes and allowlisted nested transport codes. Retry terminal errors retain these safe details; never replace them with raw provider messages. HTTP SDK failures may expose `statusCode` instead of `status`.
-Opt-in provisional deltas (`ChatInvokeInput.onDelta`) are observed in the same
-stream loop as `LlmStreamTiming`; never add a second pass over a stream or
-change the non-delta path when the sink is absent.
-
-OpenAI-compatible classification preserves explicitly trusted, same-provider
-`ProviderFailureError` values inside bounded/cycle-safe SDK cause chains (notably
-OAuth `apiKey` callbacks). Cancellation takes precedence; do not infer trusted
-failure fields from arbitrary nested objects or raw message strings.
+- **OpenAI / Codex (`openai/`)**:
+  - Responses API with `store=false`, aggregated `instructions` (no developer role), `sessionKey` mapped to `prompt_cache_key` + `session_id` header, `parsed_arguments`/`parsed` stripped on replay, `output_text` synthesized if absent. Keep narrow compatibility casts (e.g. `serviceTier: "ultrafast"`) at the request boundary without downgrading rejections.
+  - `response-accumulator.ts` rebuilds `response.output` from stream events before merging terminal `id`/`status`/`usage`.
+  - `ResponsesWS` connection & lifecycle: wait for socket `OPEN` before `response.create`; include handshake HTTP status/headers/body on `unexpected-response`; merge OAuth `ChatGPT-Account-ID`; recreate WS when history compaction invalidates `previous_response_id`; use `previous_response_id` only on strict append.
+  - `ResponsesWS` timeouts, close & fallback: reject immediately on `AbortSignal` and monitor native `ws.socket` `close` (SDK may swallow it); split connect vs activity-based idle timeout (`response.done` = terminal success); keep healthy sockets for the 10-min idle eviction bound (no eager short cutoff); Close 1009 resets chain and falls back to full-history HTTP in `auto` (temporary TTL WS latch) or errors non-retryably in `on`; in `on`, retry timeout/closed-response once on a fresh WS.
+  - Fixed `chatgpt.com/backend-api/codex` HTTP uses raw `responses.create({ stream: true })` + accumulator (`response.metadata` is not assistant output/TPS; preserve `APIUserAbortError`; `codex-metadata.ts` handles run-scoped redacted sticky routing and verification/buffering status without auto-switching models/auth or replaying).
+- **Anthropic (`anthropic/`)**: `messages.stream()` + `finalMessage()`, 20m default SDK timeout, default `cache_control: { type: "ephemeral" }`, URL vs inline base64 images (no fetch), coalesce consecutive `tool_use` turns before orphan filtering. `thinking.ts` binds raw signed/empty/redacted thinking to durable post-serialization canonical prefix fingerprints (omits stale reasoning if earlier prefix changes without blocking future turns; never silently downgrade forced tool choice, add permanent drop-block beta, or switch models/auth; raise `createProviderValidationError`). Fable `stop_reason=refusal` discards partial content.
+- **Google (`google/`)**: `@google/genai` Interactions API with `store=false` (never server interaction IDs); preserve signed `thought`/`function_call`/`model_output` steps verbatim, replaying raw `function_call` only if its ID remains in canonical `assistant.tool_calls`; require `interaction.completed` and all `step.stop` events; omit `thinking_level` when unset; map native `xhigh` for Hydrogen only (runtime resolves fallback); mark `thought_step` independently of first-output latency; raise `createProviderResponseError` with static safe causes.
+- **Named Responses (`responses/`) & DeepSeek (`deepseek/`)**: Stateless full-history HTTP Responses (`store=false`, no WS/OAuth/stored-response IDs/service tiers/passthrough); SDK retries=0 (`retryPolicy` drives Agent retries; no replay after streaming starts); check vision against user and tool-output parts before HTTP; DeepSeek rejects Pro images, hosted tools, and forced named tool choice in thinking mode locally.
+- **Moonshot (`moonshot/`)**: OpenAI-compatible Chat Completions (`reasoning_content` replayed on following assistant turn; do not send K2.x `thinking` param); accepts inline base64 or `ms://` only (rejects public URLs); defers tool-result images to one multimodal user turn after consecutive tool outputs; classifies quota/TPD limits as non-retryable `hard_quota`, unknown 429 variants fail conservatively (non-retryable), and marks `delivery=buffered` non-retryable once SSE chunks buffer; keeps `provider_meta` compact.
+- **Z.ai (`zai/`)**: Native fetch Chat Completions (`chat.ts`/`transport.ts`/`serializer.ts`); keep raw chunks out of persisted `provider_meta`; send `reasoning_effort` only for supporting models per registry/adapter, others send `thinking: { type: "enabled" }`; phase 1 ignores `sessionKey`.
+- **xAI (`xai/`)**: HTTP Responses (`store=false`, encrypted reasoning, `prompt_cache_key`); translate opaque `other` parts via `serializer.ts` only; PNG/JPEG images only; allowlisted web search (max 5 `allowed_domains`, omit `search_context_size`/`user_location`); opt-in `x_search` (`search_kind: "x"`, strip `@`, max 20 handles, allow/exclude mutual exclusion, replay `x_search_call`); preserve `provider_meta.citations`.
+- **OpenRouter (`openrouter/`)**: Dedicated Responses connector; keep image-bearing tool outputs inside `function_call_output.output` content array rather than stringifying or synthesizing a user turn.

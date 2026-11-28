@@ -1,90 +1,28 @@
 # @codelia/core
 
-The core SDK package. Entry is `src/index.ts`, output is `dist/`.
-`ContentPart.image_ref` is a durable shared image identity. `AgentServices.resolveImage`
-materializes bounded actual image input only immediately before model requests;
-normal history/session requests retain references, not generated base64. Compaction
-uses textual descriptions and preserves a bounded image registry. Keep storage,
-auth and provider image generation outside core; unresolved images must not be
-described as visually inspected.
-Place the model definition in `src/models/` and reference it from `DEFAULT_MODEL_REGISTRY`.
-The default value of OpenAI is to export `OPENAI_DEFAULT_MODEL` / `OPENAI_DEFAULT_REASONING_EFFORT`.
-Include current Codex OAuth-compatible OpenAI model ids such as `gpt-5.3-codex` and `gpt-5.3-codex-spark` in your OpenAI model definition when they are available in Codex app/CLI selection.
-Static model entries can use `ModelSpec.providerModelId` when the user-facing selectable id should differ from the actual provider API model id; runtime keeps the configured id for registry/compaction while adapters send `providerModelId ?? id`.
-Place the Anthropic (Claude) provider implementation in `src/llm/anthropic/`.
-`ChatAnthropic` uses SDK streaming for normal/Fast requests, restores the final message before history writes, and retains a 20 minute SDK timeout by default; explicit `clientOptions.timeout` still wins.
-Place the OpenRouter provider implementation in `src/llm/openrouter/`.
-Generated provider SDK types can lag newly shipped API fields. Keep narrow compatibility extensions local to the adapter boundary: Responses `max` reasoning is modeled in `src/llm/openai/responses-reasoning.ts`, Anthropic `xhigh` output effort in `src/llm/anthropic/chat.ts`, and response-only diagnostic/refusal fields in their serializers/debug payload types. Preserve the wire value and avoid broad `any` or weakening shared provider-neutral types.
-Place the Z.ai provider implementation in `src/llm/zai/`; `ChatZai` uses fetch against Z.ai Chat Completions streaming, not the OpenAI Responses adapter.
-`ChatZai` must keep `ToolCall.provider_meta` compact; never persist raw streaming chunks in assistant tool calls or session history.
-Place the xAI provider implementation in `src/llm/xai/`; `ChatXai` uses xAI's HTTP Responses API and shares Responses serialization only through its xAI ownership bridge. Do not inherit OpenAI OAuth/WebSocket behavior.
-Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).
-Place the test under `tests/` and execute it with `bun test`.
-Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
-`defineTool` emits `strict: false` and preserves Zod optional/defaulted properties as optional in the model-facing schema. Keep descriptions concise and do not add null sentinels for omission; runtime Zod parsing remains the validation boundary.
-`prepareToolInvocation` binds one Zod normalization to the eventual execution for the exact unchanged `defineTool` registration. Runtime admission inspects the normalized input; custom raw tools retain their own validator and executor.
-When tool input is an object union (`anyOf`/`oneOf` of object variants), `defineTool` normalizes top-level `parameters.type` to `"object"` for function-tool compatibility.
-Place the DI interface in `src/di/` (e.g. model metadata, storage paths).
-`AgentServices.monotonicNowMs` is the injectable monotonic clock for measured agent-step durations. `step_complete.duration_ms` is a rounded non-negative monotonic interval; keep wall-clock time only for timestamps and do not route timeout scheduling through this service.
-Interactive model steps use the shared retry coordinator in `src/llm/retry.ts`. Provider adapters expose pure `classifyFailure` functions; Core owns attempts, jitter/backoff, the retry window, and cancellation. Defaults are 2 retries (3 attempts), 1s base delay, 60s delay/provider-hint ceilings, and a 20-minute retry window. The window limits waits and whether another attempt may start; never pass its abort signal into an active provider request. Provider transports own connect/request/first-byte/stream-idle timeouts. Keep provider SDK retries disabled for Codelia-constructed clients so attempts do not multiply.
-`ProviderName` is canonical in `@codelia/shared-types` and re-exported from `src/llm/base.ts`; do not duplicate its provider union in Core events or adapters. Retry defaults and option normalization belong in `src/llm/retry.ts`, not in the Agent constructor.
-Classified terminal failures must become `ProviderFailureError` with bounded `safeMessage`; do not put raw provider messages, SDK stacks, organization/project identifiers, or key-shaped identifiers in normal runtime/session events.
-Adapter-owned timeout paths must throw `ProviderTimeoutError`, and safe local input checks that need to remain actionable across the Agent boundary must use `createProviderValidationError`; do not infer either category from free-form provider messages in the shared coordinator.
-Compaction determines the context limit by referring to `modelRegistry` (metadata is reflected in the registry) and prioritizes `maxInputTokens` over `contextWindow`.
-`Agent.getContextLeftPercent()` resolves the usage model first, then falls back to `llm.model` when the provider-reported usage model id is not in registry (e.g. OpenRouter version-suffixed model ids).
-Compaction auto-trigger compares `usage.total_tokens` to `thresholdRatio` (default `0.85`).
-Compaction retained tail keeps only conversational `user`/`assistant` messages; `tool`/`reasoning` items and `assistant.tool_calls` are dropped so `function_call*` history is not resurrected after compaction.
-Compaction stores retained memory as marker-prefixed user messages (`[codelia.compaction.retain]` / `[codelia.compaction.summary]`), carries prior retain memory forward verbatim, and excludes those marker messages from subsequent summarization input to prevent memory erosion across repeated compactions.
-Compaction skips summarization and returns history unchanged when all messages are filtered out as compaction-memory markers.
-When compaction rewrites history, `Agent` calls optional `BaseChatModel.onHistoryCompacted(context)` so providers can reset transport/session chain state (e.g., OpenAI websocket chain).
-Tool output cache is in charge of `ToolOutputCacheService`, and store is supplied from `AgentServices.toolOutputCacheStore`.
-The default system prompt is `prompts/system.md` (can be overridden with `CODELIA_SYSTEM_PROMPT_PATH`).
-The shared system prompt mission keeps a collaborative "help the user ship correct changes quickly" framing while still requiring the agent to produce the required artifact/behavior correctly and preserve the repo/runtime/user intent.
-The shared system prompt tells agents to prefer `read_line` / `tool_output_cache_line` when normal `read` / `tool_output_cache` calls hit size or long-line limits and exact content still matters.
-The shared system prompt also adds a concise hard-task note near the top so agents stay collaborative by default but persist, adapt quickly, and prefer cheap decisive experiments when the task is difficult or unclear.
-The shared system prompt now requires agents to keep trying other reasonable local verification paths before stopping, ask the user when remaining verification depends on user-only confirmation or human judgment, avoid verifier-specific hacks, and avoid claiming completion unless the required artifact/output/behavior was checked directly or with the closest feasible proxy.
-The shared system prompt now keeps non-trivial planning goal-first but exploration-led: survey the task briefly, start with the smallest decisive real probe, keep plans short, and use todo tools only when structured tracking materially reduces execution risk or context loss.
-The shared system prompt now prefers safe forward progress over unnecessary stops: inspect first, continue under reasonable assumptions when possible, isolate dirty-worktree changes instead of halting by default, avoid hanging commands/watchers unless required, and tell agents not to optimize only for visible tests or sample data.
-The shared system prompt keeps verification strong in the later stages: do not claim completion without direct or closest-feasible verification, keep trying other reasonable local checks before stopping, and use `todo_read` before finishing only when a todo-backed plan was actually used in that run.
-The shared system prompt now also teaches shell/task execution discipline with explicit tool naming: `shell` runs runtime-managed child processes, `detached_wait=true` skips the attached wait but does not make the process persistent across runtime exit, and persistent services must use explicit shell-native detach/daemonization. Use `shell_list` / `shell_status` / `shell_logs` / `shell_wait` / `shell_result` / `shell_cancel` with the returned stable `key` to monitor retained shell tasks explicitly instead of fire-and-forget. Keep exact timeout/default/limit semantics in the tool definitions rather than in the shared system prompt.
-The shared system prompt now also keeps communication light but structured: one-sentence pre-tool intent, brief progress updates on longer tasks, and final responses that surface the outcome, verification, and remaining risk within the first screen when feasible while still expanding when the user asks for detail or the task requires it.
-Use `getDefaultSystemPromptPath()` for external references (avoid package.json references).
-You can check permission by calling `AgentOptions.canExecuteTool` before running the tool (if it is deny, the tool will not be executed).
-If you return `stop_turn: true` to deny of `canExecuteTool`, you can end the turn with permission deny as the final response.
-Cross-boundary stable types (`AgentEvent`, `SessionStateSummary`) refer to `@codelia/shared-types`.
-`ContentPart` includes `type: \"other\"` for provider-specific extension, and unknown providers convert it to text (degraded).
+Domain SDK package (`src/index.ts` -> `dist/`). No RPC, auth, sandbox, or storage implementations.
 
-## runStream events
+## Core & Services
 
-`Agent.runStream()` yields display events for the UI.
-- `text`: Complete assistant text block of a non-terminal step
-- `text.delta` / `reasoning.delta`: provisional deltas, only with `AgentRunOptions.streamDeltas: true`. `invokeModelWithRetry` passes a per-attempt `ChatInvokeInput.onDelta` sink (new `stream_id` per attempt, late deltas after the attempt settled are ignored) and yields them through `withProviderStatus` (`src/llm/provider-status.ts`, the same in-flight queue as `llm.status`; deltas are never dropped and always drained before the next `llm.retry` or the step's complete events; while the consumer is busy, consecutive queued deltas with the same (type, stream_id, index) merge, so the queue grows with blocks rather than provider chunks; every pending step promise is observed when created, so a failure while the consumer is suspended at a queued event reaches the caller instead of becoming an unhandled rejection; a consumer that stops early closes the retry generator). Providers must ignore an absent sink (no extra work) and observe deltas in the same stream loop as `LlmStreamTiming`: Responses events map through `src/llm/openai/stream-deltas.ts` (OpenAI HTTP/WS, named Responses/DeepSeek, OpenRouter, xAI), Chat Completions chunks through `src/llm/chat-completion-deltas.ts` (Moonshot, Z.ai), Anthropic and Google map their own stream events.
-- `reasoning`: Summary of inference output and progress (display label on UI side is optional)
-- `final`: Turn complete. It also has a body (the UI corresponds to the case where the body comes only with `final`)
-`Agent.runStream()` is `llm.request` / `llm.response` if `AgentRunOptions.session` is passed
-and `tool.output` to the session store on a best-effort basis.
-`Agent.run` / `Agent.runStream` accept user input as `string | ContentPart[]`.
-Provide `Agent.getHistoryMessages()` / `Agent.replaceHistoryMessages()` for Session resume,
-Used to save and restore historical snapshots.
+- DI interfaces live in `src/di/`; config defaults register in `src/config/register.ts`.
+- Default system prompt loads from `getDefaultSystemPromptPath()` (`prompts/system.md`, overridden by `CODELIA_SYSTEM_PROMPT_PATH`). Keep `prompts/system.md` cross-repo and high-level (tool limits/params belong in tool schemas; benchmark rituals in adapters; interactive subagent use requires explicit user task authorization).
+- `AgentServices.monotonicNowMs` measures `step_complete.duration_ms` only; keep wall timestamps separate and never route timeouts through it.
+- `defineTool` normalizes object unions (`anyOf`/`oneOf`) to top-level `type: "object"`; `prepareToolInvocation` binds one Zod normalization to execution for unchanged registrations.
+- `ContentPart.image_ref` resolves lazily through `AgentServices.resolveImage` (`src/agent/image-input.ts`) immediately before model requests without a rolling last-N window (preserving LLM prefix cache). Missing/corrupt originals abort rather than substituting text; unresolved images must never be described as inspected. `image-context.ts` calibrates unchanged prefixes against observed input usage and resets on compaction (transfer limits never trigger auto-compaction; image token estimates never trigger billing or double-count observed usage).
+- `attachment_ref` parts project in place via store/image resolvers; tools can supply `ToolResult.display_content` for transcript/diagnostics while keeping original content in model history and archives.
 
-The OpenAI Responses API requires a corresponding output item immediately after the reasoning item, so
-When returning the model, `ChatInvokeCompletion.messages` (`BaseMessage[]`) is the original and history is also maintained in the same format.
-OpenAI Responses requests aggregate system messages into `instructions` and send them.
-The Developer role will be abolished and will only handle system prompts.
-`store` of OpenAI Responses sets `false` when not specified (stateless).
-OpenAI Responses is always called with `stream=true`; HTTP and websocket transports rebuild canonical `response.output` from stream events, then merge terminal metadata (`id`/`status`/`usage`) from `finalResponse()` or websocket terminal payloads.
-Agent passes provider-neutral invoke context `sessionKey` using `session_id` (fallback: `run_id`) so adapters can apply conversation-stable routing hints without provider coupling.
-OpenAI Responses adapter maps `sessionKey` to `prompt_cache_key` and sends `session_id: <prompt_cache_key>` header (Codex-compatible routing hint).
-Z.ai phase 1 intentionally ignores `sessionKey` because no prompt-cache/session routing field has been confirmed.
-Anthropic Messages adapter enables prompt caching by default via top-level `cache_control: { type: "ephemeral" }` (can be overridden per-request).
-Set `CODELIA_PROVIDER_LOG=1` to enable provider request/response diagnostics and dumps (OpenAI/Anthropic/OpenRouter/Z.ai/xAI).
-Override dump path with `CODELIA_PROVIDER_LOG_DIR` (default is `./tmp` when provider log is enabled).
-Request debug logs include provider-specific hashes (for OpenAI: `tools_sha` / `instructions_sha` / `session_id_header=on|off`) so order/routing drift can be spotted quickly.
-When repopulating OpenAI's `response.output` as history, parsed fields such as `parsed_arguments` / `parsed` are removed.
-If `output_text` of OpenAI Responses is missing, synthesize it from the `output_text` part of `response.output` and complement it.
-`ToolDefinition` supports both function tools and hosted search tools (`type: "hosted_search"`); provider serializers map hosted search to each provider's native tool type.
-OpenAI `web_search_call` output items are normalized as `reasoning` messages (status/query/source summary) to make search progress visible in run logs.
-`Agent.runStream()` also emits hosted web search lifecycle events (`step_start` / `tool_call` / `tool_result` / `step_complete`, tool=`web_search`, display_name=`WebSearch`) from those callbacks so UI can show them like regular tool cards.
-Provider response normalization for `Agent.runStream()` lives in `src/agent/model-output.ts`. Keep it pure: it may collect reasoning, assistant text, tool calls, and hosted-tool summaries, but event ordering, history mutation, session recording, compaction, and tool execution remain owned by `Agent`.
+## Agent Loop, History & Compaction
 
-`Agent.getContextUsage()` (`src/agent/context-usage.ts`) returns provider-reported used/limit/left plus an estimated per-category breakdown (system/tools/messages/tool_results/images) of the current history; it reuses `estimateImageContext` and never fetches or resolves images. `Agent.getLastUsage()` returns a new object per completed call.
+- `src/agent/agent.ts` owns run lifecycle ordering. `model-output.ts`, `model-context.ts`, and `tool-execution.ts` stay pure without passing `Agent` or mutating history/session state.
+- `AgentRunOptions.pollMessages` injects hidden user context only before model steps and natural final completion (never inside a tool batch or resetting iteration budgets). `AgentRunOptions.runContext` is transient per run (included in steps and max-iterations summary, excluded from originals and checkpoints).
+- Await `AgentSession.recordMessages` for admitted user/polled messages, canonical responses, and original tool results before mutable context processing; archival failure stops admission.
+- `ToolPermissionDenied` flows through the same permission-denied path as `canExecuteTool`, preserving `stop_turn` and reason.
+- `HistoryAdapter` (`src/history/`) is the active model view, not the durable archive. Immediate tool-output cache processing preserves non-text `ContentPart[]` (`image_url`, `document`, `other`) while persisting text projections when cached; runtime disables total-budget replacement trimming by default.
+- Compaction prefers `maxInputTokens` over `contextWindow` (default `thresholdRatio: 0.85`); `Agent.getContextLeftPercent()` falls back to `llm.model` for unindexed provider usage IDs. Retained tails drop `tool`/`reasoning`/`assistant.tool_calls`, carry `[codelia.compaction.retain]` verbatim (excluding markers from summarization and skipping if only markers remain), and invoke `BaseChatModel.onHistoryCompacted(context)`. `Agent.getContextUsage()` estimates categories without fetching images.
+- `Agent.runStream()` yields `text`/`reasoning`/`final` (with `final` last); `llm.status` events are never persisted into assistant/model history. With `streamDeltas: true`, `invokeModelWithRetry` attaches a per-attempt `onDelta` sink (`stream_id` per attempt; late deltas ignored) drained by `withProviderStatus` (merges consecutive deltas by `(type, stream_id, index)` with no queue eviction, observes pending step promises on creation, and cancels inference on early close).
+
+## Models & Retry Boundaries
+
+- Static specs live in `src/models/` (`DEFAULT_MODEL_REGISTRY`). Set `supportsFast`/`supportsVision` only for verified IDs; entries usable without models.dev must carry positive `maxInputTokens` or `contextWindow`. Use `ModelSpec.providerModelId` when selectable capped/alias IDs differ from API model IDs, and preserve dynamic alias buckets per provider when cloning registries.
+- `src/llm/retry.ts` owns interactive step retries (defaults: 2 retries / 3 attempts, 1s–60s backoff/hint ceilings, 20-min retry window). Never pass the retry window's abort signal into an active provider request; transports own connect/request/first-byte/stream-idle timeouts with SDK retries disabled.
+- `ProviderName` is canonical in `@codelia/shared-types`. Classified terminal failures throw `ProviderFailureError` / `ProviderTimeoutError` / `createProviderValidationError` with redacted `safeMessage` (never raw provider messages, stacks, or org/key identifiers in normal events).

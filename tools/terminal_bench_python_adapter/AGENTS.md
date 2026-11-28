@@ -1,22 +1,7 @@
-# terminal_bench_python_adapter
+# tools/terminal_bench_python_adapter
 
-## Scope
+Harbor adapter (`codelia_agent.py`) for Terminal-Bench. Keep benchmark-specific rituals out of `packages/core/prompts/system.md`.
 
-- `codelia_agent.py` owns the Harbor adapter that installs and runs Codelia for Terminal Bench.
-- Keep benchmark-specific behavior here; do not push Terminal Bench rituals into the shared system prompt unless the policy truly applies everywhere.
-- The adapter must keep `SUPPORTS_ATIF = True` and write Harbor's expected `/logs/agent/trajectory.json` via `CODELIA_ATIF_OUT`.
-- Use `codelia_npm_package_files` when validating unpublished workspace changes in Harbor; it uploads local npm tarballs into `/tmp/codelia/` before `npm install -g`.
-- Managed Harbor trial environments default to an explicit `--sandbox-mode full-access`. Explicit `sandbox_mode` wins over legacy `approval_mode`. Legacy `full-access` and `trusted` retain `workspace-write`. Unknown environment types retain isolation and refuse `full-access`.
-- Only managed full-access trials pass `--harbor-shell-approval` and set `CODELIA_HARBOR_SHELL_APPROVAL=1` for the prompt client. This gives once-only answers to the runtime's structured shell approval requests for the active run. Mode selection and approval still pass through runtime. Keep the requested sandbox flag in trial metadata and preserve `approval_mode` for legacy configs.
-- Harbor's `trajectory.json` also records `extra.sandbox_mode_requested` and `extra.sandbox_mode`. The reported mode comes from runtime initialization and is `null` when an older runtime omits it.
-
-## Prefix policy
-
-- Keep `BENCHMARK_PREFIX` short and benchmark-specific.
-- Prefer verification-first instructions over planning rituals.
-- Do not require visible planning or verification artifacts such as `/tmp/*task-state*` files unless a future benchmark requirement explicitly depends on them.
-- Avoid instructions that force end-of-task rereads of planning artifacts.
-- Keep anti-hack guidance explicit: benchmark-specific answers, public task repos/artifacts, `solution.sh`, `task.yaml`, trajectories, and externally hosted fixtures should be treated as off-limits unless already provided in `/app`.
-- Keep generic Terminal Bench execution and verification policy in `system_terminal_bench.md`; keep the adapter-side benchmark prefix minimal and avoid duplicating system-prompt policy there.
-- Do not add tests whose only purpose is to assert prompt wording/text presence; prefer behavior checks, and skip tests entirely for wording-only prompt tweaks unless there is a stronger contract to verify.
-- `system_terminal_bench.md` is the default uploaded system prompt for Harbor runs; `system_prompt_file` is an explicit file-backed override wired through `CODELIA_SYSTEM_PROMPT_PATH`.
+- **Harbor & ATIF contract**: Keep `SUPPORTS_ATIF = True` (`CODELIA_ATIF_OUT=/logs/agent/trajectory.json`, recording `extra.sandbox_mode_requested` and `extra.sandbox_mode`). Harbor `--debug` sets `CODELIA_PROMPT_PROGRESS_STDERR=1`, `CODELIA_DEBUG=1`, and writes UTC-timestamped logs to `/logs/agent/codelia-output.log`.
+- **Sandbox & packaging**: Managed Harbor trials pass `--sandbox-mode full-access` with `--harbor-shell-approval` and `CODELIA_HARBOR_SHELL_APPROVAL=1` (legacy `approval_mode` kwargs map `minimal` -> `readonly` and `trusted`/`full-access` -> `workspace-write`, while explicit `sandbox_mode` always wins; unknown environments refuse `full-access`). `auth_file` uploads `auth.json` only when passed; `codelia_npm_package_files` uploads local npm tarballs before `npm install -g`.
+- **Prompt & prefix policy**: `system_terminal_bench.md` is uploaded via `CODELIA_SYSTEM_PROMPT_PATH` (`system_prompt_file` overrides). Keep `BENCHMARK_PREFIX` short, verification-first, free of forced planning/scratch-file rituals, and explicit on anti-hack boundaries (treat external task repos, `solution.sh`, `task.yaml`, trajectories, and hosted fixtures as off-limits). Avoid brittle wording-only prompt tests.

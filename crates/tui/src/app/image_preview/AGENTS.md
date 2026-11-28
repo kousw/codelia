@@ -1,22 +1,9 @@
-# Production local image preview
+# TUI Local Image Preview (`crates/tui/src/app/image_preview/`)
 
-Contract and operation guide: `dev-docs/specs/tui-image-preview.md`.
+Contract: `dev-docs/specs/tui-image-preview.md`.
 
-- `mod.rs`: bounded controller, generation-aware result application, key ownership.
-  Its intent revision changes on open/reopen/close/forget and fences artifact RPCs
-  separately from worker generation; keep cached worker output reusable on close
-  and reopen. A failed reopen without a source does not change intent.
-- `decode.rs`: shared file/byte decoder and safe labels; the standalone lab imports
-  this module by path, so keep it independent of app/runtime code.
-- `policy.rs`: pure query-free halfblocks/explicit alternate-only Kitty selection.
-- `worker.rs`: one lazy channel-owned worker for load/decode/resize/encode.
-- `tests.rs`: real view/worker lifecycle, format limits, stale completion, composer
-  preservation and Kitty identity tests; also shares fixtures with inline replay.
-- View lives in `app/view/ui/image_preview.rs`; handlers live in
-  `app/handlers/image_preview.rs`. `entry/run_loop.rs` drives polling and
-  `event_loop/update.rs` applies preemption and worker poll transitions.
-
-Run `cargo test --manifest-path crates/tui/Cargo.toml --locked image_preview` and
-`python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui`
-after building the actual TUI. Existing scrollback ANSI capture now includes
-preview-open/close cases. Native pixels remain a separate manual acceptance gate.
+- **Local display only**: Explicitly handles `/image` and `Alt+I` composer previews plus explicit `/image-artifact <id>` RPC transfers; never infer local paths from remote runtime output or initiate downloads/uploads.
+- **Protocol policy (`policy.rs`)**: Default to query-free halfblocks. Never construct `ratatui-image` `Picker` in production (its stdin queries and tmux fallback break mid-session). Kitty requires explicit opt-in, alternate mode, no multiplexer, and safe OS pixel-cell metrics; allocate one owned image ID and delete only that ID at terminal teardown.
+- **Worker & rendering (`mod.rs`, `decode.rs`, `worker.rs`)**: Run load/decode/resize/encode off the draw/key/tick path on a single worker (`decode.rs` stays independent of app/runtime for sharing with `crates/tui/examples/image-preview`). Track intent revision and worker generation so stale results cannot undo close, preemption, `clear_log`, or session reset; failed reopens without a source do not advance intent.
+- **UI boundaries**: Preview consumes keys/paste/mouse while open, yields to runtime dialogs and panels, and renders over the Ratatui frame only — never insert preview cells into `WrappedLogCache` or call backend writes directly.
+- **Lab & checks**: `crates/tui/examples/image-preview/` (`--features image-preview`) is an isolated experiment (`smoke.py` PTY checks do not prove native terminal pixels). Production checks: `cargo test --locked --manifest-path crates/tui/Cargo.toml image_preview` and `python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui`.

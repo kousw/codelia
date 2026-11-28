@@ -1,99 +1,37 @@
-# codelia-tui
+# codelia-tui (`crates/tui`)
 
-Rust inline-or-alternate-screen TUI client (`crates/tui`) built with Ratatui + crossterm.
-The TUI launches runtime, sends UI protocol requests, and renders runtime events.
+Rust inline-or-alternate-screen TUI client built with Ratatui + crossterm (`dev-docs/specs/tui-architecture.md`, `tui-tea-architecture.md`, `tui-render-state-machine.md`, `tui-terminal-mode.md`, `ui-protocol.md`, `tui-owned-text-selection.md`, `tui-inline-scrollback-validation.md`).
 
-## Source Of Truth
+## Commands & Checks
 
-- Architecture and module boundaries: `dev-docs/specs/tui-architecture.md`
-- TEA messages, effect boundary and tick order: `dev-docs/specs/tui-tea-architecture.md`
-- Render state machine and invariants: `dev-docs/specs/tui-render-state-machine.md`
-- Terminal buffer policy and startup mode selection: `dev-docs/specs/tui-terminal-mode.md`
-- Partial alternate-mode owned text selection/copy contract: `dev-docs/specs/tui-owned-text-selection.md`
-- User-facing operation summary (commands/keys/startup): `dev-docs/specs/tui-operation-reference.md`
-- Local image preview, protocol policy, bounds and verification: `dev-docs/specs/tui-image-preview.md`
-- Runtime/UI RPC contract: `dev-docs/specs/ui-protocol.md` and the standalone `codelia-protocol` path dependency
-- Inline scrollback validation strategy/tests: `dev-docs/specs/tui-inline-scrollback-validation.md`
+- Build/check/test: `cargo run --manifest-path crates/tui/Cargo.toml`, `cargo fmt --manifest-path crates/tui/Cargo.toml`, `cargo test --locked --manifest-path crates/tui/Cargo.toml`
+- Light palette tests: `CODELIA_TEST_TUI_COLOR_SCHEME=light cargo test --locked --manifest-path crates/tui/Cargo.toml`
+- PTY image preview check: `python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui`
+- Standalone image lab (experiment): `cargo run --manifest-path crates/tui/Cargo.toml --locked --features image-preview --example codelia-image-preview -- [local-image]` (`crates/tui/examples/image-preview/README.md`)
 
-## Critical Invariants
+## Layer Boundaries (`src/main_tests.rs` checks production paths)
 
-- Startup resolves the requested `auto | inline | alternate` mode once; explicit selection wins, while `auto` uses alternate screen on native Windows/WSL and inline mode elsewhere.
-- In inline mode, Ratatui owns viewport sizing, terminal buffer bookkeeping, and history insertion through `Viewport::Inline` and `Terminal::insert_before`; do not bypass it with direct backend writes during the event loop. Do not enable `scrolling-regions`: its CSI S path drops native history in xterm.js. Use LF-based insertion and restore the viewport in the same tick before polling input again.
-- The initial inline viewport starts from the current cursor row, then shifts downward via overflow insertion until bottom-anchored. Alternate mode uses Ratatui's fullscreen viewport and must skip inline scrollback insertion.
-- Keep the direct `unicode-width` dependency aligned with Ratatui's width semantics. History normalization must not erase actual cells due to differing Unicode tables; newer-width regression fixtures live in `src/app/render/scrollback_tests.rs`.
-- `RenderState` invariants must hold:
-  - `inserted_until <= visible_start <= visible_end <= wrapped_total`
-  - `committed` tracks logical log index + source grapheme offset. `inserted_until` is its projection into the current wrapped cache and may decrease on rewrap; never preserve a raw row index across width/log changes.
-- `ConfirmSlot` transitions from `Pending` to `Active` after one draw and scrollback sync decision. Redraw the active confirm before the next input poll.
-- `view/*` must not depend on `handlers/*`.
-  - Shared pure logic belongs in `state/*` or `util/*`.
-- Owned transcript selection is alternate-mode only. Keep per-draw
-  `frame_revision` out of `SelectionProjectionId`; only `log_version` and wrap
-  width identify selectable content. Only an unmodified primary gesture belongs
-  to the owned path so terminal-native modifier selection remains an escape.
-- Permission preflight rendering uses structured events (`permission.preview` / `permission.ready`).
-- Structured approval pickers pin a command preview above the selected choice. `D` opens scrollable details, and `D` or `Esc` returns to the choices.
-- Legacy text preflight blobs like `Permission request raw args (...)` are intentionally ignored in parser rendering.
-- Hosted `web_search` lifecycle is rendered as a compact single-line summary that prioritizes query text (not raw payload body).
+- `entry/*` (startup, `terminal.rs`, `ResolvedTerminalMode` `auto|inline|alternate` — never `use_alt_screen: bool`, generic `LoopIo` `run_loop.rs`, `WakeHub`) and `event_loop/*` (`update.rs` `Msg`/`UpdateResult`/`skip_post_input_tick`, `input.rs` returning `Effect`s, thin `runtime.rs`) may depend on `app/*` public APIs, never `view/*` internals. Use `app::handlers::theme::apply_theme_from_name`.
+- `app/state/` and `app/app_state/` stay side-effect-free (no `view`, `render`, or `handlers`).
+- `app/view/` is presentation-only (no `handlers/*` imports, no terminal side effects).
+- `app/render/` owns terminal side effects (no UI composition); `app/frame.rs` coordinates `view` and `render::inline`.
+- `app/util/` helpers never mutate `AppState`.
 
-## Module Map (Short)
+## Terminal, Rendering & Selection Invariants
 
-- `src/main.rs`: startup composition and process lifecycle.
-- `src/entry/`: startup, terminal lifecycle and generic run loop with injectable shell I/O.
-- `src/event_loop/`: TEA `update.rs` (message dispatch, redraw, exit, post-input tick control), `input.rs` (key/paste/mouse routing), and `runtime.rs` (runtime drain re-export).
-- `src/app/effect.rs`: pure local shell effect data (`SetMouseCapture`, `WriteClipboard`, `StartClipboardImport`, `StartUpdateControl`).
-- `src/app/mod.rs`: app state root (`AppState`) and orchestration helpers.
-- `src/app/state/`: input/log/ui/render state buckets.
-- `src/app/view/`: Ratatui UI composition.
-- `src/app/frame.rs`: bounded draw, inline history insertion, and viewport restoration.
-- `src/app/render/`: inline history insertion and cursor sync.
-- `src/app/handlers/`: key flows and command/panel/confirm handling.
-- `src/app/runtime/`: runtime process adapter and protocol parser.
-- `src/app/util/`: shared helpers (text, attachments, clipboard).
-- Local layer notes are colocated in:
-  - `src/app/AGENTS.md`
-  - `src/app/state/AGENTS.md`
-  - `src/app/view/AGENTS.md`
-  - `src/app/render/AGENTS.md`
-  - `src/app/handlers/AGENTS.md`
+- **Startup & colors**: Never send OSC terminal color/fg/bg queries at startup (delayed replies leak into composer input). Canvas text uses `Color::Reset` without `Modifier::DIM`; dark surfaces stay explicit (`panel_divider_fg` is dark-surface only; canvas diffs use `log_muted_fg`). Contrast tests must cover gray backgrounds.
+- **Inline mode**: Ratatui owns `Viewport::Inline` and `Terminal::insert_before`; alternate mode never performs inline scrollback insertion. Keep Ratatui `scrolling-regions` disabled (CSI S drops native scrollback in xterm.js). Perform LF insertion via `app::frame::draw_frame` (at most one insertion pass + two draws, never insert after the final draw) and restore the viewport before polling input. `insert_history_chunk` empties wide-glyph continuation placeholders only; keep `unicode-width` aligned with Ratatui (preserve `scrollback_tests.rs` U+16FF0 / mixed-width ANSI regressions and `scrollback_ansi_tests.rs` CI checks).
+- **`RenderState` & log indices**: Maintain `inserted_until <= visible_start <= visible_end <= wrapped_total`. `committed` tracks `(log index, source grapheme offset)` and advances with `inserted_until` only after the corresponding `insert_before` chunk succeeds (never rewrap between chunks; reuse rendered cache). Project `inserted_until` into the current wrapped cache (may decrease on rewrap; never store raw row indices) and stop insertion at rows exceeding viewport width. `stream_commit_boundary()` retains partial anchors if a live suffix temporarily empties. Keep log indices stable until `clear_log` (streaming may prune only trailing uncommitted lines, preserving earlier indices); replace progress rows only before commit (append a new row after commit).
+- **Owned selection (`state/selection.rs`)**: Alternate mode + unmodified primary mouse gesture only. Exclude `frame_revision` from `SelectionProjectionId` (`log_version` + wrap width only). Hit-test through per-grapheme source fragments (no synthetic gutters/padding). Highlight with explicit fg/bg (never `REVERSED`, `DIM`, or `HIDDEN`). A left-button release on a dirty frame must cancel the active drag and request redraw.
 
-## Development
+## TEA, RPC & Local Feature Invariants
 
-- Run: `cargo run --manifest-path crates/tui/Cargo.toml`
-- Local check: `cargo fmt --manifest-path crates/tui/Cargo.toml`
-- Local test: `cargo test --manifest-path crates/tui/Cargo.toml`
-- Normal builds include `/image [local-path]` and `Alt+I` composer-image preview. Default halfblocks works without queries or multiplexer mutation; Kitty is explicit opt-in via `--image-protocol kitty` or `tui.image_protocol: "kitty"` with `--tui-mode alternate`, outside multiplexers, and with safe OS pixel-cell metrics. One reusable owned Kitty ID is deleted at terminal teardown. Preview cells never enter the log cache. Production PTY check: `python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui` after building.
-- Optional standalone image lab: `cargo run --manifest-path crates/tui/Cargo.toml --locked --features image-preview --example codelia-image-preview -- [local-image]`. It shares the production decoder but retains broader protocol experiments. Run the lab outside tmux; its Picker differs from the query-free production implementation. See `examples/image-preview/README.md` for controls and manual visual gates.
-- Basic CLI options are handled in `src/entry/cli.rs` and consumed from `src/main.rs` before runtime loop.
-- Startup log includes a version line; the launcher-provided `cli_version` from `--internal-launch-context` (`src/entry/launch_context.rs`) is preferred when available. Launcher-owned values (runtime command, update notice file, update control entry, startup confirmations) come only from that argument, never from the environment; `CODELIA_RUNTIME_CMD` / `_ARGS` remain developer overrides. `--diagnostics` / `CODELIA_DEBUG=diagnostics` is a TUI-local transcript-expansion toggle fed by the always-on `run.metrics` / `run.summary` notifications.
-- Bang shell mode is implemented: legacy runtimes use `shell.exec`, while runtimes advertising `supports_shell_tasks` switch to `shell.start + shell.wait` so the same deferred `<shell_result>` injection path still works.
-- TUI injects request-scoped client tools into `run.start.tools`: `tui_ask_user_choice`, `tui_open_selector`, `tui_preview_artifact`, `tui_focus_context`, and `tui_show_progress`. Runtime calls them back through `client.tool.call`; keep these tools focused on TUI-owned interaction/display state rather than runtime-owned work. They use `approval: "never"` because they are local display/interaction helpers. Do not inject them when `CODELIA_BENCHMARK_MODE=1`; `CODELIA_TUI_CLIENT_TOOLS=0` is the explicit local off switch. `tui_ask_user_choice` should be preferred over plain numbered chat lists when the model asks the user to choose from follow-up questions or options. It rejects malformed primary choices before appending `None`/`Other`, so invalid model arguments must become actionable tool errors rather than fallback-only dialogs; keep its model-visible argument guidance and human-input timeout explicit. On `client.tool.cancel`, remove only the tracked matching choice id and dismiss only the dialog with that same id. `tui_show_progress` renders a graphical log-row progress bar and updates in place when the model supplies an `id`.
-- Successful terminal shell results keep the detail area output-focused: execution time is appended to the summary, successful results usually surface plain output lines without extra labels, and when shell result details need explicit stream labeling the UI uses human-facing labels such as `Output:` / `Stderr:` instead of raw stream names.
-- When a pending `Shell: ...` tool-call line completes, TUI replaces that line with the final shell summary (`✔ Shell: <command> (N ms)`) instead of merely prefixing a status icon.
-- `shell.wait` may return `still_running: true` after its bounded wait window expires; TUI should surface that as status and leave the task running rather than enqueueing a deferred shell result.
-- While an attached shell wait is active and the runtime advertises `supports_shell_detach`, `Ctrl+B` issues `shell.detach { task_id }` and leaves the shell task running in background.
-- `/tasks` now uses the public `task.*` RPC surface for list/show/cancel over retained task metadata.
-- `/model` persists the selected model with `model.set scope=config`; `/model --session` and `/model-session` use `scope=session` for the active session (`SessionState.meta.codelia_model_override`), and `/model-session reset` clears the override. Status renders session-scoped models as `model~:`.
-- `src/app/startup_confirmations.rs` sequences built-in local startup confirmations before composer dispatch. Runtime initialization, session open, and runtime dialogs take priority. Register new IDs and completion behavior per feature; do not send local choices as runtime replies.
-- `/update` is a local picker bound to the launching CLI, including with SSH runtimes. Enter saves the global mode for later launches only if the selected option was drawn in the current terminal size. Esc closes without saving even when options are hidden. This also applies to the startup update picker. Never send a picker response to the runtime or install from the live session.
-- `/fast [on|off|toggle|ultrafast]` updates the current model via `model.set` with the `fast` flag; the runtime gates actual provider fast mode by model support. Status renders enabled fast mode with `⚡`, and adds `ultrafast` for the explicit new mode. Ultrafast requests require the runtime capability `supports_model_ultrafast`; toggle disables either accelerated mode.
-- `/tasks` list/show/cancel surfaces a shell task's public `key` first (for example `build-xxxxxxxx`), while still showing the underlying `task_id` because the current command surface still accepts `task_id` arguments.
-- Agent shell tool rendering keeps `shell_list` user-facing output compact: `ShellList: ...` summary plus one muted line per task (`state | key | optional label | command`) instead of dumping the raw JSON payload.
-- Prompt submissions while a run is active are queued locally (FIFO) and auto-dispatched when run/pending/dialog gates are clear.
-  - `Alt+Q` / `/queue pick` focuses the queue for Steer. Track selection by run ID and queue ID as runtime events can reorder or consume rows.
-  - Queue command surface: `/queue`, `/queue retry`, `/queue cancel [id|index]`, `/queue clear`.
-  - Queued items snapshot the final `run.start` input payload (including image parts and deferred shell-result prefix) at enqueue time.
-  - A busy response retries at most five times; other errors or uncertain sends pause immediately. Keep the head payload intact and require explicit retry or cancellation; do not automatically replay an uncertain run.
-  - After a terminal `run.status` (`completed`/`error`/`cancelled`), queued prompt dispatch waits one retry-backoff interval before resending to avoid racing runtime teardown and transient `runtime busy`.
-- TUI shutdown closes runtime stdin and waits up to five seconds before killing and reaping an unresponsive runtime; keep the graceful path on startup errors too.
-- `session.history` reconstructs progress rows from successful replayed `tui_show_progress` call/result pairs without repeating client-tool RPCs; active live events must not be mistaken for legacy replay.
-- Always-on TUI perf (`state/perf.rs`) and telemetry (`state/telemetry.rs`) stores collect frame/draw/flush/wrap/effect/tick ring buffers and structured LLM/tool/compaction telemetry continuously without triggering hidden redraws. Quick toggles: `Alt+H` cycles `Info -> Telemetry -> Help`, `Alt+P` / `/perf [on|off|toggle]` toggles the 2-line live telemetry + TUI perf footer bar (also enabled at launch via `--debug-perf` / `CODELIA_DEBUG=perf`), and `/stats` (`/diag`) opens a read-only panel synced via `telemetry.get`.
-  - Best-effort RSS memory polling runs at 1 Hz only while the perf bar is visible (and immediately on toggle-ON): Linux uses `/proc/<pid>/status`, macOS uses `libc::proc_pid_rusage`, Windows uses Win32 `OpenProcess` + `K32GetProcessMemoryInfo`.
-- TUI rendering optimizations: startup background `syntect` warmup, off-thread `WriteClipboard` worker, incremental `WrappedLogCache` (`line_row_ranges` + `dirty_from`), incremental Markdown/syntect streaming cache (`IncrementalMarkdownState`), and a unified wakeup-aware event loop (`WakeHub` in `entry/run_loop.rs`).
-- TUI does not query terminal colors with OSC sequences. Canvas text follows the terminal's default foreground/background; accents default to a dark-background palette. `--color-scheme light` or `tui.color_scheme: "light"` (or `CODELIA_TEST_TUI_COLOR_SCHEME=light` in CI tests) selects light-background accents at startup, independently of theme hue. Painted surfaces stay dark. `panel_divider_fg` is only for dividers on the dark input surface; canvas diff metadata (`DiffMeta`) uses scheme-adaptive `log_muted_fg`. Contrast tests must include gray backgrounds, not just pure black/white.
-- Resuming a session (`--resume <id>` or the resume picker) sends `session.open` before `session.history`, so `/model --session` or `/model-session` before the first message is saved to that session. A successful open refreshes the model status line with a silent `model.list`; `-32601` from older runtimes is ignored.
-- TUI session resume/history requests cap `session.history.max_events` to `500` to keep inline restore volume closer to typical terminal scrollback sizes.
-- Resume picker starts in current-worktree scope and `A` toggles between current workspace and all saved sessions.
-- When `session.history` returns `resume_diff`, TUI renders those status lines immediately after `History restored ...`; runtime only includes it for material current-vs-saved resume-context changes, so legacy/no-change restores stay quiet.
-
-- TUI advertises `supports_text_delta` and consumes the published `text.delta` / `reasoning.delta` protocol. Reuse that protocol rather than introducing a second streaming API. Complete live assistant/reasoning output shares the normal Markdown transcript and scrolling. Stable live lines/paragraph prefixes enter native scrollback during generation; only the mutable Markdown tail is fenced. Canonical handoff retains existing rows without duplicate append. See `state/stream_preview.rs`, `transcript.rs` and the live output section in `dev-docs/specs/ui-protocol.md`.
+- **RPC & polling**: Send RPCs synchronously via `&mut dyn RuntimeTx` with `PendingRpcs` rollback (`run.steer` allows multiple IDs). Route responses in order: goal -> upload -> `rpc_pending.take` -> fallback; apply each parsed line before reading state for the next (<= 300 lines/tick; `RuntimeMsg::Ignored` requests no redraw unless cap hit).
+- **Overlays (`AppState.overlays`)**: 3 tiers — `RuntimeDialogs` (`ConfirmSlot::Pending -> Active` after one draw + scrollback sync; confirm > prompt > pick), `LocalPanel` (`/update`, shell rules), and `QueueSteerPicker` (queue focus; independent 3rd tier blocking editor input while permitting queued dispatch when other gates pass). Open runtime dialogs block startup `/update` choice validation.
+- **Parser & streaming (`app/runtime/parser/`, `transcript.rs`, `state/stream_preview.rs`)**: `supports_text_delta` shares `transcript.rs` Markdown rendering and `stream_commit_boundary()` fencing; `stream_preview.rs` keeps run/attempt-scoped segments without tail truncation. `last_llm_tps` updates only on valid non-null active-run metrics and clears only on logout session reset (never on call/run start). Live `tui_show_progress` calls/success results and `done` stay hidden; history replay reconstructs progress rows without sending RPCs. Legacy text `Permission request raw args (...)` stays ignored. `CODELIA_DEBUG=diff` logs parser diff-highlight diagnostics.
+- **Client tools, queue, update & resume**:
+  - `tui_ask_user_choice` validates all primary choices before appending `None`/`Other`; `client.tool.cancel` dismisses only a matching tracked `request_id`. Suppress client-tool injection when `CODELIA_BENCHMARK_MODE=1` and disable when `CODELIA_TUI_CLIENT_TOOLS=0`.
+  - Queued prompts snapshot the final `run.start` payload, retry `busy` <= 5 times, pause on uncertain errors without auto-replaying, pause all matching queued candidates on Steer ID mismatch, and wait one backoff after terminal `run.status`.
+  - `session.open` precedes `session.history` (`max_events: 500`); `/logout [provider]` requires `supports_scoped_logout`; `/model-session` / `--session` sets `scope=session`; `/update` saves global `update.mode` via private CLI controls only when the option was drawn in current terminal bounds (startup confirmation never sends local choices as runtime RPC replies).
+  - Typed file clipboard (`Alt+V`) / staging (`util/clipboard/`, `util/attachments/`): accept paths only from typed file clipboard selections (not terminal text paste), reject remote URI authorities, never interpolate clipboard/selection text into command strings (use UTF-8 stdin for WSL PowerShell, bounded bridge waits), verify regular files via bounded opened handle + shared 128 MiB reservation, and replace staged markers before `run.start`; `clipboard_import.rs` binds in-flight imports to composer markers so out-of-order completions resolve in place and late completions after clear/delete/session switch leave the composer untouched.
+  - Shutdown closes runtime stdin and waits up to 5s before kill/reap (including startup errors).

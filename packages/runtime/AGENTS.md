@@ -1,277 +1,39 @@
 # @codelia/runtime
 
-runtime (JSON-RPC stdio server) that connects Core and UI.
-Responsible for receiving UI protocols, executing agents, and implementing tools.
-Image generation uses `src/image-generation/` plus `src/rpc/image.ts`; see the
-directory AGENTS/RULES and `dev-docs/specs/image-generation.md` sections 1.1-1.4.
-TUI-local `decision` uses `src/decisions/` with explicit OpenAI/Google API-key
-selection, shared text or image references and an internal permission gate;
-see `dev-docs/specs/decisions.md`. It is independent of image-generation mode.
-Inline run attachments are imported through the factory-provided `prepareRunImages`
-capability before model history/run records. The same workspace store resolves refs
-for vision and explicit image-generation references; no raw attachment bytes are
-replayed from mutable files. Non-local hosts do not acquire local persistence implicitly.
-Copied files use the negotiated upload RPCs and `src/attachments/` session
-ownership checks. The TUI-local runtime supplies the file store. Embedded
-hosts opt in with `RuntimeHostAdapters.stores.attachmentStore` and optional
-lower `attachmentUploadLimits`. The model-only `attachment_read` tool uses
-the current session and normal tool permissions.
-The opt-in builtin follows OpenAI chat auth: Codex OAuth uses the fixed Codex
-image backend and existing AuthResolver refresh/account routing without a key;
-API-key chat uses the public Image API. Custom OpenAI/OpenRouter images use API
-keys without replacing stored chat OAuth. Hosted/native output and stored auth
-v2 remain planned. Do not confuse normalized executeRaw ToolResult parts with
-the unwrapped direct tool.call RPC result in live checks.
-Never bypass generation/export inner permission gates for direct RPC calls.
-Runtime environment MVP lives in `src/environment.ts` and is specified in `dev-docs/specs/runtime-environment-contract.md`. Omitted `RuntimeOptions.environment` means the TUI-compatible `tui-local` preset. `src/index.ts` remains the auto-starting stdio entrypoint; non-TUI hosts must import `startRuntime` and host adapter types from the side-effect-free `@codelia/runtime/sdk` entrypoint. The first proof preset is `embedded-no-local-tools`, which disables local filesystem/process/MCP/search/context and uses host config/auth/system prompt/tools/events plus volatile stores. Resolve the effective environment before adding startup side effects such as config reads, store creation, task recovery, MCP startup, AGENTS/skills loading, or model metadata cache access. Host event-sink delivery is serialized per runtime state so async sinks preserve notification order and failures do not stop later notifications. A runtime with no workspace identity must not fall back to the local process cwd when applying the default `session.list` scope.
-Built-in basic tools (bash/shell/shell_list/shell_status/shell_logs/shell_wait/shell_result/shell_cancel/shell_stdin_write/read/write/edit/apply_patch/view_image/webfetch/agents_resolve/todo_read/todo_new/todo_append/todo_patch/todo_clear/done + lane_create/lane_list/lane_status/lane_close/lane_gc) and sandbox. The default root of the sandbox is the current directory at startup, which can be overwritten with `CODELIA_SANDBOX_ROOT`.
-Successful `read` and `read_line` text results end with `[read_metadata] content_sha256=<lowercase-64-hex>`, computed from the complete UTF-8 text content rather than the formatted preview. `write.expected_hash` and `edit.expected_hash` accept that value unchanged, validate lowercase 64-character hexadecimal, and should be omitted when the caller has not obtained or computed the current full-content hash. Keep the readers and both write guards on `src/tools/content-hash.ts`; do not normalize line endings or cache the guard value.
-A `write.expected_hash` or `edit.expected_hash` mismatch must tell callers to read the file again and retry with the new `content_sha256` so model-driven recovery is explicit. A provided hash for a missing file must be rejected.
-Runtime todo writes are split across `todo_new`, `todo_append`, `todo_patch`, and `todo_clear`; todo items include stable `id` and `priority`, `todo_patch` changes only supplied fields, and runtime rejects states with more than one `in_progress` item.
-`todo_read` and the split todo mutation tools return plan/task rows while keeping detail leakage low: stored `notes` are not rendered, and `Next` hints expose task id only (`Next: [id]`) using the same displayed task order.
-Todo state is scoped by runtime `session_id` (not sandbox UUID) and persisted in `SessionState.meta.codelia_todos`, so `run.start.session_id` resume restores the plan after runtime restart.
-Sandbox file/path tools stay bounded by `CODELIA_SANDBOX_ROOT` in `minimal`/`trusted`, but `full-access` resolves file/path arguments with normal user-level path semantics (no logical sandbox path guard).
-Sandbox path violations from runtime file/path tools are thrown as hard tool errors (`is_error=true`), not returned as normal text results.
+JSON-RPC runtime server connecting UI/TUI and `@codelia/core` (`src/index.ts` stdio auto-start; side-effect-free `@codelia/runtime/sdk` for embedded hosts).
 
-tool definition guide (description/field describe):
-- Built-in tools use `defineTool`'s non-strict model schema: preserve normal optional fields, omit unavailable values, and rely on runtime Zod validation rather than nullable-required sentinels.
-- Write `defineTool.description` concisely in one sentence.
-- Give top priority to what the tool does, and avoid implementation details and duplicate explanations.
-- Keep the description only as long as needed for correct use; if callers need non-obvious limits, supported formats, or usage constraints, include them here rather than optimizing for an arbitrary character count.
-- For the numeric parameter `describe`, specify `unit / default / max` briefly only when necessary.
-- Keep the text of `describe` concise and consistent, and use the same vocabulary to describe items with the same meaning (e.g. `0-based`, `Default`, `Max`).
-- If a parameter is literal-only (for example, not shell-expanded) or uses a non-obvious syntax/dialect, say that explicitly in the field `describe` so the schema does not invite shell-style or language-specific misreadings.
-- If the tool is bounded, file-only, exact-match-only, or otherwise narrower than a user might assume from the name, make that scope explicit in the tool description/schema rather than relying on prompt-side caveats.
-- If correct tool use depends on non-obvious limits, supported formats, or usage patterns, include the necessary guidance in the tool description/schema so callers can see both what the tool accepts and how it is meant to be used.
-- Audit tool names and parameter names against likely model priors: avoid names that imply broader behavior than the tool supports, avoid using different names for the same concept across nearby tools, and make adjacent tools (`edit` vs `write`, `read` vs `read_line`) distinguishable from the names/schema alone.
-- Assume the LLM may only see the tool description/schema at use time. Put extended notes and implementation detail on the AGENTS.md / spec side, but keep the tool description/schema self-sufficient for correct use.
-- Keep the shared system prompt focused on when/how to reach for a tool; put exact behavior, defaults, limits, and parameter semantics in the tool description/schema so the tool definition remains the self-sufficient source of truth for tool use.
+## Embedding & Composition
 
-Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck. If metadata is still missing but the model exists in `DEFAULT_MODEL_REGISTRY`, strict startup continues using default registry spec (strict error remains only for unknown models in both metadata and default registry).
-Static fallback only counts as usable when the effective model spec has a positive context budget (`maxInputTokens` or `contextWindow`); latest models that should run without fetched metadata must carry those limits in `DEFAULT_MODEL_REGISTRY`.
-The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
-For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter/moonshot/zai.
-Provider-specific model construction lives in `src/model-factory.ts`. Keep it independent of aggregate `RuntimeState`, RPC, and UI modules: pass resolved model config, provider auth, metadata mode, logging, and narrow auth capabilities from `src/agent-factory.ts`, which remains the composition root.
-Google ignores an older inherited boolean `model.fast: true` at execution, consistent with the TUI's `fast:off` status; explicit Google Fast selection is rejected by `model.set`, and implicit Fast inheritance is saved as `false` for both config and session scope. Ultrafast remains rejected.
-Google model names and aliases are resolved through the static registry before constructing `ChatGoogle`; the factory returns the concrete ID as `resolvedModelName`. Unknown names fail without a default fallback.
-`deepseek` constructs `ChatDeepSeek` over fixed official stateless Responses with independent `DEEPSEEK_API_KEY`/saved API-key auth. Only `deepseek-flash` and `deepseek-v4-pro` are registered; names/aliases resolve before adapter construction. Model selection clears inherited boolean Fast and rejects explicit Fast before writes, as for Google. The adapter owns effort mapping and plaintext reasoning replay; see `dev-docs/specs/providers/deepseek-provider.md`.
-Runtime tool ordering, provider-native/local search selection, and host-tool identity live in `src/tool-composition.ts`. Keep environment config resolution, MCP lifecycle, sandbox creation, and `RuntimeState` mutation in `src/agent-factory.ts`; pass prebuilt base/MCP/host tools and resolved search config into the composition module.
-When a static registry entry uses `providerModelId` (for example a capped/full-context split of one provider model), runtime preserves the configured model id for context budgeting and UI, but resolves the provider model id for OpenAI request/metadata/reasoning handling.
-For Anthropic, runtime resolves `max_tokens` from model metadata limits (`max_output_tokens` -> `max_input_tokens` -> `context_window`) with static registry fallback and guarantees it stays above legacy extended `thinking.budget_tokens` when applicable. Fable 5 uses always-on adaptive thinking and keeps all five provider-native effort levels distinct. Opus 4.7/4.8 keep provider-native `xhigh` and `max` distinct; Opus 4.6 and Sonnet 4.6 support adaptive-thinking `max` but fall canonical `xhigh` back to `high`; Opus 4.5 uses manual extended thinking and falls canonical `max` back to `xhigh` without `output_config.effort`.
-Sonnet/Haiku 5.5 keep native five-level adaptive effort, static 1M/128K limits and no Fast support. Their adapter owns summarized progress and durable prefix-safe thinking replay; see `dev-docs/specs/providers/anthropic-provider.md`.
-`model.provider=openrouter` composes core `ChatOpenRouter` (dedicated connector) instead of reusing `ChatOpenAI`.
-`model.provider=moonshot` composes core `ChatMoonshot`; auth uses `MOONSHOT_API_KEY` or saved api-key auth, and `MOONSHOT_BASE_URL` can override the default `https://api.moonshot.ai/v1`. Kimi K3 always sends `reasoning_effort=max`, and runtime/local history replay must preserve Moonshot reasoning with the following assistant message.
-Moonshot vision accepts the runtime's inline png/jpeg/webp/gif data URLs (or existing `ms://` ids) but not public image URLs. Core defers image-bearing tool results until all consecutive tool result messages have been serialized, then adds one multimodal user message so `view_image` remains visible to Kimi K3 without breaking tool-call ordering.
-Core emits `llm.retry` before bounded provider retry waits; runtime forwards and persists the safe event unchanged. Classified provider failures are normalized through `src/provider-errors.ts`: normal `run.status` / `run.error` output contains only safe message, provider, kind, status, and attempt counts, never the raw SDK message or stack.
-`model.provider=zai` composes core `ChatZai`; auth uses `ZAI_API_KEY` or saved api-key auth, and `ZAI_BASE_URL` can override the default `https://api.z.ai/api/paas/v4`.
-`model.provider=xai` composes core `ChatXai`; auth uses `XAI_API_KEY` or saved api-key auth, and `XAI_BASE_URL` can override `https://api.x.ai/v1`. Runtime maps canonical `xhigh|max` reasoning to xAI `high`, preserves the fallback in diagnostics, and may select xAI native `web_search` when configured.
-When building runtime `modelRegistry` for OpenRouter, resolve the configured model id case-insensitively and register it dynamically with context/input/output limits from metadata so context-left/compaction can resolve dynamic OpenRouter models.
-OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).
-When OpenAI `experimental.openai.websocket_mode=auto` falls back from websocket to HTTP, runtime emits a visible warning once per run while continuing over HTTP.
-Search behavior is configured by `search.*` in config (`mode=auto|native|local`).
-In `mode=auto`, runtime prefers provider-native search for supported providers (`openai`, `anthropic`, and `xai` by default) and otherwise exposes local `search` tool.
-Local `search` tool supports `ddg`/`brave` backends; `brave` reads API key from `search.local.brave_api_key_env` (default `BRAVE_SEARCH_API_KEY`).
-`search.xai.x_search.enabled=true` independently adds xAI hosted X Search; it defaults off, is ignored for other providers, and must not affect native/local web-search selection or availability checks.
-`search` is not in system allowlist by default (permission confirm required unless explicitly allowed).
-The defaults are registered in `configRegistry` on the core side, and the runtime uses only the synthesized settings.
-The project settings (`.codelia/config.json`) are read by runtime and synthesized with the global config (CLI is not supported).
-You can override the global config location with `CODELIA_CONFIG_PATH`.
-Get the model list and update the model using RPC `model.list` / `model.set` (model.set recreates the Agent). `model.set scope=config` writes through the config policy; `scope=session` stores `codelia_model_override` in `SessionState.meta` for the active session, restores it before Agent creation on `run.start session_id=...`, and should report `source=session`.
-`model.list` returns the context window / input/output limit in `include_details=true` (omitted if it cannot be obtained). For static providers, displayed limits follow the merged runtime registry (same precedence as execution), not raw metadata rows.
-`model.list` sorts by `release_date` (newest first when available) and can include normalized cost fields (`cost_per_1m_*_usd`) in details.
-If provider of `model.list` is not specified, the provider of config is given priority and a list is returned.
-On startup after `initialize`, if no stored/env auth exists, runtime starts first-run onboarding via UI pick/prompt (provider -> auth -> model) before the first run.
-`initialize` response includes resolved `tui.theme` (merged global/project config) so UI can apply the saved theme immediately at startup.
-Return skills catalog (name/description/path/scope + errors) with RPC `skills.list`.
-Return a snapshot of runtime/UI/AGENTS resolver (including loaded AGENTS.md path) with RPC `context.inspect`.
-`context.inspect` can return the rendered startup `execution_environment` block, plus skills catalog/loaded_versions with `include_skills=true`.
-Load `mcp.servers` (global/project merge) and start MCP server connection when runtime starts.
-The MCP adapter tool is generated at runtime, and `@codelia/core` does not have MCP transport/lifecycle.
-Provide RPC `mcp.list` and return server state/tool number for `/mcp`.
-MCP HTTP assigns a token of `mcp-auth.json` with Bearer and tries to reacquire it with refresh token when 401 occurs.
-MCP server that requires OAuth authenticates with Authorization Code + PKCE (localhost callback) and saves the obtained token in `mcp-auth.json`.
-OpenAI auth offers device-code login for SSH/headless environments via `https://auth.openai.com/api/accounts/deviceauth/*` and exchanges the returned authorization code at `https://auth.openai.com/deviceauth/callback`.
-OAuth browser launch defaults to `manual` when `SSH_CONNECTION` / `SSH_CLIENT` / `SSH_TTY` is present; override via `auth.oauth_browser` (`auto|manual`) in config.
-Manual SSH OAuth can complete by pasting the redirected callback URL (or `code=...&state=...`) into the TUI.
-OAuth metadata is automatically detected from `/.well-known/oauth-protected-resource` and authorization-server metadata, and can be overwritten with `mcp.servers.<id>.oauth.*` of `config.json`.
-If 401 is returned by an HTTP server that can resolve OAuth metadata, the state will be treated as `auth_required` and will transition to waiting for authentication instead of `connect failed`.
-Session store writes to `sessions/YYYY/MM/DD/<run_id>.jsonl` and runtime
-Record `run.start` / `run.status` / `run.end` / `agent.event` / `run.context`.
-`run.start` result includes `session_log_path` when the run event store exposes a persisted JSONL path; CLI benchmark/ATIF export relies on this.
-- Normal file stores keep compact `llm.usage`, with separate durable usage logs;
-  full dumps require `CODELIA_DEBUG=session-dump`. `session.update` manages pinned/archive
-  metadata independently of snapshots. Local-owned runtime startup and lifecycle
-  operations archive unpinned archived/30-day-old run events after removing diagnostics,
-  including embedded snapshots in legacy gzip; explicit dumps may expire. Embedded/custom
-  stores never acquire default-home cleanup implicitly.
-Runtime always emits structured `run.metrics` (per completed LLM call) and `run.summary` (per completed run with run delta and session-scoped cumulative totals surviving `invalidateAgentCache()`) derived in-memory, and serves read-only `telemetry.get` (behind `supports_telemetry`) for on-demand inspection of session/run totals, recent calls/tools, context breakdown, and runtime perf phases/memory/subagents/backpressure. Legacy `run.diagnostics` / `supports_run_diagnostics` are removed.
-`run.start` accepts `input.type="text"` and `input.type="parts"` (text/image_url), validates multimodal parts, and forwards them to Agent as `string | ContentPart[]`.
-LLM calls and tool output are logged from the core's session hook.
-Original messages are appended through awaited `AgentSession.recordMessages` before
-trimming/compaction. Same-session `conversation_search` / `conversation_read` are
-registered only when the injected store supports archival retrieval; no home fallback.
-Run history readers accept `.jsonl.gz` and avoid duplicate representations.
-Save session resume state via `@codelia/storage` (`sessions/state.db` index +
-`sessions/contexts/<session_id>.json` active checkpoint), expose via `session.list`, and
-restore with `run.start.session_id` (history is snapshot at the end of run).
-`session.list` defaults to `scope="current_workspace"` using exact `workspace_root`/project-root matching; callers can opt into cross-workspace results (including legacy unscoped sessions) with `scope="all"`.
-Session snapshots also persist structured resume context in `SessionState.meta.codelia_resume_context` (workspace / working dir / sandbox / initial AGENTS / loaded skill mtimes / approval mode / current model id) so later resumes can compare saved vs current context without scraping run logs.
-Session-state persistence strips startup-generated system messages from saved `messages`; on restore, runtime rebuilds the current startup system prompt, then injects a fresh `session.resume.diff` reminder describing the current runtime/workspace context before the first resumed turn.
-`session.history` resends `agent.event` of the past run, and TUI redraws the history.
-`session.history` selects runs through the state.db run index (`SessionStateStoreImpl.listSessionRuns`, used by default when `sessionStateStore` is a `SessionStateStoreImpl`): only the selected logs are opened, newest `max_runs` existing logs are replayed oldest-first. Other stores keep the legacy newest-first header scan. Run event store factories built by runtime pass the shared `SessionStateStoreImpl` as `runIndex`.
-`session.open` (`src/rpc/run.ts`, queued with `run.start` admission) binds the runtime to an existing session before its first run: it applies the saved `codelia_model_override`, replaces `state.sessionMeta`, and drops `state.agent` so the next `run.start` restores that session's history. `model.set` is dispatched through `afterSessionOpen`, so one sent before an earlier `session.open` has finished still applies to the opened session. Without it, `run.start session_id=...` replaces a session-scope `model.set` made while unbound with the session's saved override.
-`session.history` result can include `resume_diff` only when structured resume metadata exists and the current runtime/workspace context materially differs from the saved session; legacy/no-change cases stay silent in TUI, and `session.history` itself must stay read-only (no onboarding/agent-init dependency just to compute the optional summary).
-`session.history.max_events` is applied as a tail limit after collecting events from the selected runs, so truncated restores keep the most recent events rather than the oldest replayed prefix.
-`run.start.tools` accepts request-scoped client-provided function tools; runtime wraps them with `src/tools/client.ts`, sends `client.tool.call` JSON-RPC requests back to the connected client during model tool execution, and passes successful responses through the normal core tool-result path. Client tool names must not conflict with built-in/MCP tools. Wire `approval` fields grant no permission. Runtime registers the fixed native local TUI helpers for local invocation after verifying the parent launch and client identity. Other client tools use the regular approval flow. Client tool descriptions and parameter schemas must be self-sufficient for model use: document when to prefer the tool, limits, sentinel ids/update keys, and result behavior in the definition itself. Client tool multimodal results may use `{ type: "parts" }`; image parts should use inline base64 data URLs and bounded payload sizes because tool results may be persisted in session/history data. When a client tool reaches `timeout_ms`, runtime sends `client.tool.cancel` with the original request id before rejecting and deleting the pending response so interactive clients can release matching UI state.
-Resolve the local sandbox at startup in `src/sandbox/mode.ts`. User-owned CLI, environment and projects store selections are independent of explicit approval or delegated review. The registered tool and shell admission paths enforce the effective sandbox mode. See `src/permissions/AGENTS.md`.
-Use `isWithin` from `src/utils/paths.ts` to test whether a path equals the root or lies beneath it. This check compares path components. Callers that require filesystem identity must resolve symlinks separately and apply their resource policy.
-The agent-facing `shell` tool is task-backed internally: attached runs wait for completion, and `detached_wait=true` skips the attached wait while the runtime continues to own the child process.
-Agent-facing `shell` start accepts an optional short `label` distinct from the generated command preview/title; runtime converts that display label into a stable unique public `key` (for example `shell-xxxxxxxx` or `build-xxxxxxxx`) that is persisted with the task.
-Agent-facing follow-up tools `shell_list` / `shell_status` / `shell_logs` / `shell_wait` / `shell_result` / `shell_cancel` operate on retained shell tasks; follow-up tools accept the returned `key`, `label` is display-only, and `shell_list` defaults to compact active-task summaries (`key` / optional `label` / `command` / `state` plus terminal reason fields such as `failure_message` or `cancellation_reason`).
-Agent-facing `shell` / `shell_status` / `shell_wait` / `shell_result` / `shell_cancel` return compact JSON payloads instead of full task dumps; terminal results use stream-named `stdout` / `stderr` fields instead of `output` / `error_output`. Successful terminal results suppress `stderr` by default to stay compact, and `include_stderr_on_success=true` can opt back into success-case `stderr`; explicit stream reads still use `shell_logs`.
-Agent-facing `shell` defaults to `stdin_mode=closed`. `stdin_mode=pipe` requires `detached_wait=true`; `shell_stdin_write` then provides serialized UTF-8 writes capped at 64 KiB per call and optional close, restricted to the live owning runtime and originating agent session. This is not a PTY and has no Core-to-UI RPC surface.
-`shell_wait` uses a bounded attached-wait window (default 120s, max 300s) and returns `still_running: true` with compact status JSON instead of hanging indefinitely when the task has not finished yet.
-Live agent-facing `shell_logs` reads are bounded to a recent tail window; `tail_lines` can request the last N lines for live or retained output, and the response surfaces truncation metadata instead of returning the full active in-memory buffer.
-For the agent-facing `shell` tool, foreground runs use `timeout` default 120 seconds and cap it at 300 seconds; `detached_wait=true` accepts larger timeout values up to the Node timer limit (`2147483s`), and omitting `timeout` means the managed child job runs until completion, cancellation, or runtime shutdown/exit.
-Persistent services are outside the managed shell-task lifecycle: agents must use explicit shell-native out-of-process techniques (`nohup`, `setsid`, daemon CLIs, `docker compose up -d`, etc.) when they need work to survive runtime exit, and must verify readiness/liveness separately.
-Tool output cache total-budget trim is disabled by default in runtime to preserve prompt prefix stability; set `CODELIA_TOOL_OUTPUT_TOTAL_TRIM=1` to re-enable total-budget replacement trim.
-When using `rg` via shell, make the search path explicit like `rg <pattern> .` (to avoid hangs due to non-interactive stdin reads).
-The shell tool accepts an optional working directory. The launcher binds the resolved cwd and the original invocation to the grant before spawning. Persist a single external command only when the backend can bind its executable identity, exact argv and effective execution authority.
-Lane tools are worktree-first orchestration helpers for autonomous runs (`lane_*`).
-In MVP, `tmux` backend is implemented; selecting `zellij` currently returns an unsupported error.
-`lane_create.seed_context` is passed as TUI startup option (`--initial-message`) so the lane can auto-start the first run when the UI becomes send-ready.
-Lane tool responses include operator hints such as `attach_command`, `enter_worktree_command`, and follow-up tool args (`lane_status`/`lane_close`).
-`lane_create` default worktree root is home-side `~/.codelia/worktrees` (repo-local path is no longer the default); `worktree_path` is optional override.
+- Resolve `src/environment.ts` (`dev-docs/specs/runtime-environment-contract.md`) before any startup side effects (config reads, stores, task recovery, MCP, AGENTS/skills, models.dev cache). Default omitted `environment` to `tui-local`; `embedded-no-local-tools` disables local FS/process/MCP/search/context and uses host adapters + volatile stores. Never fall back to `process.cwd()` for `session.list` when workspace identity is absent.
+- Serialize host event-sink delivery per `RuntimeState` so async sinks keep order and sink errors do not drop later notifications.
+- `src/agent-factory.ts` is the singleflight composition root (`src/model-factory.ts` builds models; `src/tool-composition.ts` builds tool sets/search). Pass narrow typed inputs and explicit callbacks — never pass aggregate `RuntimeState` into leaf modules or policy flows.
+- `model-factory.ts`:
+  - Preserve `ModelSpec.providerModelId` separately from configured `id` for registry/compaction; resolve model aliases before constructing Google/DeepSeek without fallback.
+  - Clear inherited boolean `fast` (save `false`) and reject explicit `fast` when changing to Google/DeepSeek.
+  - Look up models.dev at startup (force-refresh once on miss, fall back to `DEFAULT_MODEL_REGISTRY` only if `maxInputTokens`/`contextWindow` > 0) and compose dedicated connectors (`ChatOpenRouter`, `ChatGoogle`, `ChatDeepSeek`, `ChatMoonshot`, `ChatZai`, `ChatXai`, `ChatResponses`).
+- Named Responses endpoints (`src/responses-provider.ts`): config-owned metadata/limits and credentials only (never trigger models.dev or fall back to OpenAI auth).
 
-Reference specifications:
-- dev-docs/specs/ui-protocol.md
+## Tool Authoring & Built-in Tools
 
-Launch for development:
-- OpenAI: `OPENAI_API_KEY=... bun packages/runtime/src/index.ts`
-- Anthropic: `ANTHROPIC_API_KEY=... bun packages/runtime/src/index.ts`
-- OpenRouter: `OPENROUTER_API_KEY=... bun packages/runtime/src/index.ts`
-- Moonshot: `MOONSHOT_API_KEY=... bun packages/runtime/src/index.ts`
-- Z.ai: `ZAI_API_KEY=... bun packages/runtime/src/index.ts`
-- xAI: `XAI_API_KEY=... bun packages/runtime/src/index.ts`
-- If you want to log OpenAI OAuth HTTP 4xx/5xx: `CODELIA_DEBUG=1`
-- OpenRouter app headers (optional): `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE`
-- If you want to check the history snapshot after compaction in runtime log: `CODELIA_DEBUG=1` (output `compaction context snapshot ...`)
-- If you want to track run lifecycle / tool event / transport backpressure in detail: `CODELIA_DEBUG=1`
-- In `CODELIA_DEBUG=1`, runtime logs the rendered startup `execution_environment` block once when the initial agent is built.
-- In `CODELIA_DEBUG=1`, run failure path logs `stream.error` with name/message/stack/cause/extras before emitting `run.status=error`.
-- If you want to inspect provider request payload stability, set `CODELIA_PROVIDER_LOG=1` (stderr: bytes/hash/shared-prefix ratio). Request/response JSON dumps are written to project `./tmp` by default; set `CODELIA_PROVIDER_LOG_DIR` to override.
-- OpenAI OAuth client options include `defaultHeaders.ChatGPT-Account-ID` (when available) so websocket handshake can reuse account routing headers in addition to HTTP fetch middleware.
-- OpenAI OAuth requests also attach `defaultHeaders.originator=codelia` and `defaultHeaders.User-Agent=codelia-cli` so ChatGPT-backed HTTP/WS calls carry stable client identification similar to upstream Codex without per-request/version lookup overhead.
+- **`defineTool` schema & client tools**: Keep `description` to one clear sentence focused on what the tool does (plus non-obvious constraints/bounds so callers distinguish adjacent tools like `edit` vs `write`, `read` vs `read_line` from schema alone). Keep `describe` concise with consistent vocabulary (`0-based`, `Default`, `Max`, literal-only vs shell-expanded) and keep `run.start.tools` client-tool definitions self-sufficient. Wire `approval` fields grant no permission, and client tool names must not collide with built-in or MCP tools.
+- **Content hashes & edits (`src/tools/content-hash.ts`)**: `read`/`read_line` append `[read_metadata] content_sha256=<64-hex>` over complete UTF-8 text; `write`/`edit` validate `expected_hash` without normalizing line endings or caching hashes, and reject hashes for missing files. `write`/`edit`/`apply_patch` count UTF-8 bytes, treat non-empty `edit` `old_string === new_string` as no-op success, require >=1 `+`/`-` line on non-move `Update File` sections in `apply_patch`, and treat diff-cache failures as non-fatal.
+- **Paths & sandbox**: Use `isWithin` (`src/utils/paths.ts`) for component containment and resolve symlinks separately for filesystem identity. Built-in FS tools are constructed with resource protection enabled: they allow ordinary OS-account reads (including outside the workspace), reject configured `protected_paths` and Codelia credentials/authority files, and enforce workspace write containment (plus read-only `.codelia/`, Git metadata, and home-dot protections) even in `full-access`. Only `full-access` shell execution runs unconfined with login-user filesystem/network access.
+- **Search, web & media**: `webfetch` and local `search` are intentionally excluded from default system allowlists. `view_image` URL inputs pass directly to providers (no download/fetch; `max_bytes` is local-only) and require URL permission checks separate from local file access. `todo_*` permits at most one `in_progress` item and scopes state to `session_id` (`SessionState.meta.codelia_todos`). `lane_*` defaults worktrees to `~/.codelia/worktrees` and currently supports `tmux` only.
+- **Shell & TaskManager (`src/tasks/`)**:
+  - `shell` and `shell.*` / `task.*` RPCs share `TaskManager` (serialized registry mutations, orphan reconciliation on startup and `list`/`status`, shutdown cleanup).
+  - `shell` accepts complete interpreter source (`cwd`/`label` separate); `detached_wait=true` skips the attached wait while runtime owns the child (persistent services require shell-native detach); `stdin_mode=pipe` requires `detached_wait=true` and originating live runtime/session (64 KiB/call, 30s backpressure timeout, not a PTY).
+  - `shell_wait`/`shell.wait` cap at 300s (default 120s) and return `still_running: true`. Retain cumulative usage checkpoints and monotonic `duration_ms`; never let late completion overwrite terminal records or blank whitespace-only cache outputs.
 
-Integration test:
-- Execute only if `INTEGRATION=1` and API key exists.
-- OpenAI: `OPENAI_API_KEY` + `CODELIA_TEST_OPENAI_MODEL`
-- Anthropic: `ANTHROPIC_API_KEY` + `CODELIA_TEST_ANTHROPIC_MODEL`
-- Tests point XDG environment variables to temporary directories to isolate storage space.
+## Sessions, MCP, Auth, Attachments & Decisions
 
-Implementation notes:
-- Runtime entries have been delegated to `src/index.ts` → `src/runtime.ts` and divided into `src/rpc`, `src/tools`, `src/sandbox`, `src/utils`.
-- RPC handler is divided into `src/rpc/handlers.ts` (wiring) and `src/rpc/run.ts` / `src/rpc/history.ts` / `src/rpc/model.ts` (responsible implementation).
-- Execution state is encapsulated in `src/runtime-state.ts`.
-- `createAgentFactory` is singleflight, and the Agent is constructed only once even if there are simultaneous initialization requests.
-- `agent.event` sends `AgentEvent` of `@codelia/shared-types` to the protocol notification as is.
-- `text.delta` / `reasoning.delta` are requested from Core only when the client declared `ui_capabilities.supports_text_delta`; `src/rpc/run.ts` routes them through `src/rpc/text-delta-coalescer.ts` (~40 ms batches, flushed before any other run event including the OpenAI WS-fallback warning, dropped on cancel/abort/error) and never appends them to the session log; `session.history` also skips them defensively. Subagent child runs never opt in.
-- Live delta smoke (chargeable, opt-in): `INTEGRATION=1 CODELIA_STREAM_DELTA_LIVE=1 infisical run --env=dev -- bun test packages/runtime/tests/stream-deltas-live.test.ts` runs a think → tool → answer Agent turn per provider whose key is set and asserts delta shape, ordering relative to later events and no stream_id reuse; it also logs where concatenated deltas differ from the complete events (reported, not asserted, because `index` does not identify complete events). Auth is passed explicitly, so it never reads or writes `~/.codelia`. `CODELIA_STREAM_DELTA_LIVE_PROVIDERS` / `CODELIA_STREAM_DELTA_LIVE_MODEL_<PROVIDER>` narrow or override.
-- If you terminate the stream midway with run.cancel, normalize the inconsistent history of tool call / tool output with `src/rpc/run.ts` so that it will not be broken in the next run.
-- Even when `run.cancel` arrives during terminal/finally session-save timing, `src/rpc/run.ts` re-normalizes runtime in-memory history before run teardown to avoid carrying dangling tool-call pairs into the next run.
-- `src/rpc/run.ts` also normalizes the existing in-memory agent history at the start of every `run.start`, so a previously interrupted turn cannot poison the next turn with `No tool output found for function call ...`.
-- Session-state save/restore in `src/rpc/run.ts` also normalizes dangling tool_call/tool output pairs to avoid persisting an OpenAI-incompatible history snapshot during in-flight saves.
-- When `run.start` receives `force_compaction=true`, it can force compaction without using normal input.
-- Create run event storage via `RunEventStoreFactory` and hide storage implementation details from `run.ts`.
-- `session.history` reads one header line at the beginning of the run log as a stream (fixed-length buffers are not used because they will be cut off by a huge header).
-- Startup execution-environment context is built in `src/execution-environment.ts` and injected into the initial system prompt before AGENTS/skills. The block uses outer `<execution_environment>` tags with plain-text labeled lines plus bounded startup check results.
-- Execution-environment startup checks use the same shell path as `shell.exec`, default each command to a 10000ms timeout, and launch configured probes concurrently while preserving configured output order.
-- AGENTS hierarchy resolver is located in `src/agents/`, embeds `AGENTS.md` of `root -> cwd` in the initial system prompt, and performs differential resolution explicitly using the `agents_resolve` tool.
-- Skills resolver is located in `src/skills/`, and only catalog is injected as `skills_catalog` to the initial system prompt (the main text is only when `skill_load` is executed).
-- Tools for Skills are `skill_search` / `skill_load`. `skill_load` suppresses `path + mtime` reloading within session.
-- The read tool receives `offset`/`limit` and always returns a bounded truncated preview by default. Long lines are clipped and oversized reads are truncated with continuation hints; use `read_line` when exact long-line content matters. Default caps are `CODELIA_READ_MAX_BYTES=65536` and `CODELIA_READ_MAX_LINE_LENGTH=1000` (both env-overridable).
-- `read_line` is the long-line fallback tool: reads one physical line by `line_number` (1-based) with `char_offset`/`char_limit` paging.
-- `apply_patch` is a JSON function tool (not a freeform transport tool): pass the full codex-style patch text via `patch`, and use `dry_run=true` for verification/permission preview without writing files.
-- `apply_patch` accepts bare `@@` chunk headers and context-only chunks, but a non-move `Update File` section must still contain at least one `+` or `-` line somewhere in the section.
-- `apply_patch` shares the same bounded diff preview/cache behavior as `write` / `edit`; large full diffs are persisted via tool output cache when available.
-- `view_image` accepts exactly one of `file_path` or `url`. Local `png/jpeg/webp/gif` files retain sandbox bounds and inline data URLs; HTTP(S) image URLs pass directly to the model provider without runtime fetching, saving, or size validation. `max_bytes` is local-only. See `src/tools/AGENTS.md`.
-- `view_image` local inspection uses protected file selections. URL inspection requires a structured decision before the model provider receives it.
-- `webfetch` fetches bounded HTTP(S) text/HTML content with timeout + byte caps, returning normalized `markdown` / `text` / `html` output in JSON.
-- `webfetch` is intentionally not in the default system allowlist (same posture as local `search`): external fetches require confirmation unless explicitly allowed.
-- Provide tool_output_cache / tool_output_cache_grep as standard tools.
-- `tool_output_cache` returns a bounded truncated preview by default: long lines are clipped and oversized reads are truncated with continuation hints. Use `tool_output_cache_line` when exact long-line cache content matters. Cache caps are env-overridable via `CODELIA_TOOL_OUTPUT_CACHE_MAX_READ_BYTES`, `CODELIA_TOOL_OUTPUT_CACHE_MAX_GREP_BYTES`, and `CODELIA_TOOL_OUTPUT_CACHE_MAX_LINE_LENGTH` (default line cap 1000).
-- `tool_output_cache_line` is the cache long-line fallback tool: reads one cached physical line by `line_number` (1-based) with `char_offset`/`char_limit` paging.
-- `read_line` / `tool_output_cache_line` interpret `char_offset` / `char_limit` as grapheme-cluster character positions (so emoji are not split mid-character), and their follow-up JSON examples escape embedded path strings correctly.
-- Built-in repo-search helpers `grep` / `glob_search` were removed because their narrowed semantics were too easy to misread; use `shell` with `rg`, `rg --files`, `find`, or `git ls-files` instead.
-- Shared prompt guidance now keeps the distinction light but explicit: use `rg --files` / `find` / `git ls-files` for candidate files or directories, and use `rg` for content search.
-- `write` summaries and write permission prompts use UTF-8 byte counts, not JavaScript string length.
-- `write` diffs compare against existing file contents when overwriting, so previews reflect removals/replacements instead of always looking like new-file creation.
-- `write` / `edit` return bounded diff previews; when a preview is truncated and a tool output cache store is available, they also persist the full diff and return `diff_cache_id`.
-- Runtime tool admission is registered in `src/permissions/tool-approval.ts`. Keep confirmation transport and OS enforcement in runtime and consume shell admission at process launch. See `src/permissions/AGENTS.md`.
-- MCP OAuth prompting lives in `src/mcp/oauth-prompt.ts`, and receives an explicit callback gateway; keep `RuntimeState` and UI request wiring in `agent-factory.ts` rather than passing aggregate runtime state into these policy flows.
-- If diff-cache persistence fails, `write` / `edit` fall back to the truncated preview without `diff_cache_id`; auxiliary cache failures must not turn a successful write/edit into an error.
-- The edit tool returns `old_string === new_string` (and non-empty) as a no-op success instead of an error.
-- The MCP implementation has been separated into `src/mcp/tooling.ts` (tool adapter/list acquisition) and `src/mcp/oauth-helpers.ts` (metadata/token helper), centered on `src/mcp/manager.ts`.
-- MCP transport has been separated into `src/mcp/client.ts` (contract) + `src/mcp/stdio-client.ts` / `src/mcp/http-client.ts` + `src/mcp/jsonrpc.ts` / `src/mcp/sse.ts`.
-- `src/mcp/stdio-client.ts` also cancels the abort listener at request timeout and prevents listeners from accumulating in the same `AbortSignal`.
-- Project stdio MCP launches wait for the `initialize` reply and registration of client approval capabilities. Explicit SDK approval adapters can authorize a startup without a wire client. EOF releases pending initialization waits without starting a server.
-- MCP service approvals belong to the resolved workspace and connection. Session opens, saved session model restoration, normalization of an alias to the same workspace and run Steers preserve them. Workspace changes, workspace authority revisions, disconnects, changed command bindings and shutdown still invalidate pending launches.
-- Resolve and bind the MCP workspace and working directory before asynchronous policy reads. Pass those resolved operands to the launcher and recheck the original names and directory identities through approval consumption.
-- MCP HTTP client interprets the `text/event-stream` response of Streamable HTTP, extracts and processes the `event: message` JSON-RPC payload (ignores control events such as `event: endpoint`).
-- SSE parsing of `src/mcp/sse.ts` uses `eventsource-parser` (handwritten block parser is obsolete).
-- MCP auth storage uses `McpAuthStore` of `@codelia/storage` (`src/mcp/auth-store.ts` is re-export).
-- Runtime shutdown closes owned MCP clients as well as tasks on stdin EOF, signals, and `beforeExit`. Closing is idempotent, cancels OAuth prompts/listeners and network requests, and blocks new MCP starts. POSIX stdio servers use a separate process group with bounded TERM/KILL cleanup; Windows uses taskkill tree termination. Detached descendants remain outside that guarantee. An explicit SDK-owned shutdown handle is still not available.
-- MCP OAuth callback wait timeout is 180 seconds by default and can be overwritten with `CODELIA_MCP_OAUTH_TIMEOUT_MS`.
-- Use the `oauth4webapi` utility to generate PKCE/state for MCP OAuth.
-- Common implementation of OAuth callback server / PKCE / state is consolidated into `src/auth/oauth-utils.ts` and shared by OpenAI/MCP OAuth.
-- `src/auth/oauth-utils.ts` also resolves shared OAuth browser mode and callback parsing helpers.
-- The callback server of `src/auth/oauth-utils.ts` is implemented in `node:http` and operates without dependence on `Bun` in Node runtime.
-- OpenAI OAuth browser launch on Windows uses `rundll32 url.dll,FileProtocolHandler <url>` (avoid `cmd start` query-splitting on `&`).
-- Content debug string conversion of `src/rpc/run.ts` uses `stringifyContent(..., { mode: "log" })` of `@codelia/core`.
-- RPC `shell.exec` records the UI bang origin and uses the common shell admission gate. Successful managed commands can return excerpts and output cache IDs.
-- `shell.exec` is now task-backed internally (`TaskManager.spawn + wait`) while preserving the existing RPC response shape.
-- Runtime also exposes shell-task compatibility RPCs (`shell.start/list/status/output/wait/detach/cancel`) with `supports_shell_tasks` / `supports_shell_detach`, all reusing the same `TaskManager` + shell executor path as `shell.exec`.
-- Runtime now also exposes generic public task RPCs (`task.spawn/list/status/wait/cancel/result`) with `supports_tasks`; `supported_task_kinds` advertises shell and, when a usable factory/workspace exists, subagent. `workspace_mode=worktree` remains rejected.
-- Generic `task.*` RPC summaries now include a shell task's public `key` when available (or a deterministic `shell-xxxxxxxx` fallback for direct shell-backed task records) so UIs can surface the human-usable identifier without exposing raw UUID-only task references.
-- `task.spawn` honors `background=false`: the RPC waits for shell completion and returns terminal task info/output; the default/background path still returns the immediate task summary.
-- `shell_logs.tail_lines` trims the synthetic trailing empty line created by newline-terminated output before counting tail lines, so `tail_lines: 1` returns the actual last printed line for normal CLI output.
-- `shell.output` resolves shell `stdout`/`stderr` by task id; for terminal large output it delegates to `ToolOutputCacheStoreImpl.read/readLine`, and while the task is still running it reads the active in-memory executor buffer through `TaskManager.readOutput(...)`.
-- `shell.wait` now supports in-flight detach via `shell.detach { task_id }`: the wait request resolves with `{ detached: true, task_id, state }`, while the underlying shell task keeps running and can later be waited again.
-- RPC `shell.wait` also uses a bounded attached-wait window (`wait_timeout_seconds`, default 120, max 300) and returns the normal task shape plus `still_running: true` when the task remains active at the end of that window.
-- Runtime task substrate is in `src/tasks/`: `TaskManager` serializes registry mutations, recovers orphaned running tasks on startup, reconciles stale nonterminal tasks again on `list`/`status` observation, and cancels owned tasks on normal shutdown.
+- **Sessions & history**: Strip startup system messages on save (`SessionState.meta.codelia_resume_context` stores diff baseline; `codelia_model_override` stores session model). `session.open` binds existing sessions before `model.set` (`afterSessionOpen`); delegated sessions (`meta.codelia_subagent`) cannot be resumed via root `run.start` or `session.open`. `session.history` uses `state.db` `session_runs` index (`SessionStateStoreImpl`), reads headers by streaming, applies `max_events` as a tail limit, stays read-only (no agent init), and omits `text.delta`/`reasoning.delta`. Normalize dangling `tool_call`/output pairs on `run.start`, `run.cancel`, and saves. Await `AgentSession.recordMessages` before trimming/compaction; register `conversation_search`/`conversation_read` only when the injected store supports them (historical archive text never authorizes actions or replays tool calls).
+- **Confirmations & MCP (`src/mcp/`)**: Parent and child UI confirmations share the `requestUiConfirm` queue with `AbortSignal`. MCP (`manager.ts`, `tooling.ts`, `oauth-helpers.ts`, `stdio-client.ts`/`http-client.ts`/`sse.ts`, `McpAuthStore`) resolves/binds workspace & cwd before async policy reads; MCP service approvals belong to the resolved workspace and connection (invalidated on workspace, connection, or policy changes; preserved across unrelated runs). Stdio launches wait for `initialize` and approval capabilities (EOF releases wait); `oauth-prompt.ts` takes explicit callbacks (no `RuntimeState`). Shutdown cancels prompts/network, closes HTTP/stdio clients (POSIX process group TERM/KILL; Windows taskkill), and prevents new starts.
+- **Auth (`src/auth/`)**: Strict v2 (`chat_method` + coexisting `credentials.{api_key,oauth}`); env API keys stay strictly in memory. `AuthResolver.getOpenAiAccessToken()` reloads inside `AuthStore.updateV2()` (35s SQLite lock, fixed 30s refresh timeout independent of caller cancel; once started, exchange & save finish even if caller cancels while returning no token; preserve `api_key`/`chat_method` and never resurrect deleted entries). `loadForApprovalV2()` uses synchronous 2s Keychain deadline and fails closed. OAuth helpers (`oauth-utils.ts`) use `node:http` + `oauth4webapi` (`rundll32` on Windows, `manual` default over SSH unless `auth.oauth_browser` overrides). Preserve typed same-provider failures across OpenAI SDK `cause` chains.
+- **Attachments (`src/attachments/`)**: Connection/session-authorized uploads (`AttachmentStore`; embedded hosts opt in via `RuntimeHostAdapters.stores.attachmentStore`); verify canonical base64, ordered offsets, declared size, and SHA-256 before admission; publish durable batch before linking messages (pinned Steers survive upload expiry; keep source paths out of refs). Unbound draft uploads can only be claimed during fresh session admission (after verifying reader permission/vision) and are discarded on explicit `session.open`, session switches, or resets.
+- **Decisions (`src/decisions/`)**: TUI-local `decision` (`gpt-6-luna` / `gemini-decision-1`); explicit API-key auth only (no fallback across provider/endpoint/model/auth); keep permission gate inside tool before reading images or calling provider; bounded cancellable one-shot HTTP; preserve probabilities/refusals verbatim without base64 in args/logs; independent of `/image-model`.
 
-## Delegated subagents
+## Debug & Integration Tests
 
-- `src/subagents` implements fresh, shared-workspace, depth-one child tasks. The dedicated
-  `child-entry.ts` builds to `dist/subagents/child-entry.js`; the bundled parent resolves it relative to the `dist` directory; never route it through normal
-  startup, project MCP/skills/tools, or child approval prompts.
-- `task_spawn` performs delegation approval inside the shared spawn callback so
-  direct `tool.call` and `task.spawn` cannot bypass it. Reject task tool name
-  collisions; client tool validation also rejects existing tool names.
-- Default process execution is macOS/Linux `tui-local` only. Custom hosts must
-  inject `subagentExecutorFactory`; never silently reuse local auth/stores for them.
-- Parent `run.cancel` detaches task waits after durable admission. Session-scoped
-  `task_cancel_all` is explicit; normal completion does not cancel children.
-- Child sessions carry `meta.codelia_subagent` and cannot resume through ordinary
-  root `run.start`. Task result prose stays untrusted and bounded; preserve reasons.
-
-- All parent/child UI confirmations use the common `requestUiConfirm` queue.
-  Pass the operation's AbortSignal so cancellation skips queued prompts and
-  releases active response waits. Child lifetime signals remain separate from
-  parent-turn signals.
-- `task_spawn` checks permission inside its common execution gate (including
-  direct RPC/tool calls). Propagate `ToolPermissionDenied` with reason/stop_turn
-  to core; do not flatten it into an ordinary recoverable tool error.
-
-- Named Responses endpoints use `src/responses-provider.ts` for config-owned model metadata and `ChatResponses` for stateless HTTP. Auth receives explicitly resolved provider definitions; parent factories pass the same definitions to model registry and delegated bootstrap. TUI startup/model RPCs advertise configured names and per-model effort choices. No external model catalog is fetched for named endpoints.
-- `rpc/auth.ts` implements `/logout [provider]`: scoped removal preserves unrelated stored auth and nonmatching agents/sessions. Host auth supports it only through explicit `clearProviderAuth`, advertised by `supports_scoped_logout`.
-- An Agent can also cache image-provider credentials: scoped logout of any cached provider invalidates the Agent and direct tool caches while preserving an unrelated chat session.
-- Auth resolver writes merge into freshly loaded stored auth, so later updates from a cached resolver do not restore unrelated logged-out providers.
-
-- `model-fast.ts` validates the model for explicit Ultrafast. RPC selection checks
-  for existing API-key or Codex OAuth credentials before config or session
-  mutation. The factory enforces model support for file/host/child paths.
-  Preserve the requested tier and the existing auth route. OpenAI determines
-  account eligibility.
-
-Test isolation: a test that creates a `TaskManager` must shut it down before removing its storage (`tests/fixtures/task-managers.ts`: `trackedTaskManager` / `settleTaskManagers`). Global `fetch` mocks must filter by endpoint and must not call `expect` inside the mock; collect failures and verify in the test body (see `mockReviewFetch` in `tests/shell-rule-suggestion.test.ts`). Test pure validation directly instead of through a full RPC handler.
+- Debug: `CODELIA_DEBUG=<topics>` (e.g. `1`, `provider-log`, `session-dump`) + `CODELIA_DEBUG_DIR`.
+- Test pitfalls: shut down `TaskManager` before deleting temporary storage directories; never call `expect()` inside a global `fetch` mock.
+- Live stream-delta smoke (paid, opt-in): `INTEGRATION=1 CODELIA_TEST_STREAM_DELTA_LIVE=1 bun test packages/runtime/tests/stream-deltas-live.test.ts` (`CODELIA_TEST_STREAM_DELTA_LIVE_PROVIDERS` / `CODELIA_TEST_STREAM_DELTA_LIVE_MODEL_<PROVIDER>`).

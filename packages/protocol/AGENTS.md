@@ -1,74 +1,18 @@
 # @codelia/protocol
 
-Type definition for the UI protocol used between Core and UI (TUI/desktop).
-Provides JSON-RPC 2.0 compatible envelopes and run/agent/ui message types.
-Catalogued wire shapes are Zod schemas (`<Type>Schema`, exported with the public
-`z.infer` type name) listed in `src/catalog.ts`; `ProtocolMethod` is the catalog
-keys, so a new method is added there with its schemas and capability gate. When a
-schema changes, run `bun run generate:protocol` and commit
-`schema/protocol.schema.json`, `schema/methods.md`, the TUI `generated.rs` and
-`tests/fixtures/protocol/*.jsonl`. Skill wire shapes in `skills.ts` mirror the
-validating shared-types schemas (a test keeps the types equal). Use a
-single-value `z.enum` rather than `z.literal` for a value of a set that may grow;
-literals decode strictly in Rust. Follow the wire subset and compatibility
-rules in `dev-docs/specs/protocol-codegen.md` (helpers in shared-types `wire.ts`).
-Maintains independence from `@codelia/core`.
-The cross-boundary common type refers to `@codelia/shared-types` (does not depend on core/runtime implementation type).
-Contains model.list / model.set / session.list / session.history / session.open (model.list can return details with include_details).
-`session.update` changes pinned/archive state behind `supports_session_lifecycle`.
-`session.list.include_archived` opts into archived rows; lifecycle flags are optional
-summary fields. These mutations preserve original messages, active checkpoints and references;
-archive may compress normal events, never expire them.
-`model.list.details` can include `release_date` and normalized cost fields (`cost_per_1m_input_tokens_usd`, `cost_per_1m_output_tokens_usd`) in addition to token limits.
-run.start accepts session_id.
-run.start result may include `session_log_path` for persisted session JSONL consumers such as CLI ATIF export.
-run.start `input` supports both text (`{ type:"text", text }`) and multimodal parts (`{ type:"parts", parts:[text|image_url|attachment_ref] }`).
-Request-scoped client tools use `client.tool.call`; when `timeout_ms` expires, runtime emits `client.tool.cancel` with the original `request_id` before discarding the pending request so interactive clients can clear matching UI state.
-Contains `mcp.list` and `supports_mcp_list` capability for MCP status display.
-`auth.ts` holds `auth.logout` plus the GUI auth family (`auth.status`, `auth.login`, `auth.login.complete`, `auth.login.cancel`, notification `auth.login.status`) behind `supports_auth_management` (server) / `supports_auth_management` (UI opt-out of startup onboarding). Status types never carry credentials.
-`config.ts` defines `config.get` / `config.set` (`supports_config_rw`): registry keys only, each entry reports `source` (`default`/`global`/`project`) and the raw per-layer values.
-`permissions.ts` defines `permissions.list` / `permissions.remove` (`supports_permissions_rw`): file rules by scope/kind, the resolved approval mode with its source, structural removal (rules have no id).
-`context.ts` also defines `context.usage` / `run.context.usage` (`supports_context_usage`; UI opt-in `supports_context_usage`) over shared-types `ContextUsage`; the breakdown is an estimate, used/left are provider-reported.
-`task.ts` adds `TaskSummary.progress` (shared-types `TaskProgress`) and the opt-in `task.progress` notification (`supports_task_progress` on both sides).
-`session.history` marks replayed `agent.event` notifications with optional
-`meta.replayed: true`; live events omit it. Older peers may ignore this field.
-Includes `skills.list` and `supports_skills_list` capabilities for skills catalog retrieval.
-Contains `context.inspect` and `supports_context_inspect` capabilities for taking context snapshots.
-`context.inspect` can receive `include_skills`, return skills catalog status, and include the rendered `execution_environment` startup block.
-Permission preflight uses structured `AgentEvent` variants (`permission.preview` / `permission.ready`). `supports_permission_preflight_events` remains on both UI/server capabilities for explicit feature declaration.
-Provisional `text.delta` / `reasoning.delta` agent events are opt-in via `ui_capabilities.supports_text_delta` (server advertises `supports_text_delta`); they are ephemeral and never replayed by `session.history`.
-Provide `mcp-protocol.ts` (protocol version constant/compatibility check helper) for MCP transport handshake and share it with runtime/cli.
+Core-independent UI/runtime JSON-RPC 2.0 wire catalog (`src/catalog.ts` -> `ProtocolMethod`). Depends on `@codelia/shared-types` only.
 
-Structured error data lives in the catalog as request `errorData` or a shared
-`protocolErrorData` schema keyed by error code. `sandbox.set` can return
-`SandboxSetErrorData`; catalog validation failures return
-`InvalidParamsErrorData`. Method-specific data is not keyed by code; clients
-branch on its `reason`, and the accompanying code is advisory. The JSON-RPC
-envelope still allows other or omitted `error.data`. New local hosts read Auto approve startup status from
-`initialize.local_host` and may fall back to the same fields in `tui`.
+## Codegen & Compatibility (`dev-docs/specs/protocol-codegen.md`)
 
-Reference specifications:
-- `run.metrics` carries latest completed-call TPS independently of diagnostics;
-  nullable rate clears unavailable data. Optional `LlmCallTiming` is shared-types.
-- `image.ts` defines optional `image.model.get/configure` and `image.artifact.get`
-  behind `supports_image_generation`. Stable image metadata comes from
-  shared-types. Artifact transfer is bounded PNG bytes, not host paths; image
-  settings never select the conversation model or imply account entitlement.
-- dev-docs/specs/ui-protocol.md
+- Define/update wire schemas (`<Type>Schema` + `z.infer` export) and capability gates in `src/catalog.ts` (using `packages/shared-types/src/wire.ts` helpers). Run `bun run generate:protocol` and commit `schema/protocol.schema.json`, `schema/methods.md`, `crates/protocol/src/generated.rs`, and `tests/fixtures/protocol/*.jsonl`.
+- Keep `skills.ts` types aligned with `@codelia/shared-types` (enforced by tests).
+- Use single-value `z.enum` instead of `z.literal` for extensible string sets (literals decode strictly in Rust).
+- Put structured error payloads in catalog `errorData` / shared `protocolErrorData`; clients branch on `reason` while error code is advisory.
+- `mcp-protocol.ts` centralizes MCP protocol version checks shared with runtime and CLI.
 
-Build:
-- bun run --filter @codelia/protocol build
-- Protocol includes optional `shell.exec` RPC + `supports_shell_exec` capability for TUI bang-shell flow.
-- Protocol also includes shell-task compatibility RPCs (`shell.start/list/status/output/wait/detach/cancel`) plus `supports_shell_tasks` / `supports_shell_detach` for task-backed shell lifecycle UI.
-- Public task orchestration RPCs are `task.spawn/list/status/wait/cancel/result`; `supports_tasks` advertises that generic task surface.
+## Wire Semantics & Fixtures
 
-- `initialize.model_providers` and `model.list.providers` optionally advertise configured endpoint names; `model.list.reasoning_levels` advertises per-model effort arrays (empty means no reasoning). Older peers may ignore these additive fields.
-- Named `auth.logout.provider` must be gated by `supports_scoped_logout`; older servers may otherwise ignore the name and clear all credentials. `clear_session` applies only to a matching current provider for scoped logout.
-
-- `fast` uses shared `ModelFastMode` (boolean or "ultrafast"). Require `supports_model_ultrafast` before sending the new value to a runtime; results retain the exact effective mode.
-
-- `run.status.error` optionally carries shared `RunErrorInfo` on failure without enabling routine diagnostics. Omit it for normal statuses; never transport raw provider bodies or stacks.
-
-`attachment.ts` defines capability-gated, acknowledged file transfers. An uploaded reference in run input contains only its attachment ID.
-
-The runtime and `codelia-protocol` share `tests/fixtures/steer-cancel.jsonl`. To refresh it after an intentional wire change, run `CODELIA_UPDATE_STEER_FIXTURE=1 bun test packages/runtime/tests/run-steer.test.ts -t "shared Steer notification"` from the repository root, inspect the fixture diff, and replay it with `cargo test --locked --manifest-path crates/protocol/Cargo.toml shared_steer_trace`. Normal test runs only read the fixture.
+- `session.history` marks replayed `agent.event` notifications with `meta.replayed: true`; provisional `text.delta`/`reasoning.delta` (`supports_text_delta`) are never replayed.
+- `supports_scoped_logout` gates `auth.logout.provider` (never reinterpret scoped logout as clearing all providers); `supports_model_ultrafast` gates `"ultrafast"`; `run.status.error` carries safe `RunErrorInfo`; `initialize.local_host` startup Auto approve status mirrors to `initialize.tui`; `image.artifact.get` transfers bounded original image bytes (PNG or JPEG data URL with original MIME, never runtime-host filesystem paths).
+- Refresh shared Steer trace fixture after intentional wire changes: `CODELIA_TEST_UPDATE_STEER_FIXTURE=1 bun test packages/runtime/tests/run-steer.test.ts -t "shared Steer notification"`, then replay via `cargo test --locked --manifest-path crates/protocol/Cargo.toml shared_steer_trace`.
+- Build: `bun run --filter @codelia/protocol build`.
