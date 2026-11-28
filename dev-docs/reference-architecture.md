@@ -45,13 +45,20 @@ Agent loop (repeat)
 - `@codelia/shared-types`
   - Cross-boundary stable types shared by core/protocol/runtime.
 - `@codelia/protocol`
-  - Core-independent UI/runtime wire protocol types and method names.
+  - Core-independent UI/runtime wire protocol: Zod schemas and the method
+    catalog (`src/catalog.ts`). The runtime validates params against the
+    catalog at run time; `tools/protocol-codegen` (`bun run generate:protocol`)
+    derives the committed JSON Schema, method table, shared fixtures and
+    `crates/protocol/src/generated.rs`. See
+    [protocol-codegen.md](specs/protocol-codegen.md).
 - `@codelia/config`
   - Config schema, parsing, and defaults.
 - `@codelia/config-loader`
   - Config file discovery/load/merge helpers.
 - `@codelia/logger`
-  - Shared logging helpers (stderr logger and debug flag helpers).
+  - Shared logging helpers (stderr logger and `CODELIA_DEBUG=<topics>` /
+    `CODELIA_DEBUG_DIR` helpers). It has no workspace dependencies, so core and
+    storage may use it.
 - `@codelia/runtime`
   - JSON-RPC runtime server that connects UI/TUI to core tools and agents.
 - `@codelia/storage`
@@ -63,7 +70,10 @@ Agent loop (repeat)
 - `crates/protocol`
   - Shared Rust wire types generated from `@codelia/protocol` and JSON-RPC envelope helpers.
 - `crates/tui`
-  - Rust TUI client that drives the runtime.
+  - Rust TUI client that drives the runtime. It follows a pragmatic TEA loop
+    (`Msg` -> `update` -> `AppState`, with `RuntimeTx` sends and `Effect`
+    side effects; see [tui-tea-architecture.md](specs/tui-tea-architecture.md))
+    and sends and decodes protocol messages only through `crates/protocol`.
 
 ---
 
@@ -80,6 +90,10 @@ Agent loop (repeat)
 Dependency direction:
 - `A --> B` means "A depends on B".
 - `A -.-> B` means "A spawns/calls B as a process" (not a build-time dependency).
+- `A ==> B` means "B contains committed code generated from A".
+
+Workspace edges match each package's `package.json`; `bun run check:deps`
+checks declared dependencies and deep imports in CI.
 
 ```mermaid
 graph TD
@@ -95,20 +109,27 @@ graph TD
   modelmeta["@codelia/model-metadata"]
   tui["crates/tui"]
   rust_protocol["crates/protocol"]
+  codegen["tools/protocol-codegen"]
 
   core --> shared
   core --> config
+  core --> logger
   protocol --> shared
   configloader --> config
   configloader --> storage
+  storage --> core
+  storage --> shared
+  storage --> logger
   runtime --> core
   runtime --> logger
   runtime --> protocol
+  runtime --> shared
   runtime --> config
   runtime --> configloader
   cli --> runtime
   cli --> configloader
   cli --> storage
+  cli --> protocol
   cli -.-> tui
   runtime --> modelmeta
   runtime --> storage
@@ -116,4 +137,9 @@ graph TD
   modelmeta --> storage
   tui --> rust_protocol
   tui -.-> runtime
+  codegen --> protocol
+  codegen ==> rust_protocol
 ```
+
+`storage` and `model-metadata` depend on `core` for its storage and metadata
+service interfaces (`src/di/`, `src/types/`), which they implement.
