@@ -138,9 +138,8 @@ contracts unless a document explicitly records implemented behavior.
 | [`desktop/file-tree-viewer.md`](./desktop/file-tree-viewer.md) | Proposed | File inspection surface |
 | [`desktop/git-viewer.md`](./desktop/git-viewer.md) | Proposed | Git status/diff surface |
 | [`desktop/shell-integration.md`](./desktop/shell-integration.md) | Proposed | Shell surface and context handoff |
-| [`desktop/electrobun-shell.md`](./desktop/electrobun-shell.md) | Proposed | Initial Electrobun shell target |
 | [`desktop/mvp.md`](./desktop/mvp.md) | Proposed | First delivery subset |
-| [`desktop-gpui.md`](./desktop-gpui.md) | Partial | Separate GPUI prototype record |
+| [`desktop/gpui-shell.md`](./desktop/gpui-shell.md) | Partial | GPUI desktop shell implementation strategy and prototype record |
 
 ## Planning, deferred work, and archive
 

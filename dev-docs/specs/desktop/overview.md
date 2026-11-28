@@ -54,7 +54,7 @@ The auxiliary panel exists to support the current session, not to replace a full
 ## 4. Shared assumptions
 
 - Multi-agent orchestration is out of scope for this version of the desktop product.
-- The initial desktop implementation target is Electrobun, but the product spec should remain reusable by future shells.
+- The initial desktop implementation target is GPUI (see [`gpui-shell.md`](./gpui-shell.md)), while the product specs remain reusable by future shells.
 - A workspace may correspond to a repository root or a worktree root.
 - Session execution semantics should remain aligned with TUI unless a desktop-only UX reason is documented.
 
@@ -75,5 +75,5 @@ The auxiliary panel exists to support the current session, not to replace a full
 - `file-tree-viewer.md`
 - `git-viewer.md`
 - `shell-integration.md`
-- `electrobun-shell.md`
+- `gpui-shell.md`
 - `mvp.md`
