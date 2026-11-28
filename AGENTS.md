@@ -10,14 +10,15 @@ Always use `bun run <script>` for project scripts (`test`, `lint`, `fmt`, `check
 - **Format / Lint / Typecheck**: Run `bun run fmt`, `bun run lint`, and `bun run typecheck` before major PRs (`bun run check` runs one-shot Biome format+lint; CI does not run a separate `fmt` step).
 - **Hygiene & Codegen**:
   - `bun run check:deps` — workspace dependency graph & deep-import guard
+  - `bun run check:docs` — docs/`AGENTS.md` link, path, retired-env, and no-`RULES.md` guard
   - `bun run check:versions` / `bun run sync:versions` — workspace package version sync
   - `bun run generate:protocol` / `bun run check:protocol` — generate & verify protocol artifacts from `packages/protocol/src/catalog.ts`
 - **Tests**:
   - `bun run test:js` — JS unit tests (`packages/*/tests` and `tools/protocol-codegen`)
   - `bun run test:terminal-bench` — Terminal-Bench JS tests
-  - `bun run test` — full local suite (`test:js`, `test:deps` for dep-checker script tests, `test:terminal-bench`, `crates/protocol`, `crates/tui`)
+  - `bun run test` — full local suite (`test:js`, `test:deps`, `test:docs`, `test:terminal-bench`, `crates/protocol`, `crates/tui`)
   - Root `bunfig.toml` preloads `scripts/test-preload.ts` (`CODELIA_AUTH_STORAGE=file`, real Keychain disabled, `CODELIA_TEST_PROTOCOL_ASSERT=1`). Live Keychain tests require `CODELIA_TEST_LIVE_KEYCHAIN=1`; live provider API tests require `INTEGRATION=1` (off in CI).
-- **CI (`.github/workflows/ci.yml`)**: Runs `lint`, `@codelia/core` build, `typecheck`, `check:deps`, `test:deps`, `check:versions`, `check:protocol`, `test:js`, `test:terminal-bench`, `crates/protocol` (minimum Rust `1.93.1`), `crates/tui`, and Linux sandbox tests.
+- **CI (`.github/workflows/ci.yml`)**: Runs `lint`, `@codelia/core` build, `typecheck`, `check:deps`, `test:deps`, `check:docs`, `test:docs`, `check:versions`, `check:protocol`, `test:js`, `test:terminal-bench`, `crates/protocol` (minimum Rust `1.93.1`), `crates/tui`, and Linux sandbox tests.
 - **`bun.lock` rule**: After modifying or regenerating `bun.lock`, invalidate prior lint results — run `bun install --frozen-lockfile`, then re-run `bun run lint` on the final tree before push or merge.
 - **Release & packaging**:
   - Every publishable npm package must declare `"license": "MIT"` and carry a package-local `LICENSE`.

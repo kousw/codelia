@@ -2,6 +2,7 @@
 
 - **Dependency & release checks**:
   - `check-workspace-deps.mjs` (`bun run check:deps` / `bun run test:deps`): scans workspace `src`, `tests`, and `scripts` for undeclared/unused workspace deps and deep imports; fails explicitly on unsupported workspace glob syntax.
+  - `check-docs.mjs` (`bun run check:docs` / `bun run test:docs`): verifies no `RULES.md` files, valid relative links across active docs, valid inline repo paths in `AGENTS.md`, and no retired `CODELIA_*` env vars.
   - `bump-workspace-version.mjs` / `release-workspace.mjs` / `sync-workspace-versions.mjs`: keep `packages/*` and `crates/tui/Cargo.toml` versions synchronized.
   - `release-smoke.mjs` / `tui-platforms.mjs`: must pack `@codelia/logger` in tarballs, invoke `npm.cmd` via Windows shell (avoids `spawnSync` `EINVAL`), and drive Auto approve by choice ID (verifying workspace enable/disable separately from reviewer setup).
 - **PTY & scrollback harnesses**:
