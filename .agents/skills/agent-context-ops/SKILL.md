@@ -33,14 +33,15 @@ Do not use this skill for purely editorial rewriting when implementation alignme
 
 ## Core Principles
 
-1. **Context is operational.** Favor instructions and facts that change how future work should proceed.
+1. **Context is operational.** Favor instructions, commands, and non-obvious invariants that change how future work should proceed.
 2. **Implementation beats assumption.** Verify claims against code, commands, tests, and directory structure before writing them down.
-3. **Keep artifacts separated by purpose.**
-   - Specs describe intended or current behavior.
+3. **Code is the truth source for "what" and "how".** Do not mirror static model/token tables, tool/file listings, constant values, or line-by-line implementation summaries in `AGENTS.md`.
+4. **Keep artifacts separated by purpose.**
+   - Specs describe cross-boundary contracts, security/trust models, non-obvious external constraints ("why"), or unimplemented proposals.
    - Plans describe work sequencing, open tasks, and follow-up items.
-   - `AGENTS.md` captures persistent repo rules, commands, workflow notes, and durable implementation knowledge.
-4. **Update the smallest durable surface.** Do not duplicate the same guidance across many files unless multiple audiences truly need it.
-5. **Mark uncertainty clearly.** If something is inferred rather than directly verified, say so.
+   - `AGENTS.md` captures persistent repo rules, commands, workflow pitfalls, and canonical doc pointers.
+5. **Update the smallest durable surface.** Keep `AGENTS.md` concise enough to stay well within agent instruction-loading / context budgets. Do not append chronological changelogs or duplicate the same guidance across many files, and keep invariants inside `AGENTS.md` instead of splitting parallel `RULES.md` files unless a repository explicitly separates them.
+6. **Mark uncertainty clearly.** If something is inferred rather than directly verified, say so.
 
 ## Workflow
 
@@ -91,8 +92,8 @@ Do not store permanent repo rules only in a dated plan file.
 
 Apply updates according to purpose:
 
-- Update `AGENTS.md` for durable instructions, commands, conventions, pitfalls, and directory-specific guidance.
-- Update spec docs for changed contracts, intended architecture, or current behavior descriptions.
+- Update `AGENTS.md` for durable instructions, commands, conventions, pitfalls, and directory-specific invariants.
+- Update spec docs for changed cross-boundary contracts, intended architecture, or non-obvious constraints.
 - Update `plan/` for implementation sequencing, explicit follow-ups, and unresolved risks.
 - Update runbooks/checklists for operational procedures.
 
@@ -106,6 +107,9 @@ Check for these failure modes:
 - docs claiming future behavior as if already implemented
 - commands that no longer exist or use the wrong package manager/tool
 - guidance duplicated in multiple places with conflicting wording
+- chronological changelogs or per-feature implementation summaries appended into `AGENTS.md`
+- per-directory stub `AGENTS.md` files created when no non-obvious local invariant exists
+- `AGENTS.md` exceeding comfortable instruction-loading / context budgets and risking truncation
 - plan files containing knowledge that should be promoted into `AGENTS.md`
 - `AGENTS.md` containing one-off task chatter that should remain in the current task record instead
 
@@ -123,11 +127,16 @@ After changes:
 ## Heuristics for File Placement
 
 ### Put it in `AGENTS.md` when it is:
-- a durable workflow rule
-- a repository convention
-- a command future agents should prefer
-- a directory-specific warning or gotcha
-- a stable map to important docs or code paths
+- a durable workflow rule or verification command
+- a repository convention or package boundary
+- a non-obvious pitfall or directory-specific invariant that cannot be inferred from code
+- a stable map to canonical docs or code paths
+
+### Do NOT put in `AGENTS.md`:
+- static model/config catalogs, file trees, or constants already self-evident in code or generated schemas
+- chronological release notes, test-run diaries, or per-feature summaries
+- routine tool basics (e.g., standard git commands)
+- per-directory stub files where no non-obvious local invariant exists
 
 ### Put it in `plan/` when it is:
 - tied to one implementation effort
@@ -136,14 +145,14 @@ After changes:
 - a follow-up item with a target scope/date
 
 ### Plan naming guidance
-- If the repository defines a plan-file naming convention in `AGENTS.md` or `RULES.md`, follow that convention exactly.
+- If the repository defines a plan-file naming convention in `AGENTS.md`, follow that convention exactly.
 - If no local convention exists, prefer stable date-led names such as `YYYY-MM-DD-topic.md` so plans sort naturally and stay easy to scan.
 - Keep names short, descriptive, and scoped to the work item rather than a vague team label.
 
 ### Put it in specs/docs when it is:
-- a product or architecture contract
-- a behavior description readers need outside the current task
-- a design explanation that should outlive the current work session
+- a cross-boundary contract or protocol/storage compatibility rule
+- a security/trust boundary and its rationale
+- an unimplemented proposal or design rationale readers need outside the current task
 
 ## Output Expectations
 

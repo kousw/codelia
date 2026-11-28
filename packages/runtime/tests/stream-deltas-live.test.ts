@@ -4,10 +4,10 @@ import { z } from "zod";
 import { createRuntimeModel } from "../src/model-factory";
 
 // Live smoke for opt-in provisional deltas (chargeable). Keys come from the
-// environment only (inject them with Infisical); auth is passed explicitly, so
-// nothing is read from or written to ~/.codelia.
+// environment only; auth is passed explicitly, so nothing is read from or
+// written to ~/.codelia.
 //
-//   INTEGRATION=1 CODELIA_TEST_STREAM_DELTA_LIVE=1 infisical run --env=dev -- \
+//   INTEGRATION=1 CODELIA_TEST_STREAM_DELTA_LIVE=1 \
 //     bun test packages/runtime/tests/stream-deltas-live.test.ts
 //
 // Optional: CODELIA_TEST_STREAM_DELTA_LIVE_PROVIDERS=anthropic,google limits providers;
