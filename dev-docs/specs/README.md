@@ -41,7 +41,8 @@ implemented behavior.
 | [`goals.md`](./goals.md) | Implemented | Session goals, bounded continuation and token accounting in the local TUI |
 | [`task-orchestration.md`](./task-orchestration.md) | Mixed | Implemented task/shell substrate and fresh shared-workspace subagents; session-owned lifecycle, typed reasons, lineage and finite bounds; planned worktree and aggregate-budget enforcement |
 | [`subagent-collaboration.md`](./subagent-collaboration.md) | Implemented | Shared writing, parent/child/sibling mailboxes, parent approval and shell execution, safe-boundary context injection |
-| [`lane-multiplexer.md`](./lane-multiplexer.md) | Unstated | Worktree/multiplexer lane orchestration |
+| [`lane-multiplexer.md`](./lane-multiplexer.md) | Implemented | Legacy `tmux` worktree lane orchestration (planned to be superseded by `worktree.md`) |
+| [`worktree.md`](./worktree.md) | Proposed | Multiplexer-free Git worktree management, policy inheritance, setup, and lane migration strategy |
 | [`session-resume-semantics.md`](./session-resume-semantics.md) | Implemented | Core session resume semantics |
 
 ## Providers and models

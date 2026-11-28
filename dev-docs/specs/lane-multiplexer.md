@@ -1,5 +1,7 @@
 # Lane Multiplexer Spec (Lite, worktree-first)
 
+> **Status:** Implemented (legacy `tmux` lane flow). Planned to be superseded by [`worktree.md`](./worktree.md).
+
 This document defines a minimal lane model for Codelia:
 - create one `git worktree` per autonomous task
 - launch one multiplexer lane (`tmux` or `zellij`) per worktree
