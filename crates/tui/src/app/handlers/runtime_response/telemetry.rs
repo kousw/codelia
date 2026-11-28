@@ -599,7 +599,30 @@ mod tests {
                 "latency_ms": 400,
                 "output_tokens_per_second": 40.0,
                 "usage": { "input_tokens": 500, "output_tokens": 100, "total_tokens": 600 },
-                "cache": { "hit_state": "hit", "cache_read_tokens": 250, "cache_creation_tokens": 0 }
+                "cache": { "hit_state": "hit", "cache_read_tokens": 250, "cache_creation_tokens": 0 },
+                "session": {
+                    "total_calls": 1,
+                    "total_tokens": 600,
+                    "total_input_tokens": 500,
+                    "total_output_tokens": 100,
+                    "total_output_reasoning_tokens": 0,
+                    "total_cached_input_tokens": 250,
+                    "total_cache_creation_tokens": 0,
+                    "total_input_image_tokens": 0,
+                    "cache_hit_calls": 1,
+                    "cache_miss_calls": 0,
+                    "cache_unknown_calls": 0,
+                    "total_cost_usd": null,
+                    "retry_count": 0,
+                    "retry_wait_ms": 0,
+                    "tool_calls": 0,
+                    "tool_errors": 0,
+                    "tool_exec_ms": 0,
+                    "tool_approval_wait_ms": 0,
+                    "compaction_count": 0,
+                    "compaction_duration_ms": 0,
+                    "by_model": {}
+                }
             }
         })
         .to_string();

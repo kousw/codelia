@@ -249,15 +249,6 @@ export const createRuntimeToolApproval = ({
 		execute: (consume: () => void) => T | Promise<T>,
 		files?: BoundFiles,
 	): Promise<T> => {
-		const approvalStartedAt = performance.now();
-		let approvalRecorded = false;
-		const recordApprovalWait = () => {
-			if (approvalRecorded) return;
-			approvalRecorded = true;
-			ctx.recordApprovalWaitMs?.(
-				Math.max(0, performance.now() - approvalStartedAt),
-			);
-		};
 		const tool = registration.name;
 		const builtin = registration.kind === "builtin";
 		const args = parseRawArgsForPrompt(raw);
@@ -480,35 +471,31 @@ export const createRuntimeToolApproval = ({
 				launchRule: authority.launchRule,
 			};
 		};
-		try {
-			return await dispatcher.dispatch({
-				request: {
-					id: randomUUID(),
-					owner,
-					origin,
-					subject: tool,
-					registration: registration.id,
-					input: raw,
-					authorityVersion: String(state.approvalAuthorityGeneration),
-					intentVersion: context,
-					connectionGeneration: String(generation),
-					runId: state.activeRunId ?? undefined,
-				},
-				evaluate: check,
-				stillCurrent: current,
-				...(save ? { save } : {}),
-				preview: () => previewInvocation(tool, raw, builtin),
-				...(workspaceGrant ? { grantSession: workspaceGrant } : {}),
-				signal: state.approvalSignal(ctx.signal),
-				execute: (consume) => {
-					recordApprovalWait();
-					return execute(consume);
-				},
-				deferConsumption: files?.deferConsumption,
-			});
-		} finally {
-			recordApprovalWait();
-		}
+		return dispatcher.dispatch({
+			request: {
+				id: randomUUID(),
+				owner,
+				origin,
+				subject: tool,
+				registration: registration.id,
+				input: raw,
+				authorityVersion: String(state.approvalAuthorityGeneration),
+				intentVersion: context,
+				connectionGeneration: String(generation),
+				runId: state.activeRunId ?? undefined,
+			},
+			evaluate: check,
+			stillCurrent: current,
+			...(save ? { save } : {}),
+			preview: () => previewInvocation(tool, raw, builtin),
+			...(workspaceGrant ? { grantSession: workspaceGrant } : {}),
+			signal: state.approvalSignal(ctx.signal),
+			execute,
+			deferConsumption: files?.deferConsumption,
+			...(ctx.recordApprovalWaitMs
+				? { onApprovalWaitMs: ctx.recordApprovalWaitMs }
+				: {}),
+		});
 	};
 	const authorize = async (
 		origin: ApprovalOrigin,

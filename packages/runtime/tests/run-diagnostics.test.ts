@@ -228,6 +228,8 @@ describe("always-on run telemetry and telemetry.get", () => {
 			expect(call.provider_meta_summary).toContain("reasoning_applied=high");
 			expect(call.cost_usd).toBeNull();
 			expect(call.cost_basis).toBe("unavailable");
+			expect(call.session?.total_calls).toBe(1);
+			expect(call.session?.total_cached_input_tokens).toBe(60);
 
 			const summaries = capture.messages.filter(
 				(msg): msg is RpcNotification =>
@@ -325,6 +327,7 @@ describe("always-on run telemetry and telemetry.get", () => {
 			expect(snap.session_summary.total_calls).toBe(1);
 			expect(snap.session_summary.total_cached_input_tokens).toBe(60);
 			expect(snap.recent_calls).toHaveLength(1);
+			expect(snap.recent_calls[0]?.session).toBeUndefined();
 			expect(snap.runtime.startup_phases).toEqual([
 				{ name: "sandbox_mode", duration_ms: 4 },
 			]);

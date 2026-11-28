@@ -200,7 +200,8 @@ always-on structured telemetry notifications plus a read-only pull RPC:
    `stop_reason`, `usage` (including reasoning/image/cached/cache-create tokens),
    `cache` (`hit_state`, `cache_read_tokens`, `cache_creation_tokens`, `cache_read_ratio`),
    `cost_usd`, `cost_basis` (`"api_list" | "unavailable"`), `retry_count`, `retry_wait_ms`,
-   `provider_meta_summary`, and scalar `context`.
+   `provider_meta_summary`, scalar `context`, and authoritative cumulative `session: TelemetrySummary`
+   (so clients display runtime totals directly without duplicating aggregation).
 2. **`run.summary`** (Runtime → UI, always emitted at run completion):
    carries `run_id`, `duration_ms`, per-run `run: TelemetrySummary`, and
    session-scoped cumulative `session: TelemetrySummary` (survives `invalidateAgentCache()`),

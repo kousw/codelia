@@ -703,7 +703,9 @@ observed streaming TPS (`output_tokens_per_second`, `null` when unavailable or
 generation duration < 250ms) and full structured per-call telemetry (`provider`,
 `model`, `actual_model?`, `request_ts`, `response_ts`, `latency_ms`, `timing`,
 `stop_reason`, `usage`, `cache`, `cost_usd`, `cost_basis`, `retry_count`,
-`retry_wait_ms`, `provider_meta_summary`, and scalar `context`). Clients retain
+`retry_wait_ms`, `provider_meta_summary`, scalar `context`, and authoritative
+cumulative `session?: TelemetrySummary` so clients display runtime session
+totals directly without duplicating aggregation). Clients retain
 the last known TPS and context % until replacement measurements arrive; call
 starts do not emit resets. Authoritative schema is generated from
 `packages/protocol/src/run.ts` (`RunMetricsNotifySchema`).

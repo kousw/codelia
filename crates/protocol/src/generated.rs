@@ -5369,6 +5369,8 @@ pub struct RunMetricsNotify {
     pub provider_meta_summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub context: Option<RunContextSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub session: Option<TelemetrySummary>,
 }
 impl_object_serde!(RunMetricsNotify);
 

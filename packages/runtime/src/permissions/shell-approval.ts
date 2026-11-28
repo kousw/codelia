@@ -107,6 +107,8 @@ export type ShellApprovalInput = {
 	escalation?: "unsandboxed";
 	/** Initial ceiling of an admitted child, supplied only by its parent channel. */
 	childSandboxCeiling?: "readonly" | "workspace-write";
+	/** Optional telemetry hook for elapsed approval/review wait before shell launch. */
+	onApprovalWaitMs?: (durationMs: number) => void;
 } & (
 	| { source: string; argv?: never }
 	| { argv: readonly string[]; source?: never }
@@ -1182,6 +1184,9 @@ export const createShellAuthorizer =
 				: {}),
 			...confirmationOptions,
 			deferConsumption: true,
+			...(input.onApprovalWaitMs
+				? { onApprovalWaitMs: input.onApprovalWaitMs }
+				: {}),
 			execute: (consume, saveScope) =>
 				execute((taskId) => {
 					const boundLaunch = candidate && (saveScope || reliedOnRule);

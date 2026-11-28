@@ -327,7 +327,17 @@ export class ApprovalDispatcher {
 			saveScope?: "session" | "project",
 		) => T | Promise<T>;
 		deferConsumption?: boolean;
+		/** Optional callback invoked once with elapsed approval/review wait before execute (or on deny/abort). */
+		onApprovalWaitMs?: (durationMs: number) => void;
 	}): Promise<T> {
+		const nowMs = this.options.monotonicNow ?? (() => performance.now());
+		const approvalStartedAt = options.onApprovalWaitMs ? nowMs() : 0;
+		let approvalRecorded = false;
+		const recordApprovalWait = () => {
+			if (approvalRecorded || !options.onApprovalWaitMs) return;
+			approvalRecorded = true;
+			options.onApprovalWaitMs(Math.max(0, nowMs() - approvalStartedAt));
+		};
 		const request = Object.freeze({ ...options.request });
 		const { id, ...binding } = request;
 		const receiptBinding = options.deduplicate ? digest(binding) : undefined;
@@ -778,11 +788,16 @@ export class ApprovalDispatcher {
 				audit("dispatch", route.reason, details?.taskId);
 			};
 			if (!options.deferConsumption) consume();
+			recordApprovalWait();
 			return options.execute(consume, saveScope);
 		};
-		return receiptBinding !== undefined
-			? this.requests.run(scope, id, receiptBinding, dispatch)
-			: Promise.resolve().then(dispatch);
+		const run =
+			receiptBinding !== undefined
+				? this.requests.run(scope, id, receiptBinding, dispatch)
+				: Promise.resolve().then(dispatch);
+		return options.onApprovalWaitMs
+			? run.finally(recordApprovalWait)
+			: run;
 	}
 
 	private async review(

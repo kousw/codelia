@@ -5263,6 +5263,9 @@
 				},
 				"context": {
 					"$ref": "#/$defs/RunContextSnapshot"
+				},
+				"session": {
+					"$ref": "#/$defs/TelemetrySummary"
 				}
 			},
 			"required": [

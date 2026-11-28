@@ -282,6 +282,8 @@ export const RunMetricsNotifySchema = z
 		retry_wait_ms: z.number().optional(),
 		provider_meta_summary: nullish(z.string()),
 		context: RunContextSnapshotSchema.optional(),
+		/** Authoritative cumulative session telemetry snapshot after this call. */
+		session: TelemetrySummarySchema.optional(),
 	})
 	.meta({
 		id: "RunMetricsNotify",

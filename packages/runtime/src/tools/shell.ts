@@ -828,32 +828,24 @@ export const createShellTool = (
 			);
 			const authorize = options.authorizeShell;
 			if (!authorize) throw new Error("shell_admission_required");
-			const approvalStartedAt = performance.now();
-			let approvalRecorded = false;
-			const recordApprovalWait = () => {
-				if (approvalRecorded) return;
-				approvalRecorded = true;
-				ctx.recordApprovalWaitMs?.(
-					Math.max(0, performance.now() - approvalStartedAt),
-				);
-			};
-			try {
-				return await authorize(
-					{
-						source: command,
-						cwd,
-						stdin: stdinMode,
-						additionalWriteRoots: input.additional_write_roots,
-						escalation: input.escalation,
-						timeoutSeconds,
-						origin: getOperatorContext(ctx) ? "operator" : "parent_agent",
-						signal: ctx.signal,
-						owner: sessionContext?.sessionId ?? undefined,
-						reviewHistory: input.approval_context,
-					},
-					async (admission) => {
-						recordApprovalWait();
-						try {
+			return authorize(
+				{
+					source: command,
+					cwd,
+					stdin: stdinMode,
+					additionalWriteRoots: input.additional_write_roots,
+					escalation: input.escalation,
+					timeoutSeconds,
+					origin: getOperatorContext(ctx) ? "operator" : "parent_agent",
+					signal: ctx.signal,
+					owner: sessionContext?.sessionId ?? undefined,
+					reviewHistory: input.approval_context,
+					...(ctx.recordApprovalWaitMs
+						? { onApprovalWaitMs: ctx.recordApprovalWaitMs }
+						: {}),
+				},
+				async (admission) => {
+					try {
 							const taskId = crypto.randomUUID();
 							const taskKey = await buildShellTaskKey(
 								shared.tasks,
@@ -909,9 +901,6 @@ export const createShellTool = (
 						}
 					},
 				);
-			} finally {
-				recordApprovalWait();
-			}
 		},
 	});
 };

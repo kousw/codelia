@@ -1,7 +1,6 @@
 import {
 	type Agent,
 	type AgentSession,
-	estimateUsageCostUsd,
 	type PolledMessage,
 	type RunEventStoreFactory,
 	type SessionRecord,
@@ -15,7 +14,6 @@ import {
 	type GoalContinueParams,
 	RPC_ERROR_CODE,
 	type RunCancelParams,
-	type RunMetricsNotify,
 	type RunStartParams,
 	type RunStartResult,
 	type RunStatusNotify,
@@ -63,7 +61,6 @@ import {
 	logCompactionSnapshot,
 	logRunDebug,
 	normalizeToolCallHistory,
-	summarizeProviderMeta,
 	summarizeRunEvent,
 } from "./run-debug";
 import {
@@ -77,7 +74,7 @@ import {
 	type UnresolvedRunInput,
 } from "./run-input";
 import { parseRequestParams, sendRequestResult } from "./protocol";
-import { buildRunMetrics } from "./run-metrics";
+import { buildCallRunMetrics } from "./run-metrics";
 import {
 	createTextDeltaCoalescer,
 	isStreamDeltaEvent,
@@ -790,87 +787,29 @@ export const createRunHandlers = ({
 					if (record.type === "llm.response") {
 						const request = pendingLlmRequests.get(record.seq);
 						pendingLlmRequests.delete(record.seq);
-						const usage = record.output.usage ?? null;
-						const hasCacheMetric =
-							typeof usage?.input_cached_tokens === "number";
-						const cacheReadTokens = hasCacheMetric
-							? (usage?.input_cached_tokens ?? 0)
-							: 0;
-						const cacheCreationTokens = usage?.input_cache_creation_tokens ?? 0;
-						const inputTokens = usage?.input_tokens ?? 0;
-						const hitState = hasCacheMetric
-							? cacheReadTokens > 0
-								? "hit"
-								: "miss"
-							: "unknown";
 						const latencyMs = request
 							? Math.max(0, Math.round(performance.now() - request.startedAtMs))
 							: 0;
-						const nonEmpty = (value?: string | null): string | undefined =>
-							typeof value === "string" && value.trim().length > 0
-								? value.trim()
-								: undefined;
-						const requestModel = nonEmpty(request?.model);
-						const usageModel = nonEmpty(usage?.model);
-						const model = usageModel ?? requestModel ?? "unknown";
-						const baseMetrics = buildRunMetrics(record);
 						const route = state.reviewChatRoute;
-						const metered = route?.kind === "builtin" && route.metered === true;
-						const modelCost =
-							(requestModel
-								? runtimeAgent.getModelCost(requestModel)
-								: undefined) ?? runtimeAgent.getModelCost(model);
-						const costUsd = metered
-							? estimateUsageCostUsd(usage, modelCost)
-							: null;
-						const providerMeta = record.output.provider_meta as
-							| {
-									server_model?: unknown;
-									codex_metadata?: { server_model?: unknown };
-							  }
-							| undefined;
-						const rawServerModel =
-							providerMeta?.codex_metadata?.server_model ??
-							providerMeta?.server_model;
-						const actualModel =
-							typeof rawServerModel === "string" &&
-							rawServerModel.trim().length > 0
-								? rawServerModel.trim()
-								: null;
 						const retryCount = pendingRetryCount;
 						const retryWaitMs = pendingRetryWaitMs;
 						pendingRetryCount = 0;
 						pendingRetryWaitMs = 0;
-						const metrics: RunMetricsNotify = {
-							...baseMetrics,
-							...(request?.provider ? { provider: request.provider } : {}),
-							model,
-							...(actualModel ? { actual_model: actualModel } : {}),
-							request_ts: request?.ts ?? record.ts,
-							response_ts: record.ts,
-							latency_ms: latencyMs,
-							stop_reason: record.output.stop_reason ?? null,
-							usage,
-							cache: {
-								hit_state: hitState,
-								cache_read_tokens: cacheReadTokens,
-								cache_creation_tokens: cacheCreationTokens,
-								cache_read_ratio:
-									hasCacheMetric && inputTokens > 0
-										? Math.min(1, Math.max(0, cacheReadTokens / inputTokens))
-										: null,
-							},
-							cost_usd: costUsd,
-							cost_basis: costUsd !== null ? "api_list" : "unavailable",
-							retry_count: retryCount,
-							retry_wait_ms: retryWaitMs,
-							provider_meta_summary: summarizeProviderMeta(
-								record.output.provider_meta,
-							),
+						const metrics = buildCallRunMetrics({
+							record,
+							request,
+							latencyMs,
+							metered: route?.kind === "builtin" && route.metered === true,
+							getModelCost: (modelName) => runtimeAgent.getModelCost(modelName),
+							retryCount,
+							retryWaitMs,
 							context: runtimeAgent.getContextSnapshot(),
-						};
+						});
 						state.telemetry.recordLlmCall(metrics);
-						sendRunMetrics(state, metrics);
+						sendRunMetrics(state, {
+							...metrics,
+							session: state.telemetry.getSessionSummary(),
+						});
 					}
 				} catch (error) {
 					log(`run metrics build/emit failed: ${String(error)}`);

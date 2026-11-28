@@ -187,7 +187,9 @@ export class RuntimeTelemetryStore {
 		if (this.currentRunId === call.run_id && this.currentRunSummary) {
 			applyCallToSummary(this.currentRunSummary, call);
 		}
-		this.recentCalls.push(call);
+		// Keep `recent_calls` compact without embedding nested session snapshots.
+		const { session: _session, ...callRecord } = call;
+		this.recentCalls.push(callRecord);
 		if (this.recentCalls.length > MAX_RECENT_CALLS) {
 			this.recentCalls.shift();
 		}

@@ -1,5 +1,5 @@
 use crate::protocol::{
-    CacheHitState, CompactionCompleteEvent, RunMetricsNotify, RunSummaryNotify, StepCompleteEvent,
+    CompactionCompleteEvent, RunMetricsNotify, RunSummaryNotify, StepCompleteEvent,
     StepCompleteEventStatus, TelemetryGetResult, TelemetrySummary,
 };
 use std::collections::{HashMap, VecDeque};
@@ -84,38 +84,6 @@ impl SessionTotalsView {
             compaction_duration_ms: summary.compaction_duration_ms.max(0.0),
         }
     }
-
-    fn merge_delta(&mut self, delta: &SessionTotalsView) {
-        self.calls = self.calls.saturating_add(delta.calls);
-        self.input_tokens = self.input_tokens.saturating_add(delta.input_tokens);
-        self.output_tokens = self.output_tokens.saturating_add(delta.output_tokens);
-        self.output_reasoning_tokens = self
-            .output_reasoning_tokens
-            .saturating_add(delta.output_reasoning_tokens);
-        self.cached_input_tokens = self
-            .cached_input_tokens
-            .saturating_add(delta.cached_input_tokens);
-        self.cache_creation_tokens = self
-            .cache_creation_tokens
-            .saturating_add(delta.cache_creation_tokens);
-        self.total_tokens = self.total_tokens.saturating_add(delta.total_tokens);
-        self.cache_hit_calls = self.cache_hit_calls.saturating_add(delta.cache_hit_calls);
-        self.cache_miss_calls = self.cache_miss_calls.saturating_add(delta.cache_miss_calls);
-        self.cache_unknown_calls = self
-            .cache_unknown_calls
-            .saturating_add(delta.cache_unknown_calls);
-        if let Some(cost) = delta.cost_usd {
-            self.cost_usd = Some(self.cost_usd.unwrap_or(0.0) + cost);
-        }
-        self.retry_count = self.retry_count.saturating_add(delta.retry_count);
-        self.retry_wait_ms += delta.retry_wait_ms;
-        self.tool_calls = self.tool_calls.saturating_add(delta.tool_calls);
-        self.tool_errors = self.tool_errors.saturating_add(delta.tool_errors);
-        self.tool_exec_ms += delta.tool_exec_ms;
-        self.tool_approval_wait_ms += delta.tool_approval_wait_ms;
-        self.compaction_count = self.compaction_count.saturating_add(delta.compaction_count);
-        self.compaction_duration_ms += delta.compaction_duration_ms;
-    }
 }
 
 fn non_neg_u64(value: i64) -> u64 {
@@ -127,10 +95,9 @@ pub struct TelemetryStore {
     pub last_call: Option<RunMetricsNotify>,
     pub recent_calls: VecDeque<RunMetricsNotify>,
     pub last_run_summary: Option<RunSummaryNotify>,
+    /// Authoritative session summary owned by runtime (updated from `run.metrics.session`,
+    /// `run.summary.session`, and `telemetry.get.session_summary`).
     pub session_summary: Option<TelemetrySummary>,
-    /// Live incremental delta accumulated during an in-flight run (cleared once
-    /// authoritative `run.summary` or `telemetry.get` snaps `session_summary`).
-    in_flight_delta: SessionTotalsView,
     active_tool_names: HashMap<String, String>,
     pub recent_tools: VecDeque<LocalToolTiming>,
     pub recent_compactions: VecDeque<LocalCompactionRecord>,
@@ -143,76 +110,16 @@ impl TelemetryStore {
         self.recent_calls.clear();
         self.last_run_summary = None;
         self.session_summary = None;
-        self.in_flight_delta = SessionTotalsView::default();
         self.active_tool_names.clear();
         self.recent_tools.clear();
         self.recent_compactions.clear();
         self.pulled_snapshot = None;
     }
 
-    pub fn record_metrics(&mut self, metrics: RunMetricsNotify) {
-        self.in_flight_delta.calls = self.in_flight_delta.calls.saturating_add(1);
-        if let Some(usage) = &metrics.usage {
-            self.in_flight_delta.input_tokens = self
-                .in_flight_delta
-                .input_tokens
-                .saturating_add(non_neg_u64(usage.input_tokens));
-            self.in_flight_delta.output_tokens = self
-                .in_flight_delta
-                .output_tokens
-                .saturating_add(non_neg_u64(usage.output_tokens));
-            if let Some(reasoning) = usage.output_reasoning_tokens {
-                self.in_flight_delta.output_reasoning_tokens = self
-                    .in_flight_delta
-                    .output_reasoning_tokens
-                    .saturating_add(non_neg_u64(reasoning));
-            }
-            self.in_flight_delta.total_tokens = self
-                .in_flight_delta
-                .total_tokens
-                .saturating_add(non_neg_u64(usage.total_tokens));
+    pub fn record_metrics(&mut self, mut metrics: RunMetricsNotify) {
+        if let Some(session) = metrics.session.take() {
+            self.session_summary = Some(session);
         }
-        if let Some(cache) = &metrics.cache {
-            self.in_flight_delta.cached_input_tokens = self
-                .in_flight_delta
-                .cached_input_tokens
-                .saturating_add(non_neg_u64(cache.cache_read_tokens));
-            self.in_flight_delta.cache_creation_tokens = self
-                .in_flight_delta
-                .cache_creation_tokens
-                .saturating_add(non_neg_u64(cache.cache_creation_tokens));
-            match cache.hit_state {
-                CacheHitState::Hit => {
-                    self.in_flight_delta.cache_hit_calls =
-                        self.in_flight_delta.cache_hit_calls.saturating_add(1);
-                }
-                CacheHitState::Miss => {
-                    self.in_flight_delta.cache_miss_calls =
-                        self.in_flight_delta.cache_miss_calls.saturating_add(1);
-                }
-                CacheHitState::Unknown | CacheHitState::Other(_) => {
-                    self.in_flight_delta.cache_unknown_calls =
-                        self.in_flight_delta.cache_unknown_calls.saturating_add(1);
-                }
-            }
-        } else {
-            self.in_flight_delta.cache_unknown_calls =
-                self.in_flight_delta.cache_unknown_calls.saturating_add(1);
-        }
-        if let Some(cost) = metrics.cost_usd.filter(|v| v.is_finite() && *v >= 0.0) {
-            self.in_flight_delta.cost_usd =
-                Some(self.in_flight_delta.cost_usd.unwrap_or(0.0) + cost);
-        }
-        if let Some(retries) = metrics.retry_count {
-            self.in_flight_delta.retry_count = self
-                .in_flight_delta
-                .retry_count
-                .saturating_add(non_neg_u64(retries));
-        }
-        if let Some(wait_ms) = metrics.retry_wait_ms.filter(|v| v.is_finite() && *v >= 0.0) {
-            self.in_flight_delta.retry_wait_ms += wait_ms;
-        }
-
         self.last_call = Some(metrics.clone());
         if self.recent_calls.len() >= MAX_RECENT_CALLS {
             self.recent_calls.pop_front();
@@ -223,7 +130,6 @@ impl TelemetryStore {
     pub fn record_summary(&mut self, summary: RunSummaryNotify) {
         self.session_summary = Some(summary.session.clone());
         self.last_run_summary = Some(summary);
-        self.in_flight_delta = SessionTotalsView::default();
         self.active_tool_names.clear();
     }
 
@@ -255,13 +161,6 @@ impl TelemetryStore {
             .approval_wait_ms
             .filter(|v| v.is_finite() && *v >= 0.0);
 
-        self.in_flight_delta.tool_calls = self.in_flight_delta.tool_calls.saturating_add(1);
-        if is_error {
-            self.in_flight_delta.tool_errors = self.in_flight_delta.tool_errors.saturating_add(1);
-        }
-        self.in_flight_delta.tool_exec_ms += exec_duration_ms.unwrap_or(duration_ms);
-        self.in_flight_delta.tool_approval_wait_ms += approval_wait_ms.unwrap_or(0.0);
-
         if self.recent_tools.len() >= MAX_RECENT_TOOLS {
             self.recent_tools.pop_front();
         }
@@ -276,13 +175,6 @@ impl TelemetryStore {
 
     pub fn record_compaction_complete(&mut self, event: &CompactionCompleteEvent) {
         let duration_ms = event.duration_ms.filter(|v| v.is_finite() && *v >= 0.0);
-        if event.compacted {
-            self.in_flight_delta.compaction_count =
-                self.in_flight_delta.compaction_count.saturating_add(1);
-            if let Some(ms) = duration_ms {
-                self.in_flight_delta.compaction_duration_ms += ms;
-            }
-        }
         if self.recent_compactions.len() >= MAX_RECENT_COMPACTIONS {
             self.recent_compactions.pop_front();
         }
@@ -298,10 +190,6 @@ impl TelemetryStore {
 
     pub fn apply_pulled_snapshot(&mut self, snapshot: TelemetryGetResult) {
         self.session_summary = Some(snapshot.session_summary.clone());
-        // Runtime's `session_summary` already includes all completed calls/tools/compactions
-        // up to this ordered RPC response (including the active run so far); clear any
-        // prior in-flight delta so subsequent notifications add cleanly without double-counting.
-        self.in_flight_delta = SessionTotalsView::default();
         if self.last_call.is_none() {
             if let Some(last) = snapshot.recent_calls.last() {
                 self.last_call = Some(last.clone());
@@ -311,13 +199,10 @@ impl TelemetryStore {
     }
 
     pub fn session_totals(&self) -> SessionTotalsView {
-        let mut base = self
-            .session_summary
+        self.session_summary
             .as_ref()
             .map(SessionTotalsView::from_summary)
-            .unwrap_or_default();
-        base.merge_delta(&self.in_flight_delta);
-        base
+            .unwrap_or_default()
     }
 
     pub fn last_tps(&self) -> Option<f64> {
@@ -352,7 +237,38 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    fn sample_metrics(seq: i64, cached: i64, cost: Option<f64>) -> RunMetricsNotify {
+    fn sample_summary(calls: i64, total_tokens: i64, cost: Option<f64>) -> TelemetrySummary {
+        TelemetrySummary {
+            total_calls: calls,
+            total_tokens,
+            total_input_tokens: calls * 1000,
+            total_output_tokens: calls * 200,
+            total_output_reasoning_tokens: calls * 40,
+            total_cached_input_tokens: calls * 600,
+            total_cache_creation_tokens: 0,
+            total_input_image_tokens: 0,
+            cache_hit_calls: calls,
+            cache_miss_calls: 0,
+            cache_unknown_calls: 0,
+            total_cost_usd: cost,
+            retry_count: 1,
+            retry_wait_ms: 500.0,
+            tool_calls: 1,
+            tool_errors: 0,
+            tool_exec_ms: 50.0,
+            tool_approval_wait_ms: 100.0,
+            compaction_count: 0,
+            compaction_duration_ms: 0.0,
+            by_model: BTreeMap::new(),
+        }
+    }
+
+    fn sample_metrics(
+        seq: i64,
+        cached: i64,
+        cost: Option<f64>,
+        session: Option<TelemetrySummary>,
+    ) -> RunMetricsNotify {
         RunMetricsNotify {
             run_id: "run-1".into(),
             seq,
@@ -395,13 +311,19 @@ mod tests {
             retry_wait_ms: Some(500.0),
             provider_meta_summary: None,
             context: None,
+            session,
         }
     }
 
     #[test]
-    fn telemetry_store_tracks_live_delta_and_snaps_on_summary() {
+    fn telemetry_store_tracks_runtime_authoritative_summary_and_strips_nested_session() {
         let mut store = TelemetryStore::default();
-        store.record_metrics(sample_metrics(1, 600, Some(0.01)));
+        store.record_metrics(sample_metrics(
+            1,
+            600,
+            Some(0.01),
+            Some(sample_summary(1, 1200, Some(0.01))),
+        ));
         store.record_tool_call("tc-1", "read");
         store.record_step_complete(&StepCompleteEvent {
             step_id: "tc-1".into(),
@@ -421,30 +343,11 @@ mod tests {
         assert_eq!(totals.tool_approval_wait_ms, 100.0);
         assert_eq!(store.last_ttft_ms(), Some(250.0));
         assert_eq!(store.recent_tools.back().unwrap().tool, "read");
+        // Stored per-call records strip nested session snapshots.
+        assert!(store.last_call.as_ref().unwrap().session.is_none());
+        assert!(store.recent_calls.back().unwrap().session.is_none());
 
-        let authoritative = TelemetrySummary {
-            total_calls: 2,
-            total_tokens: 2400,
-            total_input_tokens: 2000,
-            total_output_tokens: 400,
-            total_output_reasoning_tokens: 80,
-            total_cached_input_tokens: 1200,
-            total_cache_creation_tokens: 0,
-            total_input_image_tokens: 0,
-            cache_hit_calls: 2,
-            cache_miss_calls: 0,
-            cache_unknown_calls: 0,
-            total_cost_usd: Some(0.025),
-            retry_count: 1,
-            retry_wait_ms: 500.0,
-            tool_calls: 1,
-            tool_errors: 0,
-            tool_exec_ms: 50.0,
-            tool_approval_wait_ms: 100.0,
-            compaction_count: 0,
-            compaction_duration_ms: 0.0,
-            by_model: BTreeMap::new(),
-        };
+        let authoritative = sample_summary(2, 2400, Some(0.025));
         store.record_summary(RunSummaryNotify {
             run_id: "run-1".into(),
             duration_ms: 2500.0,
@@ -459,38 +362,21 @@ mod tests {
     }
 
     #[test]
-    fn mid_run_pulled_snapshot_does_not_double_count_in_flight_delta() {
+    fn mid_run_pulled_snapshot_stays_consistent_with_runtime_authoritative_metrics() {
         use crate::protocol::{
             ContextUsage, ContextUsageBasis, RuntimeMemoryUsage, RuntimePerfSnapshot,
             TelemetryGetResult,
         };
 
         let mut store = TelemetryStore::default();
-        store.record_metrics(sample_metrics(1, 600, Some(0.01)));
+        let after_call_1 = sample_summary(1, 1200, Some(0.01));
+        store.record_metrics(sample_metrics(
+            1,
+            600,
+            Some(0.01),
+            Some(after_call_1.clone()),
+        ));
 
-        let summary_so_far = TelemetrySummary {
-            total_calls: 1,
-            total_tokens: 1200,
-            total_input_tokens: 1000,
-            total_output_tokens: 200,
-            total_output_reasoning_tokens: 40,
-            total_cached_input_tokens: 600,
-            total_cache_creation_tokens: 0,
-            total_input_image_tokens: 0,
-            cache_hit_calls: 1,
-            cache_miss_calls: 0,
-            cache_unknown_calls: 0,
-            total_cost_usd: Some(0.01),
-            retry_count: 1,
-            retry_wait_ms: 500.0,
-            tool_calls: 0,
-            tool_errors: 0,
-            tool_exec_ms: 0.0,
-            tool_approval_wait_ms: 0.0,
-            compaction_count: 0,
-            compaction_duration_ms: 0.0,
-            by_model: BTreeMap::new(),
-        };
         store.apply_pulled_snapshot(TelemetryGetResult {
             session_id: Some("sess-1".into()),
             active_run_id: Some("run-1".into()),
@@ -504,8 +390,8 @@ mod tests {
                 basis: ContextUsageBasis::Provider,
                 breakdown: Vec::new(),
             },
-            session_summary: summary_so_far.clone(),
-            run_summary: Some(summary_so_far),
+            session_summary: after_call_1.clone(),
+            run_summary: Some(after_call_1),
             recent_calls: Vec::new(),
             recent_tools: Vec::new(),
             runtime: RuntimePerfSnapshot {
@@ -524,16 +410,20 @@ mod tests {
             },
         });
 
-        // Opening `/stats` mid-run must show 1 call / 1200 tokens, not 2 calls / 2400 tokens.
         let totals = store.session_totals();
         assert_eq!(totals.calls, 1);
         assert_eq!(totals.total_tokens, 1200);
         assert_eq!(totals.cost_usd, Some(0.01));
 
-        // Subsequent call during the same run adds cleanly on top of the pulled snapshot.
-        store.record_metrics(sample_metrics(2, 600, Some(0.01)));
+        store.record_metrics(sample_metrics(
+            2,
+            600,
+            Some(0.01),
+            Some(sample_summary(2, 2400, Some(0.02))),
+        ));
         let after_second = store.session_totals();
         assert_eq!(after_second.calls, 2);
         assert_eq!(after_second.total_tokens, 2400);
+        assert_eq!(after_second.cost_usd, Some(0.02));
     }
 }
