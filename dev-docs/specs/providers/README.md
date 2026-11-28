@@ -3,15 +3,16 @@
 This document is a specification that aligns providers (OpenAI / Anthropic / Gemini / DeepSeek / OpenRouter / Moonshot / Z.ai / xAI) into a "common interface".
 The goal is to make the Agent loop unaware of provider differences.
 
-Implementation status (as of 2026-11-02):
-- Implemented connector: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`), OpenRouter (`ChatOpenRouter`), Google (`ChatGoogle`), DeepSeek (`ChatDeepSeek`), Moonshot (`ChatMoonshot`), Z.ai (`ChatZai`), xAI (`ChatXai`).
-- DeepSeek uses stateless Responses with API-key auth; only Flash (currently V4.1-Flash-1017) and V4-Pro are registered. See [DeepSeek provider](./deepseek-provider.md).
+Implementation status (as of 2026-11-28):
+- Implemented connectors: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`), OpenRouter (`ChatOpenRouter`), Google (`ChatGoogle`), DeepSeek (`ChatDeepSeek`), Moonshot (`ChatMoonshot`), Z.ai (`ChatZai`), xAI (`ChatXai`), plus configured named HTTP Responses endpoints (`ChatResponses`).
+- Configured named HTTP Responses endpoints: [Named Responses endpoints](./responses-endpoints.md).
+- DeepSeek uses stateless Responses with API-key auth; only Flash and V4-Pro are registered. See [DeepSeek provider](./deepseek-provider.md).
 - Google Interactions chat/function calling and custom image adapters are fixture-tested and partially live verified; see [Google provider contract](./google-provider.md).
-- OpenRouter behavior details: `dev-docs/specs/providers/openrouter.md`, split notes in `dev-docs/specs/providers/openrouter-core-connector.md`.
+- OpenRouter behavior details: [OpenRouter provider](./openrouter.md) (archived connector split notes in [`../../archive/openrouter-core-connector.md`](../../archive/openrouter-core-connector.md)).
 - Anthropic Sonnet/Haiku 5.5 contracts and signed replay: [Anthropic provider](./anthropic-provider.md).
-- Moonshot implementation details: `dev-docs/specs/providers/moonshot-provider.md`.
-- Z.ai implementation details: `dev-docs/specs/providers/zai-provider.md`.
-- xAI implementation details: `dev-docs/specs/providers/xai-provider.md`.
+- Moonshot implementation details: [Moonshot provider](./moonshot-provider.md).
+- Z.ai implementation details: [Z.ai provider](./zai-provider.md).
+- xAI implementation details: [xAI provider](./xai-provider.md).
 - Existing Codex OAuth metadata compatibility: [selected metadata contracts](./codex-backend-metadata.md).
 - Image support is separate from chat connectors: [image provider matrix and Codex research](./image-generation.md), with the implemented public OpenAI/OpenRouter API subset in [section 1.1](../image-generation.md#11-implemented-public-api-slice) and existing-login Codex OAuth builtin in [section 1.2](../image-generation.md#12-implemented-codex-oauth-builtin). Other connectors and hosted/native image output are not implied by this inventory.
 
@@ -34,9 +35,6 @@ export interface BaseChatModel<P = ProviderName, O = unknown> {
   }): Promise<ChatInvokeCompletion>;
 }
 ```
-
-Compatibility notes:
-- The Python version defines `BaseChatModel` as Protocol, and each provider accesses the API via serializer.
 
 ---
 
@@ -88,10 +86,11 @@ requested strict flag; they do not rewrite shared tool schemas.
 
 - Anthropic (Implemented): convert to Anthropic SDK tool format and preserve tool error semantics.
 - Gemini (Implemented): convert to Interactions function steps and preserve signed thought/call metadata for stateless replay.
+- DeepSeek (Implemented): stateless HTTP Responses with function calling and plaintext reasoning/tool replay.
 - OpenRouter (Implemented): dedicated connector on Responses API path; provider-specific behavior is allowed on top of the shared Responses baseline.
-- Moonshot (Implemented): OpenAI-compatible Chat Completions connector for Kimi K3; preserves `reasoning_content` on assistant replay and maps canonical reasoning to the only currently supported `max` effort.
+- Moonshot (Implemented): OpenAI-compatible Chat Completions connector (`kimi-k3` max-only and `kimi-k3.1-pro*` `low`/`high`/`max`); preserves `reasoning_content` on assistant replay.
 - Z.ai (Implemented): native Chat Completions connector with provider-specific tool and reasoning serialization.
-- xAI (Implemented): Responses API connector for Grok 4.5 with encrypted reasoning replay, image input, prompt-cache affinity, and xAI native web search.
+- xAI (Implemented): Responses API connector (`grok-4.5`, `grok-4.7`) with encrypted reasoning replay, image input, prompt-cache affinity, and xAI native web/X search.
 
 ---
 
@@ -130,26 +129,7 @@ tokens from text/chunks or substitute total request latency. See
 
 ## 6. Error normalization (for retry)
 
-Current behavior:
-- A shared provider-error DTO is not implemented. Provider adapters and SDKs expose
-  inconsistent error types/messages and retry behavior.
-
-Planned (not implemented):
-- Normalize auth, hard quota, rate limit, overload, timeout, network, generic
-  provider, and cancellation failures through the `ProviderFailure` boundary in
-  `dev-docs/specs/providers/retry-and-failures.md`.
-- UI/session consumers use only redacted structured fields, not SDK exception types
-  or provider message matching.
-
----
-
-## 7. Order of implementation while learning (recommended)
-
-1. Secure the Agent loop with `MockModel` (return assistant message + `tool_calls`)
-2. Implement OpenAI connector (initially the minimum “tool calling can go back and forth”)
-3. Anthropic connector (absorbs serialization difference of tool result)
-4. Gemini connector (function call difference, keep signature if necessary)
-
-This order allows you to understand the differences step by step.
-
-- Configured, named HTTP Responses endpoints: [`responses-endpoints.md`](./responses-endpoints.md).
+Implemented (`packages/core/src/llm/failures.ts`, `packages/core/src/llm/retry.ts`):
+- Every built-in provider and `ChatResponses` exposes a pure `classifyFailure` mapping errors to `ProviderFailure` (`ProviderFailureError` / `ProviderTimeoutError`) across `auth`, `permission`, `hard_quota`, `rate_limit`, `overloaded`, `timeout`, `network`, `validation`, `provider`, and `cancelled`.
+- `Agent.runStream()` owns bounded retry windows (`retry.ts`) with SDK retries disabled; UI/session consumers receive only redacted structured fields (`RunErrorInfo` / `llm.retry`), never raw SDK exception stacks or credentials.
+- See [`retry-and-failures.md`](./retry-and-failures.md) for per-provider classification rules and remaining transport-watchdog work.

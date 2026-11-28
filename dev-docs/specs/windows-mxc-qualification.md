@@ -18,7 +18,7 @@ node scripts/qualify-windows-mxc.mjs $sdk | Set-Content -Encoding utf8 windows-m
 $LASTEXITCODE
 ```
 
-To measure outbound reachability, set `CODELIA_QUALIFICATION_PEER` to the IPv4 address and port of a TCP listener on another host you control (`IP:PORT`). The worker attempts only a TCP connection. With the variable unset, outbound reachability is recorded as `untested`; the default targets are synthetic loopback and a temporary named pipe. The probe removes its file and ACL fixtures and closes the listener. The SDK installation and observation JSON remain. The manual **Windows MXC qualification** workflow records separate observations for Windows 11 ARM and Windows Server 2025 x64.
+To measure outbound reachability, set `CODELIA_TEST_QUALIFICATION_PEER` to the IPv4 address and port of a TCP listener on another host you control (`IP:PORT`). The worker attempts only a TCP connection. With the variable unset, outbound reachability is recorded as `untested`; the default targets are synthetic loopback and a temporary named pipe. The probe removes its file and ACL fixtures and closes the listener. The SDK installation and observation JSON remain. The manual **Windows MXC qualification** workflow records separate observations for Windows 11 ARM and Windows Server 2025 x64.
 
 ## Reading an observation
 

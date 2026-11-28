@@ -77,9 +77,8 @@ following model call receives the image/document bytes.
 
 ### 1.7 Trim when total size exceeds
 
-Core retains the total-budget replacement mechanism for explicit consumers. The
-runtime disables it by default to preserve prompt-prefix stability and enables it
-only when `CODELIA_TOOL_OUTPUT_TOTAL_TRIM=1`.
+Core retains the total-budget replacement mechanism for explicit consumers; the
+runtime disables it by default to preserve prompt-prefix stability.
 
 If the total token estimate in the tool output exceeds `contextBudgetTokens`:
 

@@ -62,7 +62,7 @@ efforts, context/output ceilings, vision quality or structured-output behavior.
 No server-side search was executed. Opt-in repeatable smoke:
 
 ```sh
-INTEGRATION=1 CODELIA_DEEPSEEK_LIVE=1 bun test packages/runtime/tests/deepseek-live.test.ts
+INTEGRATION=1 CODELIA_TEST_DEEPSEEK_LIVE=1 bun test packages/runtime/tests/deepseek-live.test.ts
 ```
 
 This performs chargeable API requests and does not modify saved auth or config.

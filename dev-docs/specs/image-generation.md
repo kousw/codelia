@@ -27,14 +27,14 @@ is not Codelia implementation status; see the dated
 
 | Claim | Status | Local evidence / gate |
 | --- | --- | --- |
-| One stored auth method per provider | Implemented | `packages/runtime/src/auth/store.ts`: `ProviderAuth`, `AuthFile` v1 |
+| Stored auth v2 coexistence (`auth.json` / Keychain) | Implemented | `packages/runtime/src/auth/store.ts`: `AuthStore.loadV2()`, `getStoredProviderApiKey`, per-provider OAuth + API-key coexistence |
 | Stored auth precedes environment fallback | Implemented | `packages/runtime/src/auth/resolver.ts`: `resolveProviderAuth` |
 | Local image inspection using image ContentParts | Implemented | `packages/runtime/src/tools/view-image.ts`; `packages/core/src/types/llm/content.ts` |
 | Production image preview | Implemented | [TUI preview contract](tui-image-preview.md); `/image`, composer attachments and explicit `/image-artifact` RPC transfer |
 | Standalone multi-protocol preview lab | Experimental | `crates/tui/examples/image-preview`; broader protocol research, no runtime/artifact integration |
 | Public API modes, artifact references, generation/edit/inspect/export | Implemented subset | `packages/runtime/src/image-generation`, config, storage and core image-reference modules; section 1.1 |
 | Native/hosted conversation image output and suppression | Planned | Not enabled by this implementation; existing provider handling is unchanged |
-| OAuth/API-key coexistence | Partial | Environment image key coexists with stored chat OAuth without writes; stored v2 migration/UI remains [planned](./auth.md#9-credential-coexistence-for-image-generation-proposed) |
+| OAuth/API-key coexistence | Implemented storage / Planned image-key UI | `route.ts` reads stored `credentials.api_key` via `loadV2()` alongside chat OAuth (or env key fallback); dedicated UI entry for an image-only key remains [planned](./auth.md#9-credential-storage-v2-os-keyring-and-migration-implemented-2026-11-22) |
 | Codex OAuth image route | Implemented; generation live verified | Section 1.2; existing OAuth, `gpt-image-2` request, saved PNG and model-input restoration |
 | Codex Sunburst/Flare selection | Unverified execution | Exact model requests supported; no effective-model claim or fallback |
 | Google custom image route | Implemented; partial live smoke | Interactions `store=false`, three static image models, 1K/2K/4K as supported, PNG/JPEG returned originals and multiple final outputs; 1K Flash Lite, 4K Nano Banana 2.1 JPEG generation and one PNG-reference edit live verified |
@@ -66,10 +66,11 @@ is not Codelia implementation status; see the dated
   capabilities are fetched again before generation. Discovery/selection does
   not prove account access or billing entitlement.
 - `api_key_env` is an exclusive environment-variable selector. Otherwise use
-  a stored v1 API key, then the standard provider environment key; never use
-  OAuth for custom images or write auth.json while resolving image credentials.
-  A stored chat OAuth session can coexist with an environment image API key.
-  Stored auth v2 migration and a separate image-key entry UI remain planned.
+  the stored provider API key (`AuthStore.loadV2()` / `getStoredProviderApiKey`),
+  then the standard provider environment key; never use OAuth for custom images or
+  write credentials while resolving image keys. A stored chat OAuth session
+  coexists with both stored API keys and environment image keys; a dedicated UI
+  for adding an image-only stored key remains planned.
 - Allowed options: OpenAI `model` (builtin only), `size`, `quality`; OpenRouter
   `endpoint`, `quality`, `resolution`, `aspect_ratio`; Google `image_size`,
   `aspect_ratio`, and explicit `jpeg` output. Google default output
@@ -120,13 +121,13 @@ manual. An explicit one-image paid smoke is available after exporting the select
 provider's API key in the runtime environment:
 
 ```sh
-INTEGRATION=1 CODELIA_IMAGE_LIVE=1 CODELIA_IMAGE_PROVIDER=openai \
-  CODELIA_IMAGE_MODEL=gpt-image-2.5-sunburst \
+INTEGRATION=1 CODELIA_TEST_IMAGE_LIVE=1 CODELIA_TEST_IMAGE_PROVIDER=openai \
+  CODELIA_TEST_IMAGE_MODEL=gpt-image-2.5-sunburst \
   bun test packages/runtime/tests/image-generation-live.test.ts
 ```
 
-For OpenRouter, additionally choose `CODELIA_IMAGE_PROVIDER=openrouter`, an exact
-`CODELIA_IMAGE_MODEL` and `CODELIA_IMAGE_ENDPOINT`. These public provider modes read
+For OpenRouter, additionally choose `CODELIA_TEST_IMAGE_PROVIDER=openrouter`, an exact
+`CODELIA_TEST_IMAGE_MODEL` and `CODELIA_TEST_IMAGE_ENDPOINT`. These public provider modes read
 only environment keys, never stored OAuth. The test deletes only its temporary
 artifacts. There is one request and no automatic retry. Skipping is not validation.
 
@@ -162,8 +163,8 @@ actual Agent next-request image materialization using mocked HTTP.
 The following consumes one image request and requires fresh explicit permission:
 
 ```sh
-INTEGRATION=1 CODELIA_IMAGE_LIVE=1 CODELIA_IMAGE_PROVIDER=codex \
-  CODELIA_IMAGE_MODEL=gpt-image-2 \
+INTEGRATION=1 CODELIA_TEST_IMAGE_LIVE=1 CODELIA_TEST_IMAGE_PROVIDER=codex \
+  CODELIA_TEST_IMAGE_MODEL=gpt-image-2 \
   bun test packages/runtime/tests/image-generation-live.test.ts
 ```
 
@@ -190,8 +191,11 @@ AuthResolver refresh. No API key is required. Live results use normalized
   not a full source-image decoder. Original bytes/MIME are preserved, never converted.
   Output remains a validated immutable PNG/JPEG original from section 1.1.
 - Source acquisition is after the inner generation approval and route preflight.
-  Local files use runtime-host paths, regular bounded reads and realpath confinement
-  in minimal/trusted; full-access permits paths outside the logical sandbox.
+  Local files use runtime-host paths and regular bounded reads: when resource
+  protection is enabled, reads go through `SandboxContext.withSelectedFile` (allowing
+  ordinary user-readable paths while rejecting `protected_paths` and Codelia
+  credentials); otherwise `readonly`/`workspace-write` confine resolved paths to the
+  workspace root while `full-access` permits paths outside it.
   URLs use a separate unauthenticated HTTP(S) GET with direct public-IP socket lookup,
   standard ports, 15s timeout and streaming byte limits. Credentials, fragments,
   redirects and private/reserved destinations are rejected; no provider headers
@@ -408,7 +412,7 @@ OpenRouter model selection with an optional separate key reference:
     "mode": "custom",
     "provider": "openrouter",
     "model": "<image-model-slug>",
-    "api_key_env": "CODELIA_IMAGE_API_KEY"
+    "api_key_env": "OPENROUTER_IMAGE_API_KEY"
   }
 }
 ```
@@ -456,7 +460,7 @@ in the [provider companion](./providers/image-generation.md).
 
 ## 4. Credentials and billing boundaries
 
-Canonical coexistence/migration: [auth section 9](./auth.md#9-credential-coexistence-for-image-generation-proposed).
+Canonical coexistence/migration: [auth section 9](./auth.md#9-credential-storage-v2-os-keyring-and-migration-implemented-2026-11-22).
 
 Builtin reuses the conversation connection's selected auth context. An independent
 image endpoint must be explicitly defined by that connection's trusted adapter;

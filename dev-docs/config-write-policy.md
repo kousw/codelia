@@ -1,6 +1,6 @@
 # Config write policy
 
-Status: Draft (implementation-guiding)
+Status: Implemented
 
 This document defines where runtime writes config updates when both global and project config layers exist.
 
@@ -18,24 +18,20 @@ global `projects.json` (see [sandbox settings and migration](specs/command-appro
 
 ## Write target rules
 
-Runtime update paths must use the following order:
+Scope-inferred update helpers (`updateModel`, `updateTuiTheme`, `image.model.configure`) select the write target in this order:
 
 1. **Group default write policy** decides the initial target.
 2. If the key/group is already defined in one layer, use that layer as write target (sticky override).
 3. Persist and emit a message that includes the actual scope/path used.
 
+Explicit `config.set` RPC calls bypass inferred routing and write directly to the caller-specified `scope` (`global` or `project`).
+
 ### Group defaults
 
-Group defaults are defined in `@codelia/config` as `CONFIG_GROUP_DEFAULT_WRITE_SCOPE` and must cover every top-level `CodeliaConfig` group.
+Group defaults are defined canonically in `packages/config/src/index.ts` as `CONFIG_GROUP_DEFAULT_WRITE_SCOPE` and cover every top-level `CodeliaConfig` group:
 
-Current defaults:
-
-- `model.*` -> `global`
-- `permissions.*` -> `project`
-- `mcp.*` -> `project`
-- `skills.*` -> `project`
-- `search.*` -> `project`
-- `tui.*` -> `global`
+- `global`: `auth`, `model`, `providers`, `subagent`, `experimental`, `image_generation`, `tui`, `update`
+- `project`: `permissions`, `mcp`, `agents`, `skills`, `execution_environment`, `search`
 
 Any new top-level config group must add an entry to `CONFIG_GROUP_DEFAULT_WRITE_SCOPE` before introducing write/update APIs.
 
@@ -59,8 +55,10 @@ Examples:
 
 - `model.set` with `scope=config`: `model.*` policy (default global + sticky override)
 - `model.set` with `scope=session`: no config write; stores the active session override in `SessionState.meta.codelia_model_override`
-- `permissions` confirm/apply flow: `permissions.*` policy (default project)
 - `theme.set`: `tui.*` policy (default global + sticky override)
+- `image.model.configure`: `image_generation.*` policy (default global + sticky override)
+- `config.set`: writes allowlisted scalar keys directly to the caller-specified `scope` (`global` or `project`)
+- Remembered built-in tool allows from confirmation prompts persist to user-owned `ProjectsPolicyStore` (`projects.json`), not shared project `config.json`; `permissions.*` config edits (such as `permissions.remove` or manual shared rules) target the `permissions` layer (`config.json`, default project)
 
 ## Rationale
 

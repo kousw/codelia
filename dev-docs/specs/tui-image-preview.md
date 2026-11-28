@@ -48,7 +48,7 @@ capability-query reader, or modify multiplexer settings.
 Native Kitty virtual images are explicit opt-in:
 
 ```sh
-CODELIA_TUI_IMAGE_PROTOCOL=kitty cargo run --manifest-path crates/tui/Cargo.toml --locked -- --tui-mode alternate
+cargo run --manifest-path crates/tui/Cargo.toml --locked -- --tui-mode alternate --image-protocol kitty
 ```
 
 This requires a compatible terminal outside tmux/screen, alternate-screen mode,
@@ -57,7 +57,7 @@ and a nonzero bounded pixel-cell size obtained from the OS through
 Unknown protocol values, inline mode, multiplexer detection, or unavailable/unsafe
 OS metrics select halfblocks with the reason shown in the panel. The current
 Windows crossterm path cannot supply these pixel metrics and uses halfblocks.
-`CODELIA_TUI_IMAGE_PROTOCOL=halfblocks` explicitly selects the default.
+`--image-protocol halfblocks` (or `tui.image_protocol: "halfblocks"` in `config.json`) explicitly selects the default.
 
 Only halfblocks and Kitty are enabled in production; Sixel/iTerm2 remain in the
 standalone lab. No automatic compatibility claim is made for native graphics.

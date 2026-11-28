@@ -92,11 +92,11 @@ Run from the repo root (npm dependencies stay outside the workspace):
 probe_dir="$(mktemp -d)"
 npm install --prefix "$probe_dir" --ignore-scripts --no-audit --no-fund \
   --package-lock=false @xterm/headless@6.0.0
-CODELIA_TUI_CAPTURE_PATH="$probe_dir/capture.json" \
+CODELIA_TEST_TUI_CAPTURE_PATH="$probe_dir/capture.json" \
   cargo test --locked --manifest-path crates/tui/Cargo.toml inline_native_scrollback_ansi_capture
 node scripts/check-tui-scrollback.mjs "$probe_dir/capture.json" "$probe_dir"
-CODELIA_TUI_CAPTURE_PATH="$probe_dir/capture.json" \
-  CODELIA_TUI_EMULATOR_DIR="$probe_dir" \
+CODELIA_TEST_TUI_CAPTURE_PATH="$probe_dir/capture.json" \
+  CODELIA_TEST_TUI_EMULATOR_DIR="$probe_dir" \
   node --test scripts/check-tui-scrollback.test.mjs
 ```
 

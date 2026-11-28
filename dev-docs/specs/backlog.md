@@ -1,109 +1,27 @@
 # Backlog
 
-Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
+Deferred work inventory organized by topic. New items do not use numeric `B-NNN` IDs (legacy IDs remain only where existing specs link to them; retired IDs are never reused).
+
+## Runtime & Sandbox
 
 <a id="cloud-gvisor"></a>
 
-- **B-043** Evaluate gVisor for hosted Linux workers. The cloud host could run each worker with `runsc` and reuse Codelia's sandbox permission contract and acceptance tests. Select the cloud execution environment and evaluate its workload compatibility when hosted workers are in scope. [Local sandbox design](./command-approval-reference.ja.md#mxc-evaluation)
+- **Hosted Linux workers with gVisor** (legacy `B-043`): Evaluate gVisor (`runsc`) for hosted Linux workers, reusing Codelia's sandbox permission contract and acceptance tests when hosted workers are in scope. [Local sandbox design](./command-approval-reference.ja.md#mxc-evaluation)
 
-- **B-001** Web UI: compare provider-native payload (`ContentPart.other` / `provider_meta`) vs `BaseMessage` history for a session/run.
-  Purpose: identify loss/transform points when reconstructing prompts, especially across providers/models.
-  Notes: would benefit from visualizing persisted provider-native fields in `llm.response.output`.
+- **Subagent orchestration follow-ups** (legacy `B-030`): Core shared-workspace children, bounded concurrency/steps, deadlines, delegated permission caps, session-owned lifetime, and parent-mediated collaboration are implemented (`packages/runtime/src/subagents/`, [`subagent-collaboration.md`](./subagent-collaboration.md)). Remaining: aggregate token/cost enforcement, recursive children, and worktree leases ([`task-orchestration.md`](./task-orchestration.md)).
 
-- **B-036** TUI multiline input key portability (`Shift+Enter` in Windows Terminal / embedded terminals).
-  Purpose: make newline insertion reliable when terminal environments do not forward modified Enter consistently.
-  Notes: investigate Windows Terminal and embedded terminal hosts such as Cursor on macOS, validate keyboard protocol coverage, and consider a more explicit fallback/configuration path beyond the current `Ctrl+J` and backslash+`Enter` workarounds.
+- **Opt-in heavy CPU/heap profiler snapshots and issue-report export**: Lightweight live Telemetry + TUI Perf (`Alt+P`/`/perf`), `/stats` (`/diag`), and `telemetry.get` runtime memory/phase telemetry are implemented. Remaining: opt-in deep CPU/heap snapshot triggers and export bundles for investigating sustained spikes/leaks.
 
-- **B-037** Clipboard file and image attachments.
-  The TUI accepts copied file lists via `Alt+V` and supports immutable originals, bounded transfers and session-owned reads. The proposed `/attach <path>` command has been dropped from the backlog.
-  Remaining work covers native clipboard acceptance on target systems, format-specific readers and long-term blob garbage collection. See [pasted images and files](./input-attachments.md).
+## Tools
 
-- **B-038** Installed app automatic update flow.
-  Purpose: keep CLI/TUI installs current without requiring users to manually watch releases or reinstall for every update.
-  Notes: define update check UX (startup/background/manual), platform-aware apply paths for npm/global installs vs packaged binaries, restart/relaunch behavior, and security policy such as artifact verification plus opt-in vs auto-apply defaults.
+- **Future built-in tool additions**: `apply_patch`, `webfetch`, `view_image`, and TUI-local `tui_ask_user_choice` are implemented. Remaining: `lsp`, MCP resource tools, and cross-host `request_user_input` (generalizing interactive user questions beyond TUI-local client tools; keep split todo tools as-is unless evidence changes). [`future-tools.md`](./future-tools.md)
 
-- **B-031** TUI command handler split: break up `crates/tui/src/app/handlers/command.rs` into smaller focused modules.
-  Purpose: reduce file complexity, improve maintainability/testability, and make queue/approval related changes safer.
-  Current: prompt submission, queue operations, slash commands, image-model commands, and bang shell handling are extracted into `crates/tui/src/app/handlers/command/`.
-  Remaining: consider further behavior-preserving extraction if future changes expose a concrete maintenance need.
+## TUI & UX
 
-- **B-009** Optional usage/cost display per run (from `usage-tracking`).
-  Purpose: visibility into usage without external tooling.
-  Notes: scope boundary with diagnostics is defined in `dev-docs/specs/llm-call-diagnostics.md`.
+- **Clipboard file and image attachments follow-ups**: `Alt+V` copied file-list/image paste, immutable originals, bounded transfers, and session-owned reads are implemented. Remaining: native clipboard acceptance across target platforms, format-specific readers, and long-term blob garbage collection. [`input-attachments.md`](./input-attachments.md)
 
-- **B-025** TUI run timing (always-on): show elapsed time while `running` and retain total duration after completion in normal UI.
-  Purpose: make long-running operations easier to monitor without enabling any debug/diagnostic mode.
-  Current: `crates/tui/src/app/app_state/methods.rs` tracks run duration and `handlers/runtime_response/parsed_output.rs` displays it on final output.
-  Remaining: show live elapsed time while a run is active and assess terminal error/cancellation display.
+- **TUI multiline input key portability (`Shift+Enter`)**: Investigate Windows Terminal and embedded terminal hosts (such as Cursor on macOS), validate keyboard protocol coverage, and evaluate explicit configuration/fallbacks beyond `Ctrl+J` and backslash+`Enter`.
 
-- **B-026** Diagnostics panel/flag (`--diagnostics`): expose run-level diagnostics (summary usage/cost, provider metadata, and troubleshooting signals).
-  Purpose: provide deeper observability when explicitly requested.
-  Notes: overlaps with **B-009**; boundary and wire proposal are documented in `dev-docs/specs/llm-call-diagnostics.md`.
+- **TUI live run elapsed timing**: `crates/tui/src/app/app_state/methods.rs` tracks duration and `crates/tui/src/app/handlers/runtime_response/apply.rs` / `status.rs` display it on completion. Remaining: show live elapsed time while a run is active and assess terminal error/cancellation display.
 
-- **B-039** Opt-in runtime/TUI resource profiler (memory/CPU/latency).
-  Purpose: make it practical to investigate resource spikes, leaks, and slowdowns without attaching ad hoc external profilers every time.
-  Notes: define a lightweight opt-in trigger (flag/command/manual snapshot), what to capture for Bun runtime vs Rust TUI processes, artifact/output format for issue reports, and the boundary between always-on diagnostics and heavier profiling. Lightweight memory visibility can ride on existing perf/diagnostics surfaces rather than requiring a separate backlog item.
-
-- **B-010** Provider extensions: Gemini provider.
-  Purpose: broaden model/provider options beyond current OpenAI/Anthropic baseline.
-  Notes: Skills support is already implemented; this item tracks remaining provider expansion.
-
-- **B-012** TUI output: `ansi-to-tui` to render ANSI-colored tool output safely in ratatui.
-  Purpose: preserve formatting while keeping the UI stable.
-
-- **B-014** Desktop file tree: add filesystem watcher + incremental refresh (rename/create/delete).
-  Purpose: keep explorer state in sync without full reloads on each action.
-
-- **B-015** Desktop diff viewer: staged/unstaged switch, file list pane, and hunk navigation.
-  Purpose: make larger patch review practical inside the GUI client.
-
-- **B-016** Desktop diff rendering: syntax-aware highlighting for code hunks (optional).
-  Purpose: improve readability after unified diff MVP is stable.
-
-- **B-017** Selection/search UX: evaluate `nucleo-matcher` for fast fuzzy filtering in lists/pickers.
-  Purpose: make model/session/tool selection responsive at scale.
-
-- **B-018** Code blocks: consider `tree-sitter` + `tree-sitter-highlight` for rich code highlighting (optional, heavier dependency).
-  Purpose: enhance code readability when needed without making it mandatory.
-
-- **B-023** Lane completion/attention notification: notify operator when a lane finishes/errors or is blocked in permission/UI-confirm wait (`awaiting_ui`-like attention state).
-  Purpose: reduce manual polling/attach overhead by surfacing lane attention events (log badge, optional terminal/OS notification, and/or tmux-friendly signaling).
-
-- **B-024** Protocol schema/codegen for runtime ⇄ TUI boundary: define method params/results/events in a single schema source and generate TS/Rust boundary types/decoders.
-  Purpose: reduce manual drift, avoid raw JSON passthrough in UI parsing, and fail fast with type errors when protocol fields change.
-  Design: [`protocol-codegen.md`](./protocol-codegen.md) (Implemented; all methods catalogued).
-  Remaining: extract the generated Rust types into a shared `crates/protocol` crate when the desktop host lands on main and adopts them (decide its decode policy then).
-
-- **B-032** Lane resume helper (`lane_resume`): recreate a runnable lane from a previous lane id/context.
-  Purpose: make recovery from finished/dead tmux sessions one-command instead of manual `base_ref`/worktree reconstruction.
-  Notes: should carry forward useful context (task id, branch/base ref, worktree, seed context).
-
-- **B-033** Lane backend restart (`lane_reopen`): recreate multiplexer session for an existing lane/worktree when backend is dead.
-  Purpose: recover quickly from tmux/zellij session loss without creating an unrelated new lane.
-  Notes: keep lane metadata continuity and provide a deterministic attach target.
-
-- **B-034** Lane checkpoint/handoff metadata.
-  Purpose: persist concise execution context (goal, pending tasks, dirty files, recommended verify commands) to improve resume quality.
-  Notes: can be emitted automatically at finish/error and consumed by resume flows.
-
-- **B-040** Terminal-Bench ATIF validation / hardening.
-  Purpose: harden the shipped Terminal-Bench path so emitted trajectories are validator-compatible and fail loudly when artifact integrity is insufficient.
-  Notes: current Terminal-Bench helpers already emit best-effort `atif/trajectory.json`; remaining work is schema/version pinning, validator-compatible checks, stricter tool-call/observation linkage coverage, and clear failure semantics when ATIF output is invalid.
-  Spec: `dev-docs/specs/terminal-bench.md`
-
-- **B-041** Terminal-Bench official scoring/submission polish.
-  Purpose: smooth the Harbor scoring/submission workflow now that core Terminal-Bench support is implemented.
-  Notes: keep Harbor as the source of truth for official scoring; focus on runbook polish, pinned install/version ergonomics, packaging/submission helpers, and comparison/rerun workflows around Harbor job outputs.
-  Spec: `dev-docs/specs/terminal-bench.md`
-
-- **B-042** Future built-in tool additions for runtime/TUI.
-  Purpose: track the next high-value built-in tool additions after the current runtime tool surface comparison work.
-  Current: `apply_patch`, `webfetch`, and `view_image` are implemented in `packages/runtime/src/tools/`.
-  Remaining: `request_user_input`, `lsp`, and MCP resource tools; keep subagent/task execution in the separate orchestration track and keep split todo mutation tools unless implementation evidence says otherwise.
-  Spec: `dev-docs/specs/future-tools.md`
-
-- **B-030** Subagent orchestration follow-ups.
-  Purpose: decompose complex tasks into smaller executions while keeping the parent loop predictable and auditable.
-  Current: fresh, non-recursive shared-workspace children, bounded concurrency/steps, optional deadlines, delegated permission caps, session-owned lifetime, and parent-mediated read-write collaboration are implemented; see `packages/runtime/src/subagents/` and `subagent-collaboration.md`.
-  Remaining: aggregate token/cost enforcement, recursive children, and worktree leases; see the status table in `task-orchestration.md`.
-  Spec: `dev-docs/specs/task-orchestration.md`
+- **Fuzzy picker filtering (`nucleo-matcher`)**: Evaluate fast fuzzy filtering for large model/session/tool pickers at scale.

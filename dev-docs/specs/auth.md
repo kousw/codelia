@@ -15,7 +15,7 @@ Implemented:
 - Interprocess SQLite locking (35s wait) + bounded OAuth refresh timeout (30s for OpenAI and MCP), atomic `0600` temp-file→`fsync`→`rename` writes, locked `McpAuthStore.update()` preserving 401-triggered refresh via `failedAccessToken` comparison, universal all-direction pre-write conflict detection + two-phase migration, and `auth.status` non-secret `storage` / `warnings` metadata
 - OpenAI OAuth via loopback callback (`http://localhost:<port>/auth/callback`)
 - OpenAI device-code login for SSH/headless environments
-- SSH-aware manual browser fallback for loopback OAuth (`CODELIA_OAUTH_BROWSER=manual`, auto-enabled when SSH env is detected, supports pasted callback URL/code)
+- SSH-aware manual browser fallback for loopback OAuth (`auth.oauth_browser: "manual"` in config, auto-enabled when SSH env is detected, supports pasted callback URL/code)
 - UI-driven auth prompts (`ui.pick.request` / `ui.prompt.request` / `ui.confirm.request`)
 - Management RPCs (`auth.status`, `auth.login`, `auth.login.complete`, `auth.login.cancel`, `auth.login.status`, and scoped/all `auth.logout`)
 

@@ -3,62 +3,57 @@
 This document defines a lightweight diagnostics layer for per-LLM-call visibility,
 especially cache hit/miss behavior.
 
-Status (as of 2026-10-17):
-- Partial: per-call diagnostics and final diagnostic usage summaries are implemented
-  behind `--diagnostics`; the normal-mode TPS status display is implemented.
-- Planned: a dedicated diagnostics table/panel and an opt-in full
-  usage/cost run summary.
-- Scope target: backlog **B-009**, **B-026**, **B-027**
+Status (as of 2026-11-28):
+- **Implemented**: always-on `run.metrics` and `run.summary` notifications, read-only
+  `telemetry.get` RPC, compact `llm.usage` persistence, live `Alt+H` Telemetry bar,
+  `Alt+P`/`/perf` live footer, `/stats` (`/diag`) scrollable panel, and
+  `--diagnostics` / `CODELIA_DEBUG=diagnostics` transcript expansion (B-009, B-026, B-027).
+- **Planned**: live in-flight TPS updates during active token generation and optional
+  per-run diagnostics toggle.
 - Evidence: `packages/runtime/src/rpc/run.ts`, `packages/runtime/src/rpc/run-metrics.ts`,
-  `crates/tui/src/app/runtime/parser.rs`, `crates/tui/src/app/view/ui/status.rs`;
-  `packages/runtime/tests/run-diagnostics.test.ts`.
+  `packages/runtime/src/rpc/telemetry.ts`, `crates/tui/src/app/runtime/parser/`,
+  `crates/tui/src/app/view/ui/`, `packages/runtime/tests/run-diagnostics.test.ts`,
+  and protocol fixtures.
 
 ---
 
 ## 1. Goals
 
 - Show per-request LLM diagnostics (model, latency, usage, cache hit/miss).
-- Keep a clear boundary:
-  - **B-009**: opt-in run summary (usage/cost)
-  - **B-026/B-027**: opt-in detailed diagnostics
-- Derive live diagnostics from in-memory `llm.request` / `llm.response` records.
+- Keep telemetry structured and compact (`run.metrics` / `run.summary` / `telemetry.get`),
+  with detailed transcript output opt-in (`--diagnostics` or `CODELIA_DEBUG=diagnostics`).
+- Derive live telemetry from in-memory `llm.request` / `llm.response` records.
 
 Non-goals:
-- Dumping raw provider payload by default.
-- Making diagnostics mandatory for normal TUI flow.
+- Dumping raw provider payloads by default.
+- Flooding the normal transcript with per-call tables without opt-in.
 
 ---
 
-## 2. Scope boundary (B-009 vs B-026/B-027)
+## 2. Scope boundary
 
-### 2.1 Optional run summary (`B-009`)
+### 2.1 Always-on summary & panel telemetry (Implemented)
 
-Proposed: show a compact run summary only when explicitly requested. Collection
-and display are separate policies; adding accounting does not enable default
-transcript output. This summary is outside the current Steer implementation.
-
-Planned: the complete usage/cost summary below. Current normal mode shows run
-duration and the most recently completed model call's TPS in the status line.
+Collection is always active via `run.metrics`, `run.summary`, and `telemetry.get`
+without adding default transcript noise. Normal UI shows duration and latest TPS in
+`Info` mode, while `Alt+H` cycles into the 1-line `Telemetry` status bar and
+`/stats` (`/diag`) shows cumulative session/run breakdowns:
 
 - total calls
 - input/output/total tokens
 - cached input tokens total
 - cache creation tokens total
-- total cost (if available)
+- total cost (when list pricing is available)
 
-### 2.2 Diagnostics mode (`B-026/B-027`)
+### 2.2 Diagnostics transcript mode (`--diagnostics` / `CODELIA_DEBUG=diagnostics`, Implemented)
 
-When diagnostics mode is enabled (for example `--diagnostics`), show per-call details:
-
-- call sequence (`seq`)
-- provider/model
-- request/response timestamps
-- latency
-- stop reason
-- token usage breakdown
-- cache read/write indicators
-- optional per-call cost
-- optional provider metadata summary
+`run.metrics` notifications carry full per-call records (`run_id`, `seq`, `provider`, `model`,
+`request_ts`, `response_ts`, `latency_ms`, timing, `stop_reason`, token breakdown, cache state,
+cost, retries, and `provider_meta_summary`). When diagnostics transcript mode is enabled,
+the TUI renders compact per-call and run-summary transcript lines showing `provider`,
+`latency_ms`, `stop_reason`, token breakdown (`in`/`out`/`total`), cache state and
+`read`/`ratio`/`create` counts, plus optional `ttft`, `tps`, `cost`, `retries`, and
+`provider_meta_summary`.
 
 ---
 
@@ -129,10 +124,10 @@ Notes:
 - Derive diagnostics in-memory from `llm.request` / `llm.response` before disk filtering.
 - Normal stores persist compact `llm.usage` accounting, independently under
   `<storage-root>/usage/`, without messages or opaque provider payloads.
-- Full request/response/tool records are written only when `CODELIA_SESSION_DUMP=1`,
+- Full request/response/tool records are written only when `CODELIA_DEBUG=session-dump`,
   separately under `sessions/diagnostics/`; this flag is independent of display diagnostics.
-- Emit diagnostics to UI as optional runtime notifications only.
-- If diagnostics mode is off, do not emit diagnostics notifications.
+- Emit structured `run.metrics` and `run.summary` notifications unconditionally;
+  `--diagnostics` / `CODELIA_DEBUG=diagnostics` controls transcript expansion in the UI.
 
 ### 4.2 Observed streaming generation rate (implemented)
 

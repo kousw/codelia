@@ -58,7 +58,7 @@ Canonicalize the configured root, target, and nearest existing ancestor; reject 
 
 **Evidence**
 
-- [`packages/runtime/src/permissions/service.ts:61-105`](../../packages/runtime/src/permissions/service.ts#L61-L105) automatically allows read-oriented shell prefixes in `minimal` mode.
+- `packages/runtime/src/permissions/service.ts:61-105` (historical path before permissions refactor) automatically allows read-oriented shell prefixes in `minimal` mode.
 - [`packages/runtime/src/permissions/utils.ts:222-363`](../../packages/runtime/src/permissions/utils.ts#L222-L363) does not parse command substitution, backticks, process substitution, or redirect destinations as nested operations.
 - [`packages/runtime/src/tasks/shell-executor.ts:148-163`](../../packages/runtime/src/tasks/shell-executor.ts#L148-L163) executes the approved string through a real shell.
 - Local policy evaluation returned `allow` for `cat $(touch /tmp/PWNED)`, ``rg x . `touch /tmp/PWNED2` ``, and `cat /etc/hosts > /tmp/outside`.

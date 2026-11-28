@@ -468,13 +468,13 @@ Verify changes to these contracts with:
 
 1. `cargo fmt --manifest-path crates/tui/Cargo.toml -- --check`
 2. `cargo test --manifest-path crates/tui/Cargo.toml`
-3. `CODELIA_TUI_COLOR_SCHEME=light cargo test --manifest-path crates/tui/Cargo.toml`
+3. `CODELIA_TEST_TUI_COLOR_SCHEME=light cargo test --manifest-path crates/tui/Cargo.toml`
 4. `cargo clippy --manifest-path crates/tui/Cargo.toml --all-targets` — verify **no new warnings** introduced by touched files (clippy is not a CI gate today).
 5. **CI-equivalent headless xterm scrollback check** (whenever `render/`, `view/`, `log_wrap.rs`, `app/frame.rs`, or `runtime/parser` is touched):
    ```bash
-   export CODELIA_TUI_EMULATOR_DIR=/tmp/codelia-tui-emulator
-   export CODELIA_TUI_CAPTURE_PATH=/tmp/codelia-tui-capture.json
-   npm install --prefix "$CODELIA_TUI_EMULATOR_DIR" --ignore-scripts --no-audit --no-fund --package-lock=false @xterm/headless@6.0.0
+   export CODELIA_TEST_TUI_EMULATOR_DIR=/tmp/codelia-tui-emulator
+   export CODELIA_TEST_TUI_CAPTURE_PATH=/tmp/codelia-tui-capture.json
+   npm install --prefix "$CODELIA_TEST_TUI_EMULATOR_DIR" --ignore-scripts --no-audit --no-fund --package-lock=false @xterm/headless@6.0.0
    unset NO_COLOR
    cargo test --manifest-path crates/tui/Cargo.toml --locked inline_native_scrollback_ansi_capture
    node --test scripts/check-tui-scrollback.test.mjs

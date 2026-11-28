@@ -3,7 +3,7 @@
 Status: `Implemented (core)` (2026-03-10)
 
 This document defines Codelia's Terminal-Bench support shape.
-It originally turned backlog item **B-029** into concrete implementation requirements; core Terminal-Bench support is now implemented, and remaining polish is tracked separately as **B-040** and **B-041**.
+It originally turned backlog item **B-029** into concrete implementation requirements; core Terminal-Bench support is now implemented, and remaining ATIF validation / Harbor submission polish is deferred.
 
 ---
 
@@ -15,7 +15,7 @@ Current state in Codelia:
 - Runtime is already a JSON-RPC stdio server (`packages/runtime`).
 - A benchmark-focused headless path exists via `codelia -p/--prompt`, `tools/terminal-bench/scripts/run-benchmark.mjs`, and the Harbor adapter in `tools/terminal_bench_python_adapter/`.
 - Terminal-Bench helper scripts, Docker smoke path, and artifact output layout live under `tools/terminal-bench/`.
-- Remaining backlog follow-ups are tracked as `B-040` (ATIF validation / hardening) and `B-041` (official scoring/submission polish).
+- Deferred polish covers ATIF schema/validator gating and official Harbor submission/rerun helpers.
 
 External baseline:
 
@@ -240,7 +240,7 @@ Original B-029 acceptance criteria:
 Current status against that checklist:
 
 - **Implemented:** 1, 2, 3, and 5.
-- **Implemented enough to close B-029, but follow-up remains:** 4 is only partially satisfied today because the shipped ATIF path is still best-effort rather than validator-gated; this is now tracked as `B-040`.
+- **Implemented enough to close B-029, but follow-up remains:** 4 is only partially satisfied today because the shipped ATIF path is still best-effort rather than validator-gated (remaining hardening and Harbor submission polish are deferred).
 - **No known regression:** 6 remains an expectation and guardrail; no separate backlog item is needed unless benchmark work starts affecting normal TUI behavior.
 
 ---
@@ -256,7 +256,6 @@ Current status against that checklist:
 
 ## 11. References
 
-- `dev-docs/specs/backlog.md` (`B-040`, `B-041` follow-ups)
 - `dev-docs/specs/command-approval-and-auto-review.md`
 - `dev-docs/specs/sandbox-isolation.md`
 - Harbor docs: Running Terminal-Bench (`harborframework.com/docs/datasets/running-tbench`)

@@ -9,10 +9,12 @@ This directory contains maintainer/contributor-facing documentation:
 These docs may include planned or partially implemented behavior.
 
 Start here:
-- architecture: [`typescript-architecture-spec.md`](./typescript-architecture-spec.md)
+- module dependency diagram and package architecture: [`reference-architecture.md`](./reference-architecture.md)
 - status-aware spec index: [`specs/README.md`](./specs/README.md)
-- module dependency diagram: [`reference-architecture.md`](./reference-architecture.md)
+- `CODELIA_*` environment variable registry: [`environment-variables.md`](./environment-variables.md)
+- config write-target policy: [`config-write-policy.md`](./config-write-policy.md)
 - Claude Code comparison notes: [`claude-code-comparison.md`](./claude-code-comparison.md)
 - coding-agent subagent implementation comparison:
   [`comparisons/subagent-implementations.md`](./comparisons/subagent-implementations.md)
 - npm publish runbook: [`npm-publish.md`](./npm-publish.md)
+- historical / superseded developer docs: [`archive/README.md`](./archive/README.md)

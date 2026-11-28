@@ -1,7 +1,7 @@
 # TUI / Runtime Mid-Run Steer with Queue Fallback
 
 Status: `Implemented` — extends [`tui-input-queueing.md`](./tui-input-queueing.md).
-Evidence: `packages/shared-types/src/content.ts`, `packages/shared-types/src/events.ts`, `packages/core/src/agent/agent.ts`, `packages/protocol/src/capabilities.ts`, `packages/protocol/src/run.ts`, `packages/runtime/src/rpc/run.ts`, `crates/tui/src/app/handlers/command/prompt.rs`, `crates/tui/src/app/handlers/command/queue.rs`, `crates/tui/src/app/handlers/runtime_response/parsed_output.rs`; tests in `packages/core/tests/agent-steer.test.ts`, `packages/runtime/tests/run-steer.test.ts`, and `crates/tui` command/input/status tests.
+Evidence: `packages/shared-types/src/content.ts`, `packages/shared-types/src/events.ts`, `packages/core/src/agent/agent.ts`, `packages/protocol/src/capabilities.ts`, `packages/protocol/src/run.ts`, `packages/runtime/src/rpc/run.ts`, `crates/tui/src/app/handlers/command/prompt.rs`, `crates/tui/src/app/handlers/command/queue.rs`, `crates/tui/src/app/handlers/runtime_response/apply.rs`, `crates/tui/src/app/handlers/runtime_response/run_control.rs`, `crates/tui/src/app/handlers/runtime_response/steer.rs`; tests in `packages/core/tests/agent-steer.test.ts`, `packages/runtime/tests/run-steer.test.ts`, and `crates/tui` command/input/status tests.
 
 This document defines how a user can inject a **steer** message into an already running agent turn at safe execution boundaries, while preserving the existing **queue** (`pending_prompt_queue`) for deferred next-turn execution and falling back to the queue if a steer is not consumed before the run terminates.
 

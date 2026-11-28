@@ -14,7 +14,6 @@ The main `define` used in this spec are summarized here so that the definitions 
 - `loadedVersions(path -> mtimeMs)`: `6.3 Integration into context`
 ### 0.3 External injection (env)
 - `CODELIA_AGENTS_ROOT`: `4.1 Settings`
-- `CODELIA_AGENTS_MARKERS`: `4.1 Settings`
 - `CODELIA_SANDBOX_ROOT` (non-target/use separation): `4.2 Root estimation algorithm`
 ### 0.4 `<system-reminder>` type
 
@@ -81,8 +80,8 @@ export type SystemReminderType = z.infer<typeof SystemReminderTypeSchema>;
 ```
 
 ### 0.6 Implementation placement (Schema-first)
-- `packages/shared-types/src/agents/schema.ts`: `zod` Schema definition (sole source of definition).
-- `packages/shared-types/src/agents/index.ts`: Re-export of `schema` and `z.infer` types.
+- `packages/runtime/src/agents/schema.ts`: `zod` Schema definition (sole source of definition).
+- `packages/runtime/src/agents/index.ts`: Re-export of `schema` and `z.infer` types.
 - Make `Schema.parse` mandatory at the boundary (config reading/API/tool I/O) and use only `infer` type internally.
 - If a product (such as JSON Schema) is required, generate it from `schema.ts` and do not increase the number of handwritten types.
 ---
@@ -110,8 +109,8 @@ export type SystemReminderType = z.infer<typeof SystemReminderTypeSchema>;
 Use `AgentsConfigSchema` / `AgentsConfig` (`0.5`) as the setting type.
 External injection (optional):
 - `CODELIA_AGENTS_ROOT`: Override corresponding to `projectRootOverride`.
-- `CODELIA_AGENTS_MARKERS`: Comma-separated specifications corresponding to `markers`.
-- These are for AGENTS resolution only and are treated independently from `CODELIA_SANDBOX_ROOT`.
+- `markers` are configured via `agents.root.markers` (not an env var).
+- `CODELIA_AGENTS_ROOT` is for AGENTS resolution only and is treated independently from `CODELIA_SANDBOX_ROOT`.
 ### 4.2 Estimation algorithm
 1. If `projectRootOverride` is specified, make it `root`.
 2. If not specified, trace from `cwd` to the parent, and set the first ancestor where any of `markers` exists to `root`.

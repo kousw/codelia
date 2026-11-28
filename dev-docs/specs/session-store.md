@@ -16,7 +16,7 @@ best-effort replay. It is distinct from the in-memory message history module.
 - Normal `sessions/YYYY/MM/DD/<run_id>.jsonl` files retain lifecycle/conversation
   events and compact `llm.usage`. Full requests/responses/raw tool outputs and
   header prompts/tools are omitted from normal stores.
-- `CODELIA_SESSION_DUMP=1` enables a separate full stream under
+- `CODELIA_DEBUG=session-dump` enables a separate full stream under
   `sessions/diagnostics/`. It defaults off and is independent of live diagnostics.
 - Compact usage is also persisted under `<storage-root>/usage/`, without message
   bodies or opaque provider metadata, independently of event-log maintenance.

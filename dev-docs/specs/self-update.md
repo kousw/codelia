@@ -35,8 +35,8 @@ Global `config.json` only (project-level `.codelia/config.json` is ignored for s
 - `update.channel`: optional npm dist-tag name (rejects reserved `codelia-staging-*`). When omitted, stable versions infer `"latest"` and prereleases (e.g. `0.2.0-beta.1`) infer their leading prerelease identifier (`"beta"`).
 - Environment overrides:
   - `CODELIA_AUTO_UPDATE`: `"auto" | "1" | "true" | "notify" | "off" | "0" | "false"`.
-  - `CODELIA_UPDATE_CHANNEL`: npm dist-tag override.
-  - `CODELIA_UPDATE_REGISTRY` (or `npm_config_registry`): HTTPS registry base URL (must use `https:` without embedded credentials).
+  - `npm_config_registry`: standard npm HTTPS registry base URL (must use `https:` without embedded credentials).
+  - Channel selection uses `update.channel` in global `config.json`.
 - Non-interactive runs and CI (`CI=true`, `GITHUB_ACTIONS`, etc.) always disable background checks and automatic installs.
 
 ### Startup confirmation

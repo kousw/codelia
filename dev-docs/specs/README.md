@@ -4,7 +4,7 @@ This directory contains maintainer-facing product and architecture contracts.
 Use this index to find the canonical document and to distinguish implemented
 behavior from proposals before changing code.
 
-Last reviewed: 2026-08-17.
+Last reviewed: 2026-11-28.
 
 ## Status labels
 
@@ -25,20 +25,17 @@ implemented behavior.
 
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [`package-architecture.md`](./package-architecture.md) | Unstated | Target package boundaries and dependency direction |
 | [`core-types.md`](./core-types.md) | Unstated | Shared Core type contracts |
 | [`runtime-environment-contract.md`](./runtime-environment-contract.md) | Partial | Implemented MVP embedding boundary plus future axes |
 | [`ui-protocol.md`](./ui-protocol.md) | Mixed | Implemented runtime protocol and planned extensions |
-| [`protocol-codegen.md`](./protocol-codegen.md) | Implemented | Zod protocol schemas, method catalog, generated Rust types, method table and shared fixtures (B-024); shared Rust crate deferred |
+| [`protocol-codegen.md`](./protocol-codegen.md) | Implemented | Zod protocol schemas, method catalog, standalone `crates/protocol` crate, method table and shared fixtures (B-024) |
 | [`storage-layout.md`](./storage-layout.md) | Unstated | Local storage layout and ownership |
-| [`testing.md`](./testing.md) | Unstated | Test strategy and planned coverage |
 
 ## Agent, context, and orchestration
 
 | Document | Status | Purpose |
 | --- | --- | --- |
 | [`agent-loop.md`](./agent-loop.md) | Mixed | Current agent loop and planned retry/termination behavior |
-| [`agent-tasks.md`](./agent-tasks.md) | Unstated | Agent implementation task definitions |
 | [`agents-hierarchy-loading.md`](./agents-hierarchy-loading.md) | Mixed | AGENTS hierarchy loading and planned events |
 | [`context-management.md`](./context-management.md) | Unstated | Tool-output cache and compaction |
 | [`goals.md`](./goals.md) | Implemented | Session goals, bounded continuation and token accounting in the local TUI |
@@ -54,19 +51,19 @@ Provider-specific transport, serialization, and error contracts live together in
 
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [`providers/README.md`](./providers/README.md) | Partial | Common provider interface; six connectors implemented, Google chat planned |
+| [`providers/README.md`](./providers/README.md) | Implemented | Common provider interface (`BaseChatModel`, eight built-in connectors + named Responses endpoints, shared usage/timing and `ProviderFailure` boundary) |
 | [`providers/retry-and-failures.md`](./providers/retry-and-failures.md) | Partial | Implemented common classification/retry/redaction policy plus remaining transport watchdogs |
 | [`providers/anthropic-provider.md`](./providers/anthropic-provider.md) | Implemented | Native Claude Messages; Sonnet/Haiku 5.5 effort, admission and durable signed thinking replay |
 | [`providers/openrouter.md`](./providers/openrouter.md) | Implemented | OpenRouter provider behavior with planned extensions |
-| [`providers/openrouter-core-connector.md`](./providers/openrouter-core-connector.md) | Historical | Completed OpenRouter connector split |
 | [`providers/openai-websocket-mode-experimental.md`](./providers/openai-websocket-mode-experimental.md) | Experimental | Opt-in OpenAI Responses WebSocket transport |
 | [`providers/codex-backend-metadata.md`](./providers/codex-backend-metadata.md) | Implemented | Selected Codex metadata: per-turn routing, verification/buffering status and bounded diagnostics |
 | [`providers/google-provider.md`](./providers/google-provider.md) | Implemented | Native Gemini Interactions chat/tools and custom image generation; live smoke recorded |
 | [`providers/deepseek-provider.md`](./providers/deepseek-provider.md) | Implemented | API-key stateless Responses, Flash/V4-Pro, plaintext reasoning/tool replay |
 | [`providers/moonshot-provider.md`](./providers/moonshot-provider.md) | Implemented | Native Moonshot/Kimi provider |
 | [`providers/xai-provider.md`](./providers/xai-provider.md) | Implemented | Native xAI/Grok provider |
-| [`providers/image-generation.md`](./providers/image-generation.md) | Partial | Public OpenAI/OpenRouter image adapters; dated external matrix and pinned Codex research; paid live access unverified |
 | [`providers/zai-provider.md`](./providers/zai-provider.md) | Implemented | Native Z.ai/GLM provider |
+| [`providers/responses-endpoints.md`](./providers/responses-endpoints.md) | Implemented | Configured named HTTP Responses endpoints (config/auth/model/TUI/child integration; live gateway validation pending) |
+| [`providers/image-generation.md`](./providers/image-generation.md) | Partial | Public OpenAI/OpenRouter image adapters; dated external matrix and pinned Codex research; paid live access unverified |
 | [`model-metadata.md`](./model-metadata.md) | Unstated | Model registry and models.dev metadata |
 | [`model-parameter-ui.md`](./model-parameter-ui.md) | Unstated | Cross-provider reasoning parameter mapping |
 
@@ -78,7 +75,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`edit-tool.md`](./edit-tool.md) | Mixed | Current and target edit/write guards |
 | [`future-tools.md`](./future-tools.md) | Partial | Implemented and deferred built-in tool candidates |
 | [`search-tool.md`](./search-tool.md) | Proposed | Native and local-fallback search policy |
-| [`image-generation.md`](./image-generation.md) | Partial | Implemented `/image-model` public API and Codex OAuth routes, immutable PNG references, edit/inspect/export and artifact preview; OAuth generation live verified; native/hosted and stored-auth migration planned |
+| [`image-generation.md`](./image-generation.md) | Partial | Implemented `/image-model` public API, Codex OAuth, and Google custom routes, immutable PNG/JPEG references, v2 stored auth coexistence, edit/inspect/export and artifact preview; native/hosted output and image-key entry UI remain planned |
 | [`decisions.md`](./decisions.md) | Implemented | OpenAI and Google API-key decisions on shared text/images, permissions and bounded one-shot transport; live access unverified |
 | [`mcp.md`](./mcp.md) | Unstated | MCP host integration |
 | [`skills.md`](./skills.md) | Partial | Implemented skills phases and follow-ups |
@@ -95,8 +92,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`session-store.md`](./session-store.md) | Implemented | Original messages, active context, event compression, opt-in dumps and independent usage |
 | [`conversation-archive.md`](./conversation-archive.md) | Implemented | Original-message journal, active checkpoints and autonomous retrieval |
 | [`run-visibility.md`](./run-visibility.md) | Unstated | Run/tool progress projection |
-| [`usage-tracking.md`](./usage-tracking.md) | Unstated | Usage, cost, and cache accounting |
-| [`llm-call-diagnostics.md`](./llm-call-diagnostics.md) | Partial | Per-call diagnostics and observed streaming TPS implemented; dedicated panel/opt-in full usage summary planned |
+| [`llm-call-diagnostics.md`](./llm-call-diagnostics.md) | Implemented | Always-on `run.metrics`/`run.summary`, `telemetry.get`, `Alt+H`/`Alt+P`/`/stats` telemetry UI, and `--diagnostics` transcript expansion |
 | [`langfuse-observability.md`](./langfuse-observability.md) | Proposed | Optional Langfuse tracing |
 | [`startup-execution-environment-meta.md`](./startup-execution-environment-meta.md) | Implemented | Startup environment metadata |
 | [`shell-background-execution.md`](./shell-background-execution.md) | Implemented | Background shell task behavior |
@@ -146,21 +142,19 @@ contracts unless a document explicitly records implemented behavior.
 | [`desktop/mvp.md`](./desktop/mvp.md) | Proposed | First delivery subset |
 | [`desktop-gpui.md`](./desktop-gpui.md) | Partial | Separate GPUI prototype record |
 
-## Planning and deferred work
+## Planning, deferred work, and archive
 
 | Document | Status | Purpose |
 | --- | --- | --- |
 | [`backlog.md`](./backlog.md) | Backlog | Canonical deferred work inventory |
-| [`implementation-plan.md`](./implementation-plan.md) | Historical | Early implementation ordering document |
-| [`packages-refactor-priorities-2026-02.md`](./packages-refactor-priorities-2026-02.md) | Historical | Completed dated package-refactor plan |
+| [`../archive/README.md`](../archive/README.md) | Historical | Superseded bootstrap architecture, implementation plans, and historical design notes |
 
 ## Placement rule
 
-- Put stable behavior and target contracts under the relevant subsystem here.
+- Put stable behavior and target contracts under the relevant subsystem here; keep specs compact and contract-focused rather than duplicating code-owned model tables or step-by-step implementation diaries.
+- Move superseded or completed bootstrap planning documents into `dev-docs/archive/`.
 - Put temporary execution checklists in ignored `plan/`, not in this directory.
 - Put operator procedures in `dev-docs/` runbooks, not in specs.
 - Put audit evidence in `dev-docs/audits/`.
 - Add new provider-specific documents under `dev-docs/specs/providers/` and link
   them from both this index and `providers/README.md`.
-
-- [Named Responses endpoints](./providers/responses-endpoints.md): implemented config/auth/model/TUI/child integration; live inference-gateway validation pending.

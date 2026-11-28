@@ -10,7 +10,7 @@ Implemented:
 - `model.list(provider=openrouter)` via OpenRouter `GET /models`.
 - `model.set(provider=openrouter)` pass-through support for model IDs.
 - Compaction remains enabled; provider-qualified model IDs (`provider/model`) are resolved with fallback logic.
-- Connector split design/spec is tracked in `dev-docs/specs/providers/openrouter-core-connector.md` (implemented).
+- Connector split design/spec is archived in `dev-docs/archive/openrouter-core-connector.md` (implemented).
 
 Planned:
 - Expanded routing/provider preference config fields beyond MVP.
@@ -155,7 +155,7 @@ Unit tests:
   - `model.list` and `model.set` behavior for dynamic OpenRouter models.
 
 Integration tests (opt-in):
-- Gate with `INTEGRATION=1`, `OPENROUTER_API_KEY`, and `CODELIA_TEST_OPENROUTER_MODEL`.
+- No standalone OpenRouter live test exists yet; shared opt-in streaming smoke is gated with `INTEGRATION=1`, `CODELIA_TEST_STREAM_DELTA_LIVE=1`, and `OPENROUTER_API_KEY` (with optional `CODELIA_TEST_STREAM_DELTA_LIVE_MODEL_OPENROUTER` in `packages/runtime/tests/stream-deltas-live.test.ts`).
 - Verify:
   - basic text run
   - tool call round-trip

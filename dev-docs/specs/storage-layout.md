@@ -73,7 +73,7 @@ $XDG_STATE_HOME/codelia/logs/
 - `sessions/messages/<session_id>.jsonl`: append-only original messages (one serialized `BaseMessage` per line).
 - `sessions/contexts/<session_id>.json`: current active messages and covered original byte boundary for resume.
 - `sessions/state/<session_id>.json`: legacy session snapshot format kept for backward compatibility reads.
-- `sessions/diagnostics/YYYY/MM/DD/<run_id>.jsonl`: opt-in full dumps (`CODELIA_SESSION_DUMP=1`).
+- `sessions/diagnostics/YYYY/MM/DD/<run_id>.jsonl`: opt-in full dumps (`CODELIA_DEBUG=session-dump`).
 - `<storage-root>/usage/YYYY/MM/DD/<run_id>.jsonl`: compact usage retained independently of run logs.
 - `sessions/active-runs/<session-hash>/<run_id>.json`: PID-owned live-writer protection.
 - `cache/tool-output/`: tool output cache (storage area for redeploying with reference ID)

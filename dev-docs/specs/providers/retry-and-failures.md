@@ -16,11 +16,7 @@ Status: `Partial` — shared classification, bounded retry window, retry
 progress, and normal runtime/session redaction are implemented as of 2026-08-01;
 first-byte/stream-idle watchdogs and a stream-first internal model boundary remain.
 
-Scope: all six providers currently exposed by runtime auth/model selection:
-OpenAI, Anthropic, OpenRouter, Moonshot, Z.ai, and xAI. `ProviderName` also retains
-a `google` member for shared type compatibility, but there is no Google chat
-adapter or runtime-selectable Google provider in this baseline, so it has no
-retry mapping here.
+Scope: all eight built-in providers (`openai`, `anthropic`, `openrouter`, `google`, `deepseek`, `moonshot`, `zai`, `xai`) plus configured named HTTP Responses endpoints (`ChatResponses`). `ChatGoogle` reuses `classifyOpenAiCompatibleFailure` with SDK retries disabled (`retries: { strategy: "none" }`). `ChatDeepSeek` runs with `retry: "off"` (`packages/core/src/llm/deepseek/chat.ts:22`) and configured `ChatResponses` endpoints default to `retry: "off"` unless `retry.max_retries > 0` (`packages/core/src/llm/responses/chat.ts:106`), so their `classifyFailure` marks failures `retryable: false` and never multiplies chargeable POST requests through SDK or Agent retries.
 
 ### 1.1 Current behavior (implemented)
 
@@ -38,21 +34,25 @@ Runtime defaults are:
 | Maximum accepted provider wait hint | 60 seconds |
 | Window for starting another retry, including waits | 20 minutes |
 
-OpenAI, OpenRouter, Moonshot, xAI, and Anthropic clients constructed by Codelia set
-SDK `maxRetries: 0`, preventing a hidden retry loop underneath Core. Z.ai already
-uses the Codelia fetch transport without SDK retry. Explicit caller-injected SDK
-clients remain caller-owned and must disable their own retry policy.
+OpenAI, OpenRouter, Moonshot, xAI, DeepSeek/named Responses, and Anthropic
+clients constructed by Codelia set SDK `maxRetries: 0`, preventing a hidden retry
+loop underneath Core (`ChatGoogle` disables retries via `retries: { strategy: "none" }`,
+and `ChatZai` uses Codelia's fetch transport without SDK retry). Explicit
+caller-injected SDK clients remain caller-owned and must disable their own retry
+policy.
 
 Current wire modes are not the same as the Core API boundary:
 
 | Provider path | Provider wire mode | What `Agent` receives |
 | --- | --- | --- |
 | OpenAI HTTP / WebSocket | streaming events | one accumulated `ChatInvokeCompletion` promise |
+| Anthropic | SDK streaming (`messages.stream`) | one accumulated `ChatInvokeCompletion` promise |
 | OpenRouter | streaming events | one accumulated `ChatInvokeCompletion` promise |
+| Google Interactions | streaming events | one accumulated `ChatInvokeCompletion` promise |
+| DeepSeek / named Responses | HTTP streaming events | one accumulated `ChatInvokeCompletion` promise |
 | Moonshot | streaming events | one accumulated `ChatInvokeCompletion` promise |
 | xAI | streaming events | one accumulated `ChatInvokeCompletion` promise |
 | Z.ai | streaming SSE | one accumulated `ChatInvokeCompletion` promise |
-| Anthropic | non-streaming message create | one `ChatInvokeCompletion` promise |
 
 `llm.retry` is emitted before each wait and rendered by TUI with provider, category,
 delay, and attempt counts. `Retry-After` and provider-body wait hints are accepted
@@ -229,7 +229,7 @@ emitted. Section 6 defines the common retry limits.
 | Anthropic | `error.type`, status, `retry-after` | `rate_limit_error`, `overloaded_error`, retryable 5xx/504 | `billing_error`, auth/permission, invalid request |
 | Moonshot | `error.type`, then the documented limit dimension in the message | `engine_overloaded_error`; concurrency/RPM/TPM `rate_limit_reached_error`; 500/503 | `exceeded_current_quota_error`; TPD `rate_limit_reached_error`; auth/permission |
 | xAI | HTTP status and SDK error type | 429 RPS/TPM rate limit; documented retryable server/network failures | auth/permission, validation; unknown account/quota messages until structured evidence exists |
-| Z.ai | inner business `error.code` before outer HTTP status | 1302 rate limit, 1305 overload, 1234 network error | 1113 balance; 1308-1321 usage/subscription/policy cases as mapped below; auth/validation |
+| Z.ai | cancellation / HTTP 401 / 403 / validation first, then inner business `error.code` before outer `429`/`5xx` HTTP status | 1302 rate limit, 1305 overload, 1234 network error | 401/403/validation; 1113 balance; 1308-1321 usage/subscription/policy cases as mapped below; unclassified 429 |
 
 This table is a policy summary, not a substitute for adapter tests using the exact
 provider response shapes.

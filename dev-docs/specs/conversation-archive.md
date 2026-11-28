@@ -82,7 +82,7 @@ machine-state replay or rerun historical tool calls.
 ## Run events and diagnostics
 
 - Keep normal lifecycle/conversation events and compact usage. Full diagnostic
-  dumps remain explicitly enabled by `CODELIA_SESSION_DUMP=1`.
+  dumps remain explicitly enabled by `CODELIA_DEBUG=session-dump`.
 - For unpinned sessions, compress completed/inactive normal run logs after 30
   days since each run's last update or on archive. Pinning protects from automatic
   conversion. Existing active writer guards and final lifecycle checks remain.

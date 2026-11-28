@@ -187,7 +187,7 @@ The four routes:
 
 ## 5. Generation pipeline
 
-`tools/protocol-codegen/` (with its own `AGENTS.md` / `RULES.md`) provides:
+`tools/protocol-codegen/` (with its own `AGENTS.md`) provides:
 
 - `bun run generate:protocol`: writes all outputs.
 - `bun run check:protocol`: regenerates in memory and fails on any missing,
@@ -329,7 +329,7 @@ TUI usage:
 - **Outgoing messages.** Typed helpers (`notify<M>`, `requestUi<M>`, typed
   `reply`) send the caller's object unchanged. Zod `parse` strips unknown keys,
   so its output is never sent. Outgoing payloads are checked against the schema
-  only when `CODELIA_PROTOCOL_ASSERT=1`, which the runtime test preload sets.
+  only when `CODELIA_TEST_PROTOCOL_ASSERT=1`, which the runtime test preload sets.
   Production skips the check; it costs about 0.18 µs per message, so the reason
   is to avoid new failure modes, not cost.
 - **UI results.** Results of runtime-originated requests (`client.tool.call`,
@@ -557,9 +557,9 @@ Layout:
   `CatalogMethod | LegacyMethod` with a compile-time overlap check.
 - Generator: `tools/protocol-codegen/` (workspace package). Outputs are listed
   in its `AGENTS.md`. The schema JSON is excluded from Biome formatting.
-- Rust: `crates/tui/src/protocol/` (`mod.rs`, `generated.rs`, `tests.rs`).
+- Rust: `crates/protocol/src/` (`generated.rs`, extracted from `crates/tui` in section 11.4).
 - Runtime: `packages/runtime/src/rpc/protocol.ts`. The root `bunfig.toml`
-  preloads `scripts/test-preload.ts`, which sets `CODELIA_PROTOCOL_ASSERT=1`.
+  preloads `scripts/test-preload.ts`, which sets `CODELIA_TEST_PROTOCOL_ASSERT=1`.
 
 Decisions made while implementing:
 

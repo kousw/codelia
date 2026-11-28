@@ -149,9 +149,9 @@ macOS の一時リポジトリで、ステージ済みと未ステージの変�
 | 別の run で作業ツリー内のファイル名と書き込み内容を明示 | 一回許可。作成したファイルの内容を照合 |
 | 合成の秘密値を含む依頼で同じシェル操作を2度提示 | 審査通信0回。ローカルの確認サービスが初回を許可して実行し、再度の確認で拒否して起動を止めた |
 
-先頭の Follow 設定の確認は別途行った実チャット試験。それ以降は、既存の Codex サインインで `INTEGRATION=1 CODELIA_AUTO_REVIEW_CODEX_LIVE=1 bun test packages/runtime/tests/local-auto-review-live.test.ts -t "command matrix"` を実行すると再試験できる。7件を実際の審査モデルに各1回送り、プライバシー上の手動確認は合成応答で検証する。通常のテストでは実モデル試験をスキップする。[実モデルテスト](../../packages/runtime/tests/local-auto-review-live.test.ts)
+先頭の Follow 設定の確認は別途行った実チャット試験。それ以降は、既存の Codex サインインで `INTEGRATION=1 CODELIA_TEST_AUTO_REVIEW_CODEX_LIVE=1 bun test packages/runtime/tests/local-auto-review-live.test.ts -t "command matrix"` を実行すると再試験できる。7件を実際の審査モデルに各1回送り、プライバシー上の手動確認は合成応答で検証する。通常のテストでは実モデル試験をスキップする。[実モデルテスト](../../packages/runtime/tests/local-auto-review-live.test.ts)
 
-保存候補については、Auto approve をオフにした合成入力で Codex OAuth の `gpt-6-luna` を評価した。`cargo test -p parser` は `cargo test`、`npm run build -- --watch` は `npm run build` を提案した。初回は `npm run build:docs` で有効な候補が得られず、5件中4件が期待範囲に入った。保持する語を既存形式で表せないときの指示を明確にした後は、同じ5件すべてが期待範囲に入った。インラインコードとコロンを含むスクリプト名には完全一致を期待し、架空の CLI には完全一致かタスク名を含む前方一致を許容する。これは小規模な実測で、候補を保存する前のユーザー確認は全 provider 共通。再試験は `INTEGRATION=1 CODELIA_RULE_SUGGESTION_CODEX_LIVE=1 bun test packages/runtime/tests/shell-rule-suggestion.test.ts -t "live Codex"`。[候補生成のテスト](../../packages/runtime/tests/shell-rule-suggestion.test.ts)
+保存候補については、Auto approve をオフにした合成入力で Codex OAuth の `gpt-6-luna` を評価した。`cargo test -p parser` は `cargo test`、`npm run build -- --watch` は `npm run build` を提案した。初回は `npm run build:docs` で有効な候補が得られず、5件中4件が期待範囲に入った。保持する語を既存形式で表せないときの指示を明確にした後は、同じ5件すべてが期待範囲に入った。インラインコードとコロンを含むスクリプト名には完全一致を期待し、架空の CLI には完全一致かタスク名を含む前方一致を許容する。これは小規模な実測で、候補を保存する前のユーザー確認は全 provider 共通。再試験は `INTEGRATION=1 CODELIA_TEST_RULE_SUGGESTION_CODEX_LIVE=1 bun test packages/runtime/tests/shell-rule-suggestion.test.ts -t "live Codex"`。[候補生成のテスト](../../packages/runtime/tests/shell-rule-suggestion.test.ts)
 
 追加の `-t "incidental writes"` 試験には、PATH から実行できる Bun と pytest が必要。審査指示の変更前には「テストを回して」で `pytest -q` が起動前に判定不能となった。変更後の実測では次の3件がそれぞれ一回の審査で起動した。
 

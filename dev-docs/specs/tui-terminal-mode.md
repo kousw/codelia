@@ -44,8 +44,7 @@ the initial implementation.
 
 The following behavior is implemented now:
 
-- `crates/tui/src/entry/cli.rs` parses `--tui-mode` and
-  `CODELIA_TUI_MODE` before runtime startup; CLI selection takes precedence and
+- `crates/tui/src/entry/cli.rs` parses `--tui-mode` before runtime startup;
   the default requested mode is `auto`.
 - `crates/tui/src/entry/terminal_mode.rs` captures platform/WSL facts and
   resolves the requested mode once to typed `Inline` or `Alternate` behavior.
@@ -165,14 +164,12 @@ The implemented startup selection is exposed through:
 
 ```text
 --tui-mode <auto|inline|alternate>
-CODELIA_TUI_MODE=auto|inline|alternate
 ```
 
 Resolution precedence is:
 
 1. `--tui-mode` command-line argument;
-2. `CODELIA_TUI_MODE` environment variable;
-3. built-in default `auto`.
+2. built-in default `auto`.
 
 Requirements:
 
@@ -187,7 +184,7 @@ Requirements:
   printed during normal startup.
 
 A persisted global/project setting is deferred. When added, its precedence
-should be below the environment variable and above the built-in default. The
+should be below `--tui-mode` (and any future environment override) and above the built-in default. The
 storage location and scope must be specified with that implementation rather
 than introduced ad hoc in the Rust TUI.
 

@@ -304,30 +304,23 @@ Z.ai returns `usage.prompt_tokens_details.cached_tokens`; normalize it to `input
 does not set a default in phase 1. This leaves Z.ai's server default in effect
 until Codelia chooses an explicit cost-safety cap.
 
-Provider diagnostics should follow existing provider-log conventions:
+Provider diagnostics follow existing provider-log conventions:
 
-- `CODELIA_PROVIDER_LOG=1` emits one-line request/response summaries
-- `CODELIA_PROVIDER_LOG_DIR` writes request/response dumps
+- `CODELIA_DEBUG=provider-log` enables request/response summaries and dumps
+- `CODELIA_DEBUG_DIR` overrides the dump directory (defaults to `tmp/` under cwd)
 - never log API keys
 - log provider as `zai`
 
-HTTP error policy:
+HTTP error policy (implemented in `packages/core/src/llm/zai/failure.ts`,
+routed through the shared `Agent` retry coordinator — see
+`dev-docs/specs/providers/retry-and-failures.md`):
 
-Current implementation:
-
-- `401`/`403`: auth/config error;
-- `402`: credits/payment error, non-retryable;
-- `408`/`429`/`5xx`: classified only by status/message as transient or rate-limit,
-  with no automatic retry;
-- malformed stream: provider error with bounded chunk context.
-
-Planned behavior must inspect Z.ai's inner business code before the outer HTTP
-status. HTTP 429 includes materially different balance, request-rate, overload,
-subscription, model-access, fair-use, and multi-hour/weekly/monthly usage-limit
-conditions. Only documented short rate limit/overload codes are retryable; long
-reset windows stop with a safe reset hint. Raw body snippets must not reach normal
-UI or session persistence. The complete mapping and streaming `finish_reason`
-rule are in `dev-docs/specs/providers/retry-and-failures.md`.
+- `classifyZaiFailure` handles cancellation, HTTP `401` (`auth`), HTTP `403` (`permission`), and validation statuses (`400`/`404`/`422`) first;
+- after those checks, inner business `error.code` takes precedence over outer `429`/`5xx` HTTP status:
+  - `1302` (`rate_limit`), `1305` (`overloaded`), `1234` (`network`): retryable;
+  - `1113`, `1308`–`1310`, `1316`–`1321` (`hard_quota`), and `1311`–`1315` (`permission`): non-retryable;
+- `408`/`504`: retryable `timeout`; `503`: retryable `overloaded`; other `5xx`: retryable `provider`; unclassified `429`: non-retryable `provider`;
+- malformed streams fail with typed provider/stream error metadata without copying raw body snippets into normal UI or session persistence.
 
 ## 8. Model Listing and Selection
 
@@ -375,7 +368,7 @@ Runtime unit tests:
 
 Integration tests, opt-in only:
 
-- gated by `INTEGRATION=1`, `ZAI_API_KEY`, and `CODELIA_TEST_ZAI_MODEL`
+- no standalone Z.ai live test exists yet; shared opt-in streaming smoke is gated by `INTEGRATION=1`, `CODELIA_TEST_STREAM_DELTA_LIVE=1`, and `ZAI_API_KEY` (with optional `CODELIA_TEST_STREAM_DELTA_LIVE_MODEL_ZAI` in `packages/runtime/tests/stream-deltas-live.test.ts`)
 - text smoke
 - tool round trip
 - reasoning stream smoke

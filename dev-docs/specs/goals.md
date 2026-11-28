@@ -159,8 +159,9 @@ Code anchors for the existing routes:
   shared with `session.open`.
 - `packages/runtime/src/runtime-state.ts` owns `withAdmissionLock` and the
   current run lifecycle.
-- `crates/tui/src/app/handlers/runtime_response/parsed_output.rs` requeues
-  unconsumed Steers on terminal status.
+- `crates/tui/src/app/handlers/runtime_response/apply.rs` and
+  `crates/tui/src/app/handlers/runtime_response/steer.rs` requeue unconsumed Steers on
+  terminal status.
 - `crates/tui/src/app/handlers/command/prompt.rs` dispatches the user queue
   and already handles the case of an uncertain send.
 
