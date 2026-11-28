@@ -52,7 +52,7 @@ pub struct SessionTotalsView {
 
 impl SessionTotalsView {
     pub fn cache_read_ratio(&self) -> Option<f64> {
-        if self.input_tokens == 0 {
+        if self.input_tokens == 0 || (self.cache_hit_calls == 0 && self.cache_miss_calls == 0) {
             None
         } else {
             Some((self.cached_input_tokens as f64 / self.input_tokens as f64) * 100.0)
@@ -425,5 +425,16 @@ mod tests {
         assert_eq!(after_second.calls, 2);
         assert_eq!(after_second.total_tokens, 2400);
         assert_eq!(after_second.cost_usd, Some(0.02));
+
+        // When all calls have unknown cache metrics, ratio stays unavailable (`None`).
+        let mut unknown_only = sample_summary(1, 1000, None);
+        unknown_only.cache_hit_calls = 0;
+        unknown_only.cache_miss_calls = 0;
+        unknown_only.cache_unknown_calls = 1;
+        unknown_only.total_cached_input_tokens = 0;
+        assert_eq!(
+            super::SessionTotalsView::from_summary(&unknown_only).cache_read_ratio(),
+            None
+        );
     }
 }

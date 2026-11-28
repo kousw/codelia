@@ -705,7 +705,9 @@ generation duration < 250ms) and full structured per-call telemetry (`provider`,
 `stop_reason`, `usage`, `cache`, `cost_usd`, `cost_basis`, `retry_count`,
 `retry_wait_ms`, `provider_meta_summary`, scalar `context`, and authoritative
 cumulative `session?: TelemetrySummary` so clients display runtime session
-totals directly without duplicating aggregation). Clients retain
+totals directly without duplicating aggregation; tool/retry/compaction updates
+between calls appear on the next `run.metrics`, `run.summary`, or `telemetry.get`,
+and older runtimes omitting `session` refresh on `run.summary`/`telemetry.get`). Clients retain
 the last known TPS and context % until replacement measurements arrive; call
 starts do not emit resets. Authoritative schema is generated from
 `packages/protocol/src/run.ts` (`RunMetricsNotifySchema`).

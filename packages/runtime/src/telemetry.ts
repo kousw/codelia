@@ -213,6 +213,14 @@ export class RuntimeTelemetryStore {
 		}
 	}
 
+	recordRetryWait(runId: string, waitMs: number): void {
+		const rounded = Math.max(0, Math.round(waitMs));
+		this.sessionSummary.retry_wait_ms += rounded;
+		if (this.currentRunId === runId && this.currentRunSummary) {
+			this.currentRunSummary.retry_wait_ms += rounded;
+		}
+	}
+
 	recordCompaction(runId: string, durationMs: number): void {
 		applyCompactionToSummary(this.sessionSummary, durationMs);
 		if (this.currentRunId === runId && this.currentRunSummary) {

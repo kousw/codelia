@@ -201,7 +201,9 @@ export function fromGoogleInteraction(
 							? { provider_model: interaction.model }
 							: {}),
 						input_tokens: input,
-						input_cached_tokens: token(usage.total_cached_tokens),
+						...(typeof usage.total_cached_tokens === "number"
+							? { input_cached_tokens: token(usage.total_cached_tokens) }
+							: {}),
 						output_tokens: output + thought,
 						output_reasoning_tokens: thought,
 						total_tokens: token(usage.total_tokens) || input + output + thought,

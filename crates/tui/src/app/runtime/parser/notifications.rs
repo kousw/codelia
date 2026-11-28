@@ -112,11 +112,22 @@ pub(crate) fn format_metrics_diagnostic_lines(call: &RunMetricsNotify) -> Vec<Lo
             )
         })
         .unwrap_or(("unknown", 0, 0));
-    let cache_read_ratio = if input_tokens == 0 {
-        0.0
-    } else {
-        (cache_read as f64 / input_tokens as f64) * 100.0
-    };
+    let cache_read_ratio_label = call
+        .cache
+        .as_ref()
+        .and_then(|cache| cache.cache_read_ratio)
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|ratio| format_percent(ratio * 100.0))
+        .or_else(|| {
+            if matches!(hit_state, "hit" | "miss") && input_tokens > 0 {
+                Some(format_percent(
+                    (cache_read as f64 / input_tokens as f64) * 100.0,
+                ))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "-".to_string());
     let latency_ms = call
         .latency_ms
         .filter(|value| value.is_finite() && *value >= 0.0)
@@ -132,7 +143,7 @@ pub(crate) fn format_metrics_diagnostic_lines(call: &RunMetricsNotify) -> Vec<Lo
         format_u64_with_commas(total_tokens),
         hit_state,
         format_u64_with_commas(cache_read),
-        format_percent(cache_read_ratio),
+        cache_read_ratio_label,
         format_u64_with_commas(cache_create),
     );
     if let Some(ttft) = call

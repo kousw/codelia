@@ -846,61 +846,61 @@ export const createShellTool = (
 				},
 				async (admission) => {
 					try {
-							const taskId = crypto.randomUUID();
-							const taskKey = await buildShellTaskKey(
-								shared.tasks,
-								taskId,
+						const taskId = crypto.randomUUID();
+						const taskKey = await buildShellTaskKey(
+							shared.tasks,
+							taskId,
+							label,
+						);
+						const task = await shared.tasks.spawn(
+							{
+								task_id: taskId,
+								kind: "shell",
+								workspace_mode: "live_workspace",
+								key: taskKey,
 								label,
-							);
-							const task = await shared.tasks.spawn(
-								{
-									task_id: taskId,
-									kind: "shell",
-									workspace_mode: "live_workspace",
-									key: taskKey,
-									label,
-									title: commandSummary,
-									working_directory: cwd,
-									parent_session_id: sessionContext?.sessionId ?? undefined,
-								},
-								({ task }) =>
-									startShellTask({
-										taskId: task.task_id,
-										command,
-										cwd,
-										timeoutSeconds,
-										toolName: "shell",
-										spawnProcess: () => admission(task.task_id),
-										outputCache: shared.outputCacheStore,
-										stdinMode,
-									}),
-							);
-							if (detachedWait) {
-								return shellStatusPayload(task, { detachedWait: true });
-							}
-							const settled = await waitForForegroundRun(
-								shared.tasks,
-								task.task_id,
-								ctx.signal,
-							);
-							debugLog(
-								`shell.done task_id=${task.task_id} state=${settled.state} duration_ms=${settled.result?.duration_ms ?? -1}`,
-							);
-							return shellTerminalPayload(settled, {
-								includeStderrOnSuccess: input.include_stderr_on_success,
-								confinedMode:
-									options.canEscalate !== false &&
-									input.escalation === undefined &&
-									sandbox.sandboxMode !== undefined &&
-									sandbox.sandboxMode !== "full-access"
-										? sandbox.sandboxMode
-										: undefined,
-							});
-						} catch (error) {
-							throw formatTaskError(error);
+								title: commandSummary,
+								working_directory: cwd,
+								parent_session_id: sessionContext?.sessionId ?? undefined,
+							},
+							({ task }) =>
+								startShellTask({
+									taskId: task.task_id,
+									command,
+									cwd,
+									timeoutSeconds,
+									toolName: "shell",
+									spawnProcess: () => admission(task.task_id),
+									outputCache: shared.outputCacheStore,
+									stdinMode,
+								}),
+						);
+						if (detachedWait) {
+							return shellStatusPayload(task, { detachedWait: true });
 						}
-					},
-				);
+						const settled = await waitForForegroundRun(
+							shared.tasks,
+							task.task_id,
+							ctx.signal,
+						);
+						debugLog(
+							`shell.done task_id=${task.task_id} state=${settled.state} duration_ms=${settled.result?.duration_ms ?? -1}`,
+						);
+						return shellTerminalPayload(settled, {
+							includeStderrOnSuccess: input.include_stderr_on_success,
+							confinedMode:
+								options.canEscalate !== false &&
+								input.escalation === undefined &&
+								sandbox.sandboxMode !== undefined &&
+								sandbox.sandboxMode !== "full-access"
+									? sandbox.sandboxMode
+									: undefined,
+						});
+					} catch (error) {
+						throw formatTaskError(error);
+					}
+				},
+			);
 		},
 	});
 };

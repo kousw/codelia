@@ -248,11 +248,6 @@ type PendingLlmRequest = {
 	model: string;
 };
 
-const toTimestampMs = (value: string): number | null => {
-	const ms = Date.parse(value);
-	return Number.isFinite(ms) ? ms : null;
-};
-
 const OPENAI_AUTO_WS_FALLBACK_WARNING =
 	"Warning: OpenAI websocket auto mode fell back to HTTP. Continuing this run over HTTP.";
 
@@ -733,6 +728,20 @@ export const createRunHandlers = ({
 			const toolNamesByCallId = new Map<string, string>();
 			let pendingRetryCount = 0;
 			let pendingRetryWaitMs = 0;
+			let activeRetry: { startedAtMs: number; plannedMs: number } | null = null;
+			const settleActiveRetryWait = (interrupted: boolean): void => {
+				if (!activeRetry) return;
+				const { startedAtMs, plannedMs } = activeRetry;
+				activeRetry = null;
+				const waitMs = interrupted
+					? Math.min(
+							plannedMs,
+							Math.max(0, Math.round(performance.now() - startedAtMs)),
+						)
+					: plannedMs;
+				pendingRetryWaitMs += waitMs;
+				state.telemetry.recordRetryWait(runId, waitMs);
+			};
 			const runStartedAtMs = performance.now();
 			state.telemetry.beginRun(runId);
 			let openAiWsFallbackWarningShown = false;
@@ -785,6 +794,7 @@ export const createRunHandlers = ({
 						});
 					}
 					if (record.type === "llm.response") {
+						settleActiveRetryWait(false);
 						const request = pendingLlmRequests.get(record.seq);
 						pendingLlmRequests.delete(record.seq);
 						const latencyMs = request
@@ -957,6 +967,7 @@ export const createRunHandlers = ({
 				const polledUnconfirmedSteers: PendingRunSteer[] = [];
 				const emitRunSummary = (): void => {
 					try {
+						settleActiveRetryWait(true);
 						const runSummary = state.telemetry.getRunSummary();
 						if (!runSummary) return;
 						sendRunSummary(state, {
@@ -1137,10 +1148,14 @@ export const createRunHandlers = ({
 						// Pending deltas always precede any other event of the run.
 						deltaCoalescer?.flush();
 						if (event.type === "llm.retry") {
+							settleActiveRetryWait(false);
 							const delayMs = Math.max(0, event.delay_ms);
 							pendingRetryCount += 1;
-							pendingRetryWaitMs += delayMs;
-							state.telemetry.recordRetry(runId, delayMs);
+							state.telemetry.recordRetry(runId, 0);
+							activeRetry = {
+								startedAtMs: performance.now(),
+								plannedMs: delayMs,
+							};
 						}
 						if (event.type === "tool_call") {
 							toolNamesByCallId.set(event.tool_call_id, event.tool);

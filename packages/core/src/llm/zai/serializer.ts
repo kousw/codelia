@@ -360,13 +360,13 @@ const normalizeZaiUsage = (
 		typeof usage.total_tokens === "number"
 			? normalizeNumber(usage.total_tokens)
 			: inputTokens + outputTokens;
-	const cachedTokens = normalizeNumber(
-		usage.prompt_tokens_details?.cached_tokens,
-	);
+	const rawCachedTokens = usage.prompt_tokens_details?.cached_tokens;
 	return {
 		model: accumulator.model ?? "",
 		input_tokens: inputTokens,
-		...(cachedTokens > 0 ? { input_cached_tokens: cachedTokens } : {}),
+		...(typeof rawCachedTokens === "number"
+			? { input_cached_tokens: normalizeNumber(rawCachedTokens) }
+			: {}),
 		output_tokens: outputTokens,
 		total_tokens: totalTokens,
 	};

@@ -3,10 +3,7 @@ import {
 	type LlmResponseRecord,
 	type ModelCost,
 } from "@codelia/core";
-import type {
-	RunContextSnapshot,
-	RunMetricsNotify,
-} from "@codelia/protocol";
+import type { RunContextSnapshot, RunMetricsNotify } from "@codelia/protocol";
 import { summarizeProviderMeta } from "./run-debug";
 
 export type PendingLlmRequestMeta = {
@@ -113,8 +110,8 @@ export const buildCallRunMetrics = (
 	const model = usageModel ?? requestModel ?? "unknown";
 	const baseMetrics = buildRunMetrics(record);
 	const modelCost = input.getModelCost
-		? (requestModel ? input.getModelCost(requestModel) : undefined) ??
-			input.getModelCost(model)
+		? ((requestModel ? input.getModelCost(requestModel) : undefined) ??
+			input.getModelCost(model))
 		: undefined;
 	const costUsd = input.metered ? estimateUsageCostUsd(usage, modelCost) : null;
 	const actualModel = extractActualModel(record.output.provider_meta);

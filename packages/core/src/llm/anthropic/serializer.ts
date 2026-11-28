@@ -523,13 +523,17 @@ const toUsage = (response: {
 	// Anthropic total input is the sum of base input and cache components.
 	const baseInputTokens = response.usage.input_tokens ?? 0;
 	const cacheCreateTokens = response.usage.cache_creation_input_tokens ?? 0;
-	const cacheReadTokens = response.usage.cache_read_input_tokens ?? 0;
+	const hasCacheRead =
+		typeof response.usage.cache_read_input_tokens === "number";
+	const cacheReadTokens = hasCacheRead
+		? (response.usage.cache_read_input_tokens ?? 0)
+		: 0;
 	const inputTokens = baseInputTokens + cacheCreateTokens + cacheReadTokens;
 	const outputTokens = response.usage.output_tokens ?? 0;
 	return {
 		model: response.model ?? "",
 		input_tokens: inputTokens,
-		input_cached_tokens: cacheReadTokens,
+		...(hasCacheRead ? { input_cached_tokens: cacheReadTokens } : {}),
 		input_cache_creation_tokens: cacheCreateTokens,
 		output_tokens: outputTokens,
 		total_tokens: inputTokens + outputTokens,

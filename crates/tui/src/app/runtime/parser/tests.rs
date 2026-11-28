@@ -445,6 +445,15 @@ fn parse_run_metrics_decodes_rich_telemetry_and_formats_diagnostics() {
     assert!(line.contains("cache=hit read=40 (40.0%) create=0"));
     assert!(line.contains("meta=transport=ws_mode websocket_mode=on"));
     assert!(line.contains("ws_input_mode=full_regenerated"));
+
+    let mut unknown_metrics = metrics;
+    if let Some(cache) = unknown_metrics.cache.as_mut() {
+        cache.hit_state = crate::protocol::CacheHitState::Unknown;
+        cache.cache_read_tokens = 0;
+        cache.cache_read_ratio = None;
+    }
+    let unknown_line = super::format_metrics_diagnostic_lines(&unknown_metrics)[0].plain_text();
+    assert!(unknown_line.contains("cache=unknown read=0 (-) create=0"));
 }
 
 #[test]
