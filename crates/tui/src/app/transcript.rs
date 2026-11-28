@@ -167,6 +167,7 @@ pub(crate) fn render_body(content: &str, reasoning: bool) -> Vec<LogLine> {
 /// End of text whose existing presentation cannot change as the current line grows.
 /// Completed lines are stable. A plain paragraph may also commit complete graphemes,
 /// stopping before an unmatched inline marker or an unfinished code line.
+#[cfg(test)]
 pub(crate) fn stable_body_prefix(content: &str, reasoning: bool, channel_closed: bool) -> &str {
     if channel_closed {
         return content;
@@ -185,8 +186,30 @@ pub(crate) fn stable_body_prefix(content: &str, reasoning: bool, channel_closed:
             in_code = !in_code;
         }
     }
+    stable_body_prefix_with_fence_state(content, reasoning, channel_closed, in_code)
+}
+
+/// O(tail) variant of [`stable_body_prefix`] when the caller already tracks
+/// whether `content[..line_start]` leaves an open fenced code block.
+pub(crate) fn stable_body_prefix_with_fence_state(
+    content: &str,
+    reasoning: bool,
+    channel_closed: bool,
+    in_code_before_tail: bool,
+) -> &str {
+    if channel_closed {
+        return content;
+    }
+    let line_start = content.rfind('\n').map_or(0, |index| index + 1);
+    if reasoning {
+        return &content[..line_start
+            + content[line_start..]
+                .grapheme_indices(true)
+                .last()
+                .map_or(0, |(index, _)| index)];
+    }
     let tail = &content[line_start..];
-    if in_code || tail.trim_start().starts_with("```") {
+    if in_code_before_tail || tail.trim_start().starts_with("```") {
         return &content[..line_start];
     }
     let mut tick = None;

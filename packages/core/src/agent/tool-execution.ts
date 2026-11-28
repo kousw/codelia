@@ -140,16 +140,35 @@ export const executeToolCall = async ({
 		}
 	}
 
+	let innerApprovalWaitMs = 0;
+	let hasInnerApprovalWait = false;
+	const execContext = createToolContext(signal);
+	execContext.recordApprovalWaitMs = (durationMs: number) => {
+		if (Number.isFinite(durationMs) && durationMs >= 0) {
+			innerApprovalWaitMs += durationMs;
+			hasInnerApprovalWait = true;
+		}
+	};
+
 	const execStartedAt = performance.now();
 	try {
 		const result = await tool.executeRaw(
 			toolCall.function.arguments,
-			createToolContext(signal),
+			execContext,
 		);
-		const execDurationMs = Math.max(
+		const totalWallMs = Math.max(
 			0,
 			Math.round(performance.now() - execStartedAt),
 		);
+		const roundedInnerWait = hasInnerApprovalWait
+			? Math.max(0, Math.round(innerApprovalWaitMs))
+			: 0;
+		if (hasInnerApprovalWait) {
+			approvalWaitMs = (approvalWaitMs ?? 0) + roundedInnerWait;
+		}
+		const execDurationMs = hasInnerApprovalWait
+			? Math.max(0, totalWallMs - roundedInnerWait)
+			: totalWallMs;
 
 		const displayContent =
 			result.display_content && typeof result.display_content === "string"
@@ -167,15 +186,24 @@ export const executeToolCall = async ({
 			execDurationMs,
 		} satisfies ToolExecution;
 	} catch (error) {
-		const execDurationMs = Math.max(
+		const totalWallMs = Math.max(
 			0,
 			Math.round(performance.now() - execStartedAt),
 		);
+		const roundedInnerWait = hasInnerApprovalWait
+			? Math.max(0, Math.round(innerApprovalWaitMs))
+			: 0;
+		if (hasInnerApprovalWait) {
+			approvalWaitMs = (approvalWaitMs ?? 0) + roundedInnerWait;
+		}
+		const execDurationMs = hasInnerApprovalWait
+			? Math.max(0, totalWallMs - roundedInnerWait)
+			: totalWallMs;
 		if (error instanceof ToolPermissionDenied)
 			return {
 				...permissionDeniedResult(toolCall, error.decision),
 				...(approvalWaitMs !== undefined ? { approvalWaitMs } : {}),
-				execDurationMs,
+				execDurationMs: 0,
 			};
 		if (error instanceof TaskComplete) {
 			return {

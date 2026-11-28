@@ -17,7 +17,6 @@ usage: codelia [options] [-- <tui-options>]
 | `-V`, `-v`, `--version` | Show the CLI version |
 | `-p`, `--prompt <text>` | Run one headless prompt and exit |
 | `--sandbox-mode <mode>` | Select `readonly`, `workspace-write` (default) or `full-access`. Full access runs as the current user after command approval. |
-| `--approval-mode <mode>` | Legacy input. `trusted` selects workspace writes and honors shared project allows. Legacy `full-access` starts confined. To disable OS isolation, set `--sandbox-mode full-access`. |
 
 ## TUI startup options
 
@@ -32,7 +31,6 @@ These flags are passed through to the TUI launcher:
 | `--initial-user-message <text>` | Alias of `--initial-message` |
 | `--debug-perf[=true|false]` | Enable the perf panel |
 | `--sandbox-mode <mode>` | Select `readonly`, `workspace-write` (default) or `full-access`. Full access runs as the current user after command approval. |
-| `--approval-mode <mode>` | Legacy input. `trusted` selects workspace writes and honors shared project allows. Legacy `full-access` starts confined. To disable OS isolation, set `--sandbox-mode full-access`. |
 
 Examples:
 

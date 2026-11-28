@@ -791,11 +791,14 @@ export const createRunHandlers = ({
 						const request = pendingLlmRequests.get(record.seq);
 						pendingLlmRequests.delete(record.seq);
 						const usage = record.output.usage ?? null;
-						const cacheReadTokens = usage?.input_cached_tokens ?? 0;
-						const cacheCreationTokens =
-							usage?.input_cache_creation_tokens ?? 0;
+						const hasCacheMetric =
+							typeof usage?.input_cached_tokens === "number";
+						const cacheReadTokens = hasCacheMetric
+							? (usage?.input_cached_tokens ?? 0)
+							: 0;
+						const cacheCreationTokens = usage?.input_cache_creation_tokens ?? 0;
 						const inputTokens = usage?.input_tokens ?? 0;
-						const hitState = usage
+						const hitState = hasCacheMetric
 							? cacheReadTokens > 0
 								? "hit"
 								: "miss"
@@ -803,20 +806,36 @@ export const createRunHandlers = ({
 						const latencyMs = request
 							? Math.max(0, Math.round(performance.now() - request.startedAtMs))
 							: 0;
-						const model = usage?.model ?? request?.model ?? "unknown";
+						const nonEmpty = (value?: string | null): string | undefined =>
+							typeof value === "string" && value.trim().length > 0
+								? value.trim()
+								: undefined;
+						const requestModel = nonEmpty(request?.model);
+						const usageModel = nonEmpty(usage?.model);
+						const model = usageModel ?? requestModel ?? "unknown";
 						const baseMetrics = buildRunMetrics(record);
 						const route = state.reviewChatRoute;
 						const metered = route?.kind === "builtin" && route.metered === true;
+						const modelCost =
+							(requestModel
+								? runtimeAgent.getModelCost(requestModel)
+								: undefined) ?? runtimeAgent.getModelCost(model);
 						const costUsd = metered
-							? estimateUsageCostUsd(usage, runtimeAgent.getModelCost(model))
+							? estimateUsageCostUsd(usage, modelCost)
 							: null;
 						const providerMeta = record.output.provider_meta as
-							| { server_model?: unknown }
+							| {
+									server_model?: unknown;
+									codex_metadata?: { server_model?: unknown };
+							  }
 							| undefined;
+						const rawServerModel =
+							providerMeta?.codex_metadata?.server_model ??
+							providerMeta?.server_model;
 						const actualModel =
-							typeof providerMeta?.server_model === "string" &&
-							providerMeta.server_model.trim().length > 0
-								? providerMeta.server_model
+							typeof rawServerModel === "string" &&
+							rawServerModel.trim().length > 0
+								? rawServerModel.trim()
 								: null;
 						const retryCount = pendingRetryCount;
 						const retryWaitMs = pendingRetryWaitMs;
@@ -836,9 +855,10 @@ export const createRunHandlers = ({
 								hit_state: hitState,
 								cache_read_tokens: cacheReadTokens,
 								cache_creation_tokens: cacheCreationTokens,
-								cache_read_ratio: usage
-									? cacheReadTokens / Math.max(inputTokens, 1)
-									: null,
+								cache_read_ratio:
+									hasCacheMetric && inputTokens > 0
+										? Math.min(1, Math.max(0, cacheReadTokens / inputTokens))
+										: null,
 							},
 							cost_usd: costUsd,
 							cost_basis: costUsd !== null ? "api_list" : "unavailable",
@@ -1178,8 +1198,10 @@ export const createRunHandlers = ({
 						// Pending deltas always precede any other event of the run.
 						deltaCoalescer?.flush();
 						if (event.type === "llm.retry") {
+							const delayMs = Math.max(0, event.delay_ms);
 							pendingRetryCount += 1;
-							pendingRetryWaitMs += Math.max(0, event.delay_ms);
+							pendingRetryWaitMs += delayMs;
+							state.telemetry.recordRetry(runId, delayMs);
 						}
 						if (event.type === "tool_call") {
 							toolNamesByCallId.set(event.tool_call_id, event.tool);
@@ -1208,7 +1230,9 @@ export const createRunHandlers = ({
 							await queueSessionSave("final");
 						}
 						if (event.type === "compaction_complete") {
-							state.telemetry.recordCompaction(runId, event.duration_ms ?? 0);
+							if (event.compacted) {
+								state.telemetry.recordCompaction(runId, event.duration_ms ?? 0);
+							}
 							logCompactionSnapshot(log, runId, runtimeAgent, event.compacted);
 							if (event.compacted) await queueSessionSave("compaction");
 						}

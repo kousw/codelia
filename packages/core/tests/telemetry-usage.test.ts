@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { executeToolCall } from "../src/agent/tool-execution";
 import { estimateUsageCostUsd } from "../src/models/registry";
 import { TokenUsageService } from "../src/services/usage/service";
+import { ToolPermissionDenied } from "../src/types/permissions";
+import type { Tool } from "../src/tools/tool";
 
 describe("cost estimation and TokenUsageService", () => {
 	test("estimateUsageCostUsd splits uncached input, cache read/write, output, and reasoning", () => {
@@ -73,5 +76,69 @@ describe("cost estimation and TokenUsageService", () => {
 		expect(summary.total_cost_usd).toBeCloseTo(0.0025, 6);
 		expect(summary.by_model.m1?.cache_hit_calls).toBe(1);
 		expect(summary.by_model.m1?.cache_miss_calls).toBe(1);
+
+		svc.updateUsageSummary({
+			model: "m1",
+			input_tokens: 50,
+			output_tokens: 10,
+			total_tokens: 60,
+		});
+		const afterUnknown = svc.getUsageSummary();
+		expect(afterUnknown.cache_unknown_calls).toBe(1);
+		expect(afterUnknown.cache_miss_calls).toBe(1);
+		expect(afterUnknown.by_model.m1?.cache_unknown_calls).toBe(1);
+	});
+
+	test("executeToolCall splits approval_wait_ms reported via ToolContext from execDurationMs", async () => {
+		const approvedTool: Tool = {
+			definition: {
+				name: "mock_shell",
+				description: "mock",
+				parameters: { type: "object", properties: {} },
+			},
+			name: "mock_shell",
+			description: "mock",
+			executeRaw: async (_raw, ctx) => {
+				await new Promise((resolve) => setTimeout(resolve, 25));
+				ctx.recordApprovalWaitMs?.(25);
+				await new Promise((resolve) => setTimeout(resolve, 15));
+				return { type: "text", text: "ok" };
+			},
+		};
+		const approved = await executeToolCall({
+			toolCall: {
+				id: "call-1",
+				type: "function",
+				function: { name: "mock_shell", arguments: "{}" },
+			},
+			tools: [approvedTool],
+		});
+		expect(approved.approvalWaitMs).toBe(25);
+		expect(approved.execDurationMs).toBeGreaterThanOrEqual(5);
+		expect(approved.execDurationMs).toBeLessThan(approved.approvalWaitMs! + 40);
+
+		const deniedTool: Tool = {
+			...approvedTool,
+			name: "mock_denied",
+			executeRaw: async (_raw, ctx) => {
+				await new Promise((resolve) => setTimeout(resolve, 20));
+				ctx.recordApprovalWaitMs?.(20);
+				throw new ToolPermissionDenied({
+					decision: "deny",
+					reason: "user_denied",
+				});
+			},
+		};
+		const denied = await executeToolCall({
+			toolCall: {
+				id: "call-2",
+				type: "function",
+				function: { name: "mock_denied", arguments: "{}" },
+			},
+			tools: [deniedTool],
+		});
+		expect(denied.approvalWaitMs).toBe(20);
+		expect(denied.execDurationMs).toBe(0);
+		expect(denied.message.is_error).toBe(true);
 	});
 });

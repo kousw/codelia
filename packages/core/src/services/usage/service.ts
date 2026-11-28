@@ -64,11 +64,16 @@ export class TokenUsageService {
 			return;
 		}
 
-		const cached = usage.input_cached_tokens ?? 0;
+		const hasCacheMetric = typeof usage.input_cached_tokens === "number";
+		const cached = hasCacheMetric ? (usage.input_cached_tokens ?? 0) : 0;
 		const cacheCreation = usage.input_cache_creation_tokens ?? 0;
 		const reasoning = usage.output_reasoning_tokens ?? 0;
 		const image = usage.input_image_tokens ?? 0;
-		const isCacheHit = cached > 0;
+		const cacheState: "hit" | "miss" | "unknown" = hasCacheMetric
+			? cached > 0
+				? "hit"
+				: "miss"
+			: "unknown";
 		const validCost =
 			typeof costUsd === "number" && Number.isFinite(costUsd) && costUsd >= 0
 				? costUsd
@@ -82,10 +87,12 @@ export class TokenUsageService {
 		this.usageSummary.total_cached_input_tokens += cached;
 		this.usageSummary.total_cache_creation_tokens += cacheCreation;
 		this.usageSummary.total_input_image_tokens += image;
-		if (isCacheHit) {
+		if (cacheState === "hit") {
 			this.usageSummary.cache_hit_calls++;
-		} else {
+		} else if (cacheState === "miss") {
 			this.usageSummary.cache_miss_calls++;
+		} else {
+			this.usageSummary.cache_unknown_calls++;
 		}
 		if (validCost !== null) {
 			this.usageSummary.total_cost_usd =
@@ -103,9 +110,9 @@ export class TokenUsageService {
 				cached_input_tokens: cached,
 				cache_creation_tokens: cacheCreation,
 				input_image_tokens: image,
-				cache_hit_calls: isCacheHit ? 1 : 0,
-				cache_miss_calls: isCacheHit ? 0 : 1,
-				cache_unknown_calls: 0,
+				cache_hit_calls: cacheState === "hit" ? 1 : 0,
+				cache_miss_calls: cacheState === "miss" ? 1 : 0,
+				cache_unknown_calls: cacheState === "unknown" ? 1 : 0,
 				total_tokens: usage.total_tokens,
 				cost_usd: validCost,
 			};
@@ -117,10 +124,12 @@ export class TokenUsageService {
 			bucket.cached_input_tokens += cached;
 			bucket.cache_creation_tokens += cacheCreation;
 			bucket.input_image_tokens += image;
-			if (isCacheHit) {
+			if (cacheState === "hit") {
 				bucket.cache_hit_calls++;
-			} else {
+			} else if (cacheState === "miss") {
 				bucket.cache_miss_calls++;
+			} else {
+				bucket.cache_unknown_calls++;
 			}
 			bucket.total_tokens += usage.total_tokens;
 			if (validCost !== null) {

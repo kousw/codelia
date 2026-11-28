@@ -434,6 +434,7 @@ pub(super) fn handle_logout_response(app: &mut AppState, response: RpcResponse) 
         app.discard_composer_attachments();
         app.runtime_info.attachment_session_epoch += 1;
         app.runtime_info.session_id = None;
+        app.telemetry.reset_session();
     }
 
     let message = match result.provider.as_deref() {

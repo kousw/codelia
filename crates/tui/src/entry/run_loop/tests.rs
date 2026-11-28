@@ -463,3 +463,65 @@ fn wake_hub_coalesces_runtime_notifications_and_wakes_immediately() {
         "runtime arrival must wake well before the 500ms timeout"
     );
 }
+
+#[test]
+fn secret_prompt_suppresses_key_trace_formatting() {
+    use crate::app::state::{InputState, PromptDialogState, PromptSlot};
+
+    let mut app = AppState::default();
+    let event = Event::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    assert!(format_key_trace_line(&app, &event).is_some());
+
+    app.overlays.runtime_dialogs.prompt = Some(PromptSlot {
+        state: PromptDialogState {
+            id: "req-secret".into(),
+            title: "API key".into(),
+            message: "Enter key".into(),
+            multiline: false,
+            secret: true,
+        },
+        input: InputState::default(),
+    });
+    assert_eq!(format_key_trace_line(&app, &event), None);
+
+    app.overlays.runtime_dialogs.prompt = Some(PromptSlot {
+        state: PromptDialogState {
+            id: "req-plain".into(),
+            title: "Name".into(),
+            message: "Enter name".into(),
+            multiline: false,
+            secret: false,
+        },
+        input: InputState::default(),
+    });
+    assert!(format_key_trace_line(&app, &event).is_some());
+}
+
+#[test]
+fn clipboard_worker_serializes_writes_in_fifo_order() {
+    let (tx, rx) = mpsc::channel::<String>();
+    let (wake_tx, wake_rx) = mpsc::channel::<WakeEvent>();
+    let observed = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let observed_writer = Arc::clone(&observed);
+    let handle = spawn_clipboard_worker(rx, wake_tx, move |text| {
+        observed_writer.lock().unwrap().push(text.to_string());
+        Ok(text.chars().count())
+    })
+    .expect("spawn clipboard worker");
+
+    tx.send("first".into()).unwrap();
+    tx.send("second".into()).unwrap();
+    tx.send("third".into()).unwrap();
+    drop(tx);
+    handle.join().unwrap();
+
+    assert_eq!(*observed.lock().unwrap(), vec!["first", "second", "third"]);
+    let counts: Vec<usize> = wake_rx
+        .try_iter()
+        .filter_map(|event| match event {
+            WakeEvent::ClipboardWritten(Ok(count)) => Some(count),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(counts, vec![5, 6, 5]);
+}

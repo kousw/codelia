@@ -273,7 +273,9 @@ describe("always-on run telemetry and telemetry.get", () => {
 		try {
 			const state = new RuntimeState();
 			state.telemetry.recordStartupPhase("sandbox_mode", 4);
-			state.telemetry.setAgentInitPhases([{ name: "mcp_tools", duration_ms: 12 }]);
+			state.telemetry.setAgentInitPhases([
+				{ name: "mcp_tools", duration_ms: 12 },
+			]);
 			const handlers = createRuntimeHandlers({
 				state,
 				getAgent: async () => agent,
@@ -289,8 +291,11 @@ describe("always-on run telemetry and telemetry.get", () => {
 			} satisfies RpcRequest);
 			const initResp = await capture.waitForResponse("init-telemetry");
 			expect(
-				(initResp.result as { server_capabilities?: { supports_telemetry?: boolean } })
-					?.server_capabilities?.supports_telemetry,
+				(
+					initResp.result as {
+						server_capabilities?: { supports_telemetry?: boolean };
+					}
+				)?.server_capabilities?.supports_telemetry,
 			).toBe(true);
 
 			handlers.processMessage({
@@ -582,4 +587,103 @@ test("OAuth refresh rejection survives the real SDK, Agent and runtime status/pe
 		"secret-refresh-token",
 	])
 		expect(serialized).not.toContain(secret);
+});
+
+test("run.metrics classifies missing cache tokens as unknown, reads codex server_model, updates context immediately, and resolves requested model cost", async () => {
+	class SnapshotCostModel implements BaseChatModel {
+		readonly provider = "anthropic";
+		readonly model = "claude-opus-5";
+		async ainvoke() {
+			return {
+				messages: [{ role: "assistant" as const, content: "priced ok" }],
+				usage: {
+					model: "claude-opus-5-20260901",
+					input_tokens: 1_000_000,
+					output_tokens: 100_000,
+					total_tokens: 1_100_000,
+				},
+				stop_reason: "end_turn",
+				provider_meta: {
+					codex_metadata: { server_model: "claude-opus-5-server" },
+				},
+			};
+		}
+	}
+
+	const llm = new SnapshotCostModel();
+	const agent = new CoreAgent({
+		llm,
+		tools: [],
+		modelRegistry: {
+			modelsById: {
+				"claude-opus-5": {
+					id: "claude-opus-5",
+					provider: "anthropic",
+					contextWindow: 1_000_000,
+					cost: { input: 10, output: 30, cacheRead: 1, cacheWrite: 12.5 },
+				},
+			},
+			aliasesByProvider: {},
+		},
+	}) as unknown as Agent;
+	const records: SessionRecord[] = [];
+	const capture = createStdoutCapture();
+	capture.start();
+	try {
+		const state = new RuntimeState();
+		state.recordAgentChatRoute(agent, {
+			kind: "builtin",
+			provider: "anthropic",
+			metered: true,
+		});
+		const handlers = createRuntimeHandlers({
+			state,
+			getAgent: async () => agent,
+			log: () => {},
+			...createStores(records),
+		});
+		handlers.processMessage({
+			jsonrpc: "2.0",
+			id: "run-metrics-fixes",
+			method: "run.start",
+			params: { input: { type: "text", text: "hello" } },
+		} satisfies RpcRequest);
+		const resp = await capture.waitForResponse("run-metrics-fixes");
+		const runId = (resp.result as RunStartResult).run_id;
+		await capture.waitForRunStatus(runId, "completed");
+
+		const metricsMsg = capture.messages.find(
+			(msg): msg is RpcNotification =>
+				isRpcNotification(msg) && msg.method === "run.metrics",
+		);
+		const call = metricsMsg?.params as RunMetricsNotify;
+		expect(call.cache?.hit_state).toBe("unknown");
+		expect(call.cache?.cache_read_ratio).toBeNull();
+		expect(call.actual_model).toBe("claude-opus-5-server");
+		expect(call.cost_basis).toBe("api_list");
+		expect(call.cost_usd).not.toBeNull();
+		expect(call.cost_usd!).toBeGreaterThan(0);
+		expect(call.context?.used_tokens).toBe(1_100_000);
+
+		const summaryMsg = capture.messages.find(
+			(msg): msg is RpcNotification =>
+				isRpcNotification(msg) && msg.method === "run.summary",
+		);
+		const summary = summaryMsg?.params as RunSummaryNotify;
+		expect(summary.run.cache_unknown_calls).toBe(1);
+		expect(summary.run.cache_miss_calls).toBe(0);
+	} finally {
+		capture.stop();
+	}
+});
+
+test("telemetry.get retains retries recorded before a failed run", () => {
+	const state = new RuntimeState();
+	state.telemetry.beginRun("run-retry-fail");
+	state.telemetry.recordRetry("run-retry-fail", 400);
+	state.telemetry.recordRetry("run-retry-fail", 800);
+	expect(state.telemetry.getRunSummary()?.retry_count).toBe(2);
+	expect(state.telemetry.getRunSummary()?.retry_wait_ms).toBe(1200);
+	expect(state.telemetry.getSessionSummary().retry_count).toBe(2);
+	expect(state.telemetry.getSessionSummary().retry_wait_ms).toBe(1200);
 });

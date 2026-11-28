@@ -61,15 +61,19 @@ const applyCallToSummary = (
 	const cacheCreationTokens = usage?.input_cache_creation_tokens ?? 0;
 	const imageTokens = usage?.input_image_tokens ?? 0;
 	const totalTokens = usage?.total_tokens ?? 0;
-	const hitState = call.cache?.hit_state ?? (usage ? (cachedTokens > 0 ? "hit" : "miss") : "unknown");
+	const hitState =
+		call.cache?.hit_state ??
+		(typeof usage?.input_cached_tokens === "number"
+			? cachedTokens > 0
+				? "hit"
+				: "miss"
+			: "unknown");
 	const validCost =
 		typeof call.cost_usd === "number" &&
 		Number.isFinite(call.cost_usd) &&
 		call.cost_usd >= 0
 			? call.cost_usd
 			: null;
-	const retryCount = Math.max(0, call.retry_count ?? 0);
-	const retryWaitMs = Math.max(0, call.retry_wait_ms ?? 0);
 
 	summary.total_calls += 1;
 	summary.total_tokens += totalTokens;
@@ -85,8 +89,6 @@ const applyCallToSummary = (
 	if (validCost !== null) {
 		summary.total_cost_usd = (summary.total_cost_usd ?? 0) + validCost;
 	}
-	summary.retry_count += retryCount;
-	summary.retry_wait_ms += retryWaitMs;
 
 	const modelKey = call.model ?? "unknown";
 	const existing = summary.by_model[modelKey];
@@ -136,6 +138,14 @@ const applyToolToSummary = (
 		record.exec_duration_ms ?? record.duration_ms,
 	);
 	summary.tool_approval_wait_ms += Math.max(0, record.approval_wait_ms ?? 0);
+};
+
+const applyRetryToSummary = (
+	summary: TelemetrySummary,
+	delayMs: number,
+): void => {
+	summary.retry_count += 1;
+	summary.retry_wait_ms += Math.max(0, Math.round(delayMs));
 };
 
 const applyCompactionToSummary = (
@@ -191,6 +201,13 @@ export class RuntimeTelemetryStore {
 		this.recentTools.push(record);
 		if (this.recentTools.length > MAX_RECENT_TOOLS) {
 			this.recentTools.shift();
+		}
+	}
+
+	recordRetry(runId: string, delayMs: number): void {
+		applyRetryToSummary(this.sessionSummary, delayMs);
+		if (this.currentRunId === runId && this.currentRunSummary) {
+			applyRetryToSummary(this.currentRunSummary, delayMs);
 		}
 	}
 

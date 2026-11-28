@@ -136,6 +136,7 @@ const withOpenRouterDynamicModel = (
 			...(contextWindow ? { contextWindow } : {}),
 			...(maxInputTokens ? { maxInputTokens } : {}),
 			...(maxOutputTokens ? { maxOutputTokens } : {}),
+			...(entry.cost ? { cost: entry.cost } : {}),
 			...(entry.capabilities?.supportsVision !== undefined
 				? { supportsVision: entry.capabilities.supportsVision }
 				: {}),

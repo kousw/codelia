@@ -1,7 +1,9 @@
 use crate::app::state::render::LogPosition;
 use crate::app::state::stream_preview::{StreamSegment, StreamUpdate};
 use crate::app::state::{LogKind, LogLine};
-use crate::app::transcript::{render_body, render_single_body_line, stable_body_prefix};
+use crate::app::transcript::{
+    render_body, render_single_body_line, stable_body_prefix_with_fence_state,
+};
 use crate::app::AppState;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -90,7 +92,12 @@ impl AppState {
         tail_lines: &[LogLine],
         channel_closed: bool,
     ) -> Option<LogPosition> {
-        let prefix = stable_body_prefix(&segment.content, segment.reasoning, channel_closed);
+        let prefix = stable_body_prefix_with_fence_state(
+            &segment.content,
+            segment.reasoning,
+            channel_closed,
+            segment.render_cache.in_code_block(),
+        );
         if prefix.trim().is_empty() {
             return segment
                 .row_indices
@@ -432,7 +439,7 @@ mod incremental_stream_tests {
                     "log mismatch for reasoning={reasoning} content={accumulated:?}"
                 );
                 let expected_stable = render_body(
-                    stable_body_prefix(&accumulated, reasoning, false),
+                    crate::app::transcript::stable_body_prefix(&accumulated, reasoning, false),
                     reasoning,
                 );
                 let seg = &app.stream_preview.segments()[0];
@@ -444,5 +451,37 @@ mod incremental_stream_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn incremental_streaming_handles_multiple_segments_and_closed_channel() {
+        let mut app = AppState::default();
+        app.runtime_info.active_run_id = Some("run-multi".into());
+
+        // Reasoning segment followed by assistant code segment (closing reasoning channel).
+        app.apply_stream_update(StreamUpdate::Append {
+            run_id: "run-multi".into(),
+            stream_id: "s-1".into(),
+            index: 0,
+            reasoning: true,
+            content: "thinking line 1\nthinking tail".into(),
+        });
+        app.apply_stream_update(StreamUpdate::Append {
+            run_id: "run-multi".into(),
+            stream_id: "s-1".into(),
+            index: 1,
+            reasoning: false,
+            content: "```rust\nlet x = 1;\n".into(),
+        });
+        app.flush_stream_output();
+
+        let segs = app.stream_preview.segments();
+        assert_eq!(segs.len(), 2);
+        // Segment 0 is closed because segment 1 is a later segment, so its entire body is stable.
+        assert_eq!(segs[0].stable_end, None);
+        // Segment 1 is still inside an open code block and matches reference render_body.
+        let mut expected = render_body("thinking line 1\nthinking tail", true);
+        expected.extend(render_body("```rust\nlet x = 1;\n", false));
+        assert_eq!(app.log, expected);
     }
 }

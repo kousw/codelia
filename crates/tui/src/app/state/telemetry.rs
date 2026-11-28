@@ -298,9 +298,10 @@ impl TelemetryStore {
 
     pub fn apply_pulled_snapshot(&mut self, snapshot: TelemetryGetResult) {
         self.session_summary = Some(snapshot.session_summary.clone());
-        if snapshot.active_run_id.is_none() {
-            self.in_flight_delta = SessionTotalsView::default();
-        }
+        // Runtime's `session_summary` already includes all completed calls/tools/compactions
+        // up to this ordered RPC response (including the active run so far); clear any
+        // prior in-flight delta so subsequent notifications add cleanly without double-counting.
+        self.in_flight_delta = SessionTotalsView::default();
         if self.last_call.is_none() {
             if let Some(last) = snapshot.recent_calls.last() {
                 self.last_call = Some(last.clone());
@@ -455,5 +456,84 @@ mod tests {
         assert_eq!(snapped.calls, 2);
         assert_eq!(snapped.total_tokens, 2400);
         assert_eq!(snapped.cost_usd, Some(0.025));
+    }
+
+    #[test]
+    fn mid_run_pulled_snapshot_does_not_double_count_in_flight_delta() {
+        use crate::protocol::{
+            ContextUsage, ContextUsageBasis, RuntimeMemoryUsage, RuntimePerfSnapshot,
+            TelemetryGetResult,
+        };
+
+        let mut store = TelemetryStore::default();
+        store.record_metrics(sample_metrics(1, 600, Some(0.01)));
+
+        let summary_so_far = TelemetrySummary {
+            total_calls: 1,
+            total_tokens: 1200,
+            total_input_tokens: 1000,
+            total_output_tokens: 200,
+            total_output_reasoning_tokens: 40,
+            total_cached_input_tokens: 600,
+            total_cache_creation_tokens: 0,
+            total_input_image_tokens: 0,
+            cache_hit_calls: 1,
+            cache_miss_calls: 0,
+            cache_unknown_calls: 0,
+            total_cost_usd: Some(0.01),
+            retry_count: 1,
+            retry_wait_ms: 500.0,
+            tool_calls: 0,
+            tool_errors: 0,
+            tool_exec_ms: 0.0,
+            tool_approval_wait_ms: 0.0,
+            compaction_count: 0,
+            compaction_duration_ms: 0.0,
+            by_model: BTreeMap::new(),
+        };
+        store.apply_pulled_snapshot(TelemetryGetResult {
+            session_id: Some("sess-1".into()),
+            active_run_id: Some("run-1".into()),
+            context: ContextUsage {
+                provider: Some("openai".into()),
+                model: Some("gpt-5".into()),
+                limit_tokens: Some(128_000),
+                used_tokens: Some(1200),
+                input_tokens: Some(1000),
+                left_percent: Some(99.0),
+                basis: ContextUsageBasis::Provider,
+                breakdown: Vec::new(),
+            },
+            session_summary: summary_so_far.clone(),
+            run_summary: Some(summary_so_far),
+            recent_calls: Vec::new(),
+            recent_tools: Vec::new(),
+            runtime: RuntimePerfSnapshot {
+                startup_phases: Vec::new(),
+                agent_init_phases: Vec::new(),
+                active_subagents: 0,
+                max_concurrent_subagents: 8,
+                backpressure_events: 0,
+                memory: RuntimeMemoryUsage {
+                    rss_bytes: 0,
+                    heap_used_bytes: 0,
+                    heap_total_bytes: 0,
+                    external_bytes: 0,
+                    array_buffers_bytes: 0,
+                },
+            },
+        });
+
+        // Opening `/stats` mid-run must show 1 call / 1200 tokens, not 2 calls / 2400 tokens.
+        let totals = store.session_totals();
+        assert_eq!(totals.calls, 1);
+        assert_eq!(totals.total_tokens, 1200);
+        assert_eq!(totals.cost_usd, Some(0.01));
+
+        // Subsequent call during the same run adds cleanly on top of the pulled snapshot.
+        store.record_metrics(sample_metrics(2, 600, Some(0.01)));
+        let after_second = store.session_totals();
+        assert_eq!(after_second.calls, 2);
+        assert_eq!(after_second.total_tokens, 2400);
     }
 }

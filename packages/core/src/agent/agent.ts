@@ -280,7 +280,9 @@ export class Agent {
 		return this.usageService.getLastUsage();
 	}
 
-	getModelCost(modelName?: string): import("../di/model-metadata").ModelCost | undefined {
+	getModelCost(
+		modelName?: string,
+	): import("../di/model-metadata").ModelCost | undefined {
 		return resolveModel(
 			this.modelRegistry,
 			modelName ?? this.llm.model,
@@ -382,8 +384,12 @@ export class Agent {
 			throwIfAborted(signal);
 			const compactionStartedAt = this.monotonicNowMs();
 			const messagesBefore = this.history.getViewMessages().length;
-			const estimatedTokensBefore =
-				this.getContextUsage().used_tokens ?? options.estimatedInputTokens;
+			const estimateHistoryTokens = (): number =>
+				this.getContextUsage().breakdown.reduce(
+					(total, entry) => total + entry.tokens,
+					0,
+				);
+			const estimatedTokensBefore = estimateHistoryTokens();
 			const startEvent: CompactionStartEvent = {
 				type: "compaction_start",
 				timestamp: Date.now(),
@@ -434,7 +440,7 @@ export class Agent {
 				this.monotonicNowMs,
 			);
 			const messagesAfter = this.history.getViewMessages().length;
-			const estimatedTokensAfter = this.getContextUsage().used_tokens;
+			const estimatedTokensAfter = estimateHistoryTokens();
 			const completeEvent: CompactionCompleteEvent = {
 				type: "compaction_complete",
 				timestamp: Date.now(),
@@ -444,11 +450,21 @@ export class Agent {
 				messages_after: messagesAfter,
 				...(typeof estimatedTokensBefore === "number" &&
 				Number.isFinite(estimatedTokensBefore)
-					? { estimated_tokens_before: Math.max(0, Math.round(estimatedTokensBefore)) }
+					? {
+							estimated_tokens_before: Math.max(
+								0,
+								Math.round(estimatedTokensBefore),
+							),
+						}
 					: {}),
 				...(typeof estimatedTokensAfter === "number" &&
 				Number.isFinite(estimatedTokensAfter)
-					? { estimated_tokens_after: Math.max(0, Math.round(estimatedTokensAfter)) }
+					? {
+							estimated_tokens_after: Math.max(
+								0,
+								Math.round(estimatedTokensAfter),
+							),
+						}
 					: {}),
 			};
 			yield completeEvent;
@@ -837,10 +853,10 @@ export class Agent {
 					? { seq, observer: options.modelCallObserver }
 					: undefined,
 			);
-			this.recordLlmResponse(session, seq, response);
-
-			// update usage summary with response usage
+			// Update usage summary before emitting llm.response so runtime metrics
+			// read this call's context usage instead of lagging by one call.
 			this.usageService.updateUsageSummary(response.usage);
+			this.recordLlmResponse(session, seq, response);
 
 			await this.recordOriginals(session, response.messages);
 			this.history.commitModelResponse(response);
@@ -1189,11 +1205,11 @@ export class Agent {
 			);
 			if (seq !== null && observer)
 				await observer.completed(seq, summary.usage, false);
+			// Update usage summary before emitting llm.response so runtime metrics
+			// read this call's context usage instead of lagging by one call.
+			this.usageService.updateUsageSummary(summary.usage);
 			this.recordLlmResponse(session, seq, summary);
 			await this.recordOriginals(session, summary.messages);
-
-			// update usage summary with summary usage
-			this.usageService.updateUsageSummary(summary.usage);
 
 			const { assistantTexts } = collectModelOutput(summary.messages);
 			const finalResponse = `[Max Iterations Reached]\n\n${assistantTexts.join("\n").trim()}`;

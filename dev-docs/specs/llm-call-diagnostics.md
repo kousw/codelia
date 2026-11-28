@@ -241,6 +241,7 @@ always-on structured telemetry notifications plus a read-only pull RPC:
 - Anthropic: read/create tokens map to `input_cached_tokens` and `input_cache_creation_tokens`.
 - Providers without cache metrics report `hit_state: "unknown"` unless normalized usage clearly indicates `0`.
 - Across all providers, normalized `input_tokens` equals total input tokens (uncached + cached read + cache creation); cost estimation accounts for this when subtracting cached/creation tokens from base input pricing, and sets `cost_usd: null` (`cost_basis: "unavailable"`) for non-metered OAuth routes or unknown pricing.
+- `cost_basis: "api_list"` is a standard-tier list-price estimate: it does not add fast/priority-tier surcharges, >200K long-context tier multipliers, or extended cache-TTL write multipliers. When a session mixes priced and unpriced models, cumulative `total_cost_usd` sums only calls with available pricing.
 
 ---
 

@@ -11,6 +11,8 @@ export type ToolContext = {
 	signal?: AbortSignal;
 	logger?: Logger;
 	now?: () => Date;
+	/** Optional runtime hook for reporting approval/review wait elapsed inside executeRaw. */
+	recordApprovalWaitMs?: (durationMs: number) => void;
 
 	// DI
 	deps: Record<string, unknown>;

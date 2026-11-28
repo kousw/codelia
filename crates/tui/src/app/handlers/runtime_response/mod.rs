@@ -51,13 +51,19 @@ pub(crate) fn can_auto_start_initial_message(app: &AppState) -> bool {
     handlers::can_dispatch_prompt_now(app)
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct RuntimeDrainOutcome {
+    pub(crate) needs_redraw: bool,
+    pub(crate) hit_cap: bool,
+}
+
 #[cfg(test)]
 pub(crate) fn process_runtime_messages(
     app: &mut AppState,
     rx: &RuntimeReceiver,
     tx: &mut dyn RuntimeTx,
 ) -> bool {
-    drain_runtime_messages(app, rx, tx, apply_runtime_msg)
+    drain_runtime_messages(app, rx, tx, apply_runtime_msg).needs_redraw
 }
 
 pub(crate) use apply::apply_runtime_msg;
@@ -67,7 +73,7 @@ pub(crate) fn drain_runtime_messages(
     rx: &RuntimeReceiver,
     tx: &mut dyn RuntimeTx,
     mut apply: impl FnMut(&mut AppState, crate::app::runtime::RuntimeMsg, &mut dyn RuntimeTx) -> bool,
-) -> bool {
+) -> RuntimeDrainOutcome {
     let mut needs_redraw = false;
     let mut processed = 0usize;
     while processed < MAX_RUNTIME_LINES_PER_TICK {
@@ -93,7 +99,10 @@ pub(crate) fn drain_runtime_messages(
         // Keep the UI responsive under heavy runtime output by yielding each tick.
         needs_redraw = true;
     }
-    needs_redraw
+    RuntimeDrainOutcome {
+        needs_redraw,
+        hit_cap,
+    }
 }
 
 fn handle_initialize_response(app: &mut AppState, response: RpcResponse) {

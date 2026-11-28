@@ -81,7 +81,7 @@ pub(crate) fn run_tui_loop(
     pending_initial_message: &mut Option<String>,
     wake_hub: WakeHub,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut io = ProductionIo::new(child, wake_hub);
+    let mut io = ProductionIo::new(child, wake_hub)?;
     run_loop(
         app,
         terminal_session.terminal,
@@ -94,6 +94,7 @@ pub(crate) fn run_tui_loop(
 }
 
 trait LoopIo<B: Backend> {
+    fn before_runtime_drain(&mut self) {}
     fn poll_event(
         &mut self,
         terminal: &mut Terminal<B>,
@@ -126,14 +127,16 @@ struct ProductionIo<'a> {
     wake_tx: mpsc::Sender<WakeEvent>,
     wake_rx: mpsc::Receiver<WakeEvent>,
     runtime_pending: Arc<AtomicBool>,
+    has_unread_runtime_wake: bool,
     pending_terminal: VecDeque<io::Result<Event>>,
     pending_local: VecDeque<LocalMsg>,
     input_stop: Arc<AtomicBool>,
     input_thread: Option<thread::JoinHandle<()>>,
+    clipboard_tx: Option<mpsc::Sender<String>>,
 }
 
 impl<'a> ProductionIo<'a> {
-    fn new(child: &'a mut Child, wake_hub: WakeHub) -> Self {
+    fn new(child: &'a mut Child, wake_hub: WakeHub) -> io::Result<Self> {
         let input_stop = Arc::new(AtomicBool::new(false));
         let stop_flag = Arc::clone(&input_stop);
         let input_tx = wake_hub.tx.clone();
@@ -154,18 +157,19 @@ impl<'a> ProductionIo<'a> {
                         }
                     }
                 }
-            })
-            .ok();
-        Self {
+            })?;
+        Ok(Self {
             child,
             wake_tx: wake_hub.tx,
             wake_rx: wake_hub.rx,
             runtime_pending: wake_hub.runtime_pending,
+            has_unread_runtime_wake: false,
             pending_terminal: VecDeque::new(),
             pending_local: VecDeque::new(),
             input_stop,
-            input_thread,
-        }
+            input_thread: Some(input_thread),
+            clipboard_tx: None,
+        })
     }
 
     fn drain_ready_wakes(&mut self) {
@@ -173,7 +177,10 @@ impl<'a> ProductionIo<'a> {
             match item {
                 WakeEvent::Terminal(ev) => self.pending_terminal.push_back(ev),
                 WakeEvent::Runtime => {
-                    self.runtime_pending.store(false, Ordering::Release);
+                    // Preserve the wake until the next runtime drain; clearing
+                    // `runtime_pending` here would drop wakes that arrived after
+                    // `drain_runtime_messages` finished.
+                    self.has_unread_runtime_wake = true;
                 }
                 WakeEvent::ClipboardWritten(result) => {
                     self.pending_local.push_back(LocalMsg::ClipboardWritten {
@@ -184,10 +191,45 @@ impl<'a> ProductionIo<'a> {
             }
         }
     }
+
+    fn ensure_clipboard_worker(&mut self) -> io::Result<&mpsc::Sender<String>> {
+        if self.clipboard_tx.is_none() {
+            let (tx, rx) = mpsc::channel::<String>();
+            let wake_tx = self.wake_tx.clone();
+            spawn_clipboard_worker(rx, wake_tx, |text| {
+                write_clipboard_text(text)
+                    .map(|_| text.chars().count())
+                    .map_err(|error| error.to_string())
+            })?;
+            self.clipboard_tx = Some(tx);
+        }
+        Ok(self.clipboard_tx.as_ref().expect("clipboard worker sender"))
+    }
+}
+
+fn spawn_clipboard_worker<F>(
+    rx: mpsc::Receiver<String>,
+    wake_tx: mpsc::Sender<WakeEvent>,
+    mut writer: F,
+) -> io::Result<thread::JoinHandle<()>>
+where
+    F: FnMut(&str) -> Result<usize, String> + Send + 'static,
+{
+    thread::Builder::new()
+        .name("codelia-clipboard-write".to_string())
+        .spawn(move || {
+            while let Ok(text) = rx.recv() {
+                let result = writer(&text);
+                if wake_tx.send(WakeEvent::ClipboardWritten(result)).is_err() {
+                    break;
+                }
+            }
+        })
 }
 
 impl Drop for ProductionIo<'_> {
     fn drop(&mut self) {
+        self.clipboard_tx.take();
         self.input_stop.store(true, Ordering::Release);
         if let Some(handle) = self.input_thread.take() {
             let _ = handle.join();
@@ -196,19 +238,29 @@ impl Drop for ProductionIo<'_> {
 }
 
 impl LoopIo<TerminalBackend> for ProductionIo<'_> {
+    fn before_runtime_drain(&mut self) {
+        self.runtime_pending.store(false, Ordering::Release);
+        self.has_unread_runtime_wake = false;
+    }
+
     fn poll_event(&mut self, _: &mut TuiTerminal, timeout: Duration) -> io::Result<Option<Event>> {
         if let Some(event) = self.pending_terminal.pop_front() {
             return event.map(Some);
         }
-        if self.runtime_pending.swap(false, Ordering::AcqRel) || !self.pending_local.is_empty() {
+        if self.has_unread_runtime_wake
+            || self.runtime_pending.load(Ordering::Acquire)
+            || !self.pending_local.is_empty()
+        {
+            self.has_unread_runtime_wake = false;
             return Ok(None);
+        }
+        if timeout.is_zero() {
+            self.drain_ready_wakes();
+            return self.pending_terminal.pop_front().transpose();
         }
         match self.wake_rx.recv_timeout(timeout) {
             Ok(WakeEvent::Terminal(event)) => event.map(Some),
-            Ok(WakeEvent::Runtime) => {
-                self.runtime_pending.store(false, Ordering::Release);
-                Ok(None)
-            }
+            Ok(WakeEvent::Runtime) => Ok(None),
             Ok(WakeEvent::ClipboardWritten(result)) => {
                 self.pending_local.push_back(LocalMsg::ClipboardWritten {
                     result,
@@ -252,18 +304,17 @@ impl LoopIo<TerminalBackend> for ProductionIo<'_> {
         match effect {
             Effect::SetMouseCapture(enabled) => set_mouse_capture(terminal, enabled),
             Effect::WriteClipboard { text } => {
-                let wake_tx = self.wake_tx.clone();
-                let spawn_result = thread::Builder::new()
-                    .name("codelia-clipboard-write".to_string())
-                    .spawn(move || {
-                        let result = write_clipboard_text(&text)
-                            .map(|_| text.chars().count())
-                            .map_err(|error| error.to_string());
-                        let _ = wake_tx.send(WakeEvent::ClipboardWritten(result));
+                let send_result = self
+                    .ensure_clipboard_worker()
+                    .map_err(|error| format!("clipboard worker failed: {error}"))
+                    .and_then(|tx| {
+                        tx.send(text)
+                            .map_err(|_| "clipboard worker channel closed".to_string())
                     });
-                if let Err(error) = spawn_result {
+                if let Err(error) = send_result {
+                    self.clipboard_tx = None;
                     return Some(LocalMsg::ClipboardWritten {
-                        result: Err(format!("clipboard worker failed: {error}")),
+                        result: Err(error),
                         now: self.now(),
                     });
                 }
@@ -387,14 +438,15 @@ where
     loop {
         let active_started = io.now();
         let mut active_work = false;
-        let drained = drain_runtime_messages(app, rx, tx, |app, msg, tx| {
+        io.before_runtime_drain();
+        let drain = drain_runtime_messages(app, rx, tx, |app, msg, tx| {
             let result = update(app, Msg::Runtime(msg), tx);
             let redraw = result.needs_redraw;
             let _ = state.apply(terminal, app, tx, io, result);
             redraw
         });
-        state.needs_redraw |= drained;
-        active_work |= drained;
+        state.needs_redraw |= drain.needs_redraw;
+        active_work |= drain.needs_redraw;
         let _ = state.dispatch(
             terminal,
             app,
@@ -499,21 +551,18 @@ where
 
         let mut post_poll_work = false;
         let mut post_poll_started = io.now();
-        if let Some(event) = io.poll_event(terminal, EVENT_POLL_TIMEOUT)? {
+        let poll_timeout = if drain.hit_cap {
+            Duration::ZERO
+        } else {
+            EVENT_POLL_TIMEOUT
+        };
+        if let Some(event) = io.poll_event(terminal, poll_timeout)? {
             post_poll_started = io.now();
             post_poll_work = true;
-            if crate::app::util::debug::debug_config().keys {
-                if let Event::Key(key) = &event {
-                    if key.kind == KeyEventKind::Press {
-                        let line = format!(
-                            "key: code={:?} mods={:?} kind={:?}",
-                            key.code, key.modifiers, key.kind
-                        );
-                        if !crate::app::util::debug::append_debug_file_line("tui-keys.log", &line) {
-                            app.push_line(crate::app::state::LogKind::Status, line);
-                            state.needs_redraw = true;
-                        }
-                    }
+            if let Some(line) = format_debug_key_event(app, &event) {
+                if !crate::app::util::debug::append_debug_file_line("tui-keys.log", &line) {
+                    app.push_line(crate::app::state::LogKind::Status, line);
+                    state.needs_redraw = true;
                 }
             }
             let update_choice_size_matches = !matches!(
@@ -577,6 +626,35 @@ where
     }
 
     Ok(())
+}
+
+fn format_debug_key_event(app: &AppState, event: &Event) -> Option<String> {
+    if !crate::app::util::debug::debug_config().keys {
+        return None;
+    }
+    format_key_trace_line(app, event)
+}
+
+fn format_key_trace_line(app: &AppState, event: &Event) -> Option<String> {
+    if app
+        .overlays
+        .runtime_dialogs
+        .prompt
+        .as_ref()
+        .is_some_and(|prompt| prompt.state.secret)
+    {
+        return None;
+    }
+    let Event::Key(key) = event else {
+        return None;
+    };
+    if key.kind != KeyEventKind::Press {
+        return None;
+    }
+    Some(format!(
+        "key: code={:?} mods={:?} kind={:?}",
+        key.code, key.modifiers, key.kind
+    ))
 }
 
 #[cfg(test)]

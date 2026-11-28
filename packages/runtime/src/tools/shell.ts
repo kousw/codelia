@@ -828,76 +828,90 @@ export const createShellTool = (
 			);
 			const authorize = options.authorizeShell;
 			if (!authorize) throw new Error("shell_admission_required");
-			return authorize(
-				{
-					source: command,
-					cwd,
-					stdin: stdinMode,
-					additionalWriteRoots: input.additional_write_roots,
-					escalation: input.escalation,
-					timeoutSeconds,
-					origin: getOperatorContext(ctx) ? "operator" : "parent_agent",
-					signal: ctx.signal,
-					owner: sessionContext?.sessionId ?? undefined,
-					reviewHistory: input.approval_context,
-				},
-				async (admission) => {
-					try {
-						const taskId = crypto.randomUUID();
-						const taskKey = await buildShellTaskKey(
-							shared.tasks,
-							taskId,
-							label,
-						);
-						const task = await shared.tasks.spawn(
-							{
-								task_id: taskId,
-								kind: "shell",
-								workspace_mode: "live_workspace",
-								key: taskKey,
+			const approvalStartedAt = performance.now();
+			let approvalRecorded = false;
+			const recordApprovalWait = () => {
+				if (approvalRecorded) return;
+				approvalRecorded = true;
+				ctx.recordApprovalWaitMs?.(
+					Math.max(0, performance.now() - approvalStartedAt),
+				);
+			};
+			try {
+				return await authorize(
+					{
+						source: command,
+						cwd,
+						stdin: stdinMode,
+						additionalWriteRoots: input.additional_write_roots,
+						escalation: input.escalation,
+						timeoutSeconds,
+						origin: getOperatorContext(ctx) ? "operator" : "parent_agent",
+						signal: ctx.signal,
+						owner: sessionContext?.sessionId ?? undefined,
+						reviewHistory: input.approval_context,
+					},
+					async (admission) => {
+						recordApprovalWait();
+						try {
+							const taskId = crypto.randomUUID();
+							const taskKey = await buildShellTaskKey(
+								shared.tasks,
+								taskId,
 								label,
-								title: commandSummary,
-								working_directory: cwd,
-								parent_session_id: sessionContext?.sessionId ?? undefined,
-							},
-							({ task }) =>
-								startShellTask({
-									taskId: task.task_id,
-									command,
-									cwd,
-									timeoutSeconds,
-									toolName: "shell",
-									spawnProcess: () => admission(task.task_id),
-									outputCache: shared.outputCacheStore,
-									stdinMode,
-								}),
-						);
-						if (detachedWait) {
-							return shellStatusPayload(task, { detachedWait: true });
+							);
+							const task = await shared.tasks.spawn(
+								{
+									task_id: taskId,
+									kind: "shell",
+									workspace_mode: "live_workspace",
+									key: taskKey,
+									label,
+									title: commandSummary,
+									working_directory: cwd,
+									parent_session_id: sessionContext?.sessionId ?? undefined,
+								},
+								({ task }) =>
+									startShellTask({
+										taskId: task.task_id,
+										command,
+										cwd,
+										timeoutSeconds,
+										toolName: "shell",
+										spawnProcess: () => admission(task.task_id),
+										outputCache: shared.outputCacheStore,
+										stdinMode,
+									}),
+							);
+							if (detachedWait) {
+								return shellStatusPayload(task, { detachedWait: true });
+							}
+							const settled = await waitForForegroundRun(
+								shared.tasks,
+								task.task_id,
+								ctx.signal,
+							);
+							debugLog(
+								`shell.done task_id=${task.task_id} state=${settled.state} duration_ms=${settled.result?.duration_ms ?? -1}`,
+							);
+							return shellTerminalPayload(settled, {
+								includeStderrOnSuccess: input.include_stderr_on_success,
+								confinedMode:
+									options.canEscalate !== false &&
+									input.escalation === undefined &&
+									sandbox.sandboxMode !== undefined &&
+									sandbox.sandboxMode !== "full-access"
+										? sandbox.sandboxMode
+										: undefined,
+							});
+						} catch (error) {
+							throw formatTaskError(error);
 						}
-						const settled = await waitForForegroundRun(
-							shared.tasks,
-							task.task_id,
-							ctx.signal,
-						);
-						debugLog(
-							`shell.done task_id=${task.task_id} state=${settled.state} duration_ms=${settled.result?.duration_ms ?? -1}`,
-						);
-						return shellTerminalPayload(settled, {
-							includeStderrOnSuccess: input.include_stderr_on_success,
-							confinedMode:
-								options.canEscalate !== false &&
-								input.escalation === undefined &&
-								sandbox.sandboxMode !== undefined &&
-								sandbox.sandboxMode !== "full-access"
-									? sandbox.sandboxMode
-									: undefined,
-						});
-					} catch (error) {
-						throw formatTaskError(error);
-					}
-				},
-			);
+					},
+				);
+			} finally {
+				recordApprovalWait();
+			}
 		},
 	});
 };

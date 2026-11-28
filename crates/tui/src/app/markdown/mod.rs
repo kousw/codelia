@@ -13,28 +13,36 @@ use language_aliases::language_aliases;
 
 struct HighlightAssets {
     syntax_set: SyntaxSet,
-    theme: Theme,
+    theme_set: ThemeSet,
 }
 
-// NOTE: syntect highlight assets are intentionally initialized once per process.
-// Theme changes applied at runtime update UI colors immediately, but syntect code
-// highlighting stays on the initially loaded theme until TUI restart.
-static HIGHLIGHT_ASSETS: OnceLock<Option<HighlightAssets>> = OnceLock::new();
+// syntect syntax definitions and built-in themes are loaded once per process;
+// the active theme is resolved dynamically on render so startup config and
+// runtime `/theme` changes take effect immediately even after background warmup.
+static HIGHLIGHT_ASSETS: OnceLock<HighlightAssets> = OnceLock::new();
 
-fn highlight_assets() -> Option<&'static HighlightAssets> {
-    HIGHLIGHT_ASSETS
-        .get_or_init(|| {
-            let syntax_set = SyntaxSet::load_defaults_newlines();
-            let theme_set = ThemeSet::load_defaults();
-            let theme = theme_set
-                .themes
-                .get(syntect_theme_name())
-                .cloned()
-                .or_else(|| theme_set.themes.get(syntect_fallback_theme_name()).cloned())
-                .or_else(|| theme_set.themes.values().next().cloned())?;
-            Some(HighlightAssets { syntax_set, theme })
-        })
-        .as_ref()
+fn highlight_assets() -> &'static HighlightAssets {
+    HIGHLIGHT_ASSETS.get_or_init(|| HighlightAssets {
+        syntax_set: SyntaxSet::load_defaults_newlines(),
+        theme_set: ThemeSet::load_defaults(),
+    })
+}
+
+fn resolve_highlight_theme(
+    assets: &'static HighlightAssets,
+    preferred: &str,
+    fallback: &str,
+) -> Option<&'static Theme> {
+    assets
+        .theme_set
+        .themes
+        .get(preferred)
+        .or_else(|| assets.theme_set.themes.get(fallback))
+        .or_else(|| assets.theme_set.themes.values().next())
+}
+
+fn active_highlight_theme(assets: &'static HighlightAssets) -> Option<&'static Theme> {
+    resolve_highlight_theme(assets, syntect_theme_name(), syntect_fallback_theme_name())
 }
 
 /// Pre-warms syntect syntax & theme assets on a background thread so the first
@@ -137,9 +145,10 @@ pub(crate) fn highlight_code_line(
     kind: LogKind,
     tone: LogTone,
 ) -> Option<Vec<LogSpan>> {
-    let assets = highlight_assets()?;
+    let assets = highlight_assets();
+    let theme = active_highlight_theme(assets)?;
     let syntax = syntax_for_language(&assets.syntax_set, language);
-    let mut highlighter = HighlightLines::new(syntax, &assets.theme);
+    let mut highlighter = HighlightLines::new(syntax, theme);
     let ranges = highlighter.highlight_line(line, &assets.syntax_set).ok()?;
 
     if ranges.is_empty() {
@@ -220,9 +229,10 @@ fn render_plain_code_lines(lines: &[String]) -> Vec<LogLine> {
 }
 
 fn render_highlighted_code_lines(lines: &[String], language: Option<&str>) -> Option<Vec<LogLine>> {
-    let assets = highlight_assets()?;
+    let assets = highlight_assets();
+    let theme = active_highlight_theme(assets)?;
     let syntax = syntax_for_language(&assets.syntax_set, language);
-    let mut highlighter = HighlightLines::new(syntax, &assets.theme);
+    let mut highlighter = HighlightLines::new(syntax, theme);
 
     let mut rendered = Vec::with_capacity(lines.len());
     for line in lines {
@@ -276,20 +286,20 @@ fn render_code_block_lines(lines: &[String], language: Option<&str>) -> Vec<LogL
 
 fn highlight_code_line_with_state(
     line: &str,
-    state: &mut Option<(ParseState, HighlightState)>,
+    state: &mut Option<(ParseState, HighlightState, &'static Theme)>,
 ) -> LogLine {
     if line.is_empty() {
         return LogLine::new(LogKind::AssistantCode, "");
     }
-    let (Some(assets), Some((parse_state, highlight_state))) = (highlight_assets(), state.as_mut())
-    else {
+    let Some((parse_state, highlight_state, theme)) = state.as_mut() else {
         return LogLine::new(LogKind::AssistantCode, line.to_string());
     };
+    let assets = highlight_assets();
     let line_with_newline = format!("{line}\n");
     let Ok(ops) = parse_state.parse_line(&line_with_newline, &assets.syntax_set) else {
         return LogLine::new(LogKind::AssistantCode, line.to_string());
     };
-    let highlighter = Highlighter::new(&assets.theme);
+    let highlighter = Highlighter::new(theme);
     let spans = HighlightIterator::new(highlight_state, &ops[..], &line_with_newline, &highlighter)
         .filter_map(|(style, text)| {
             let text = text.strip_suffix('\n').unwrap_or(text);
@@ -315,13 +325,16 @@ fn highlight_code_line_with_state(
     }
 }
 
-fn init_code_highlight_state(language: Option<&str>) -> Option<(ParseState, HighlightState)> {
-    let assets = highlight_assets()?;
+fn init_code_highlight_state(
+    language: Option<&str>,
+) -> Option<(ParseState, HighlightState, &'static Theme)> {
+    let assets = highlight_assets();
+    let theme = active_highlight_theme(assets)?;
     let syntax = syntax_for_language(&assets.syntax_set, language);
-    let highlighter = Highlighter::new(&assets.theme);
+    let highlighter = Highlighter::new(theme);
     let highlight_state = HighlightState::new(&highlighter, ScopeStack::new());
     let parse_state = ParseState::new(syntax);
-    Some((parse_state, highlight_state))
+    Some((parse_state, highlight_state, theme))
 }
 
 pub(crate) fn render_markdown_single_line(raw: &str) -> LogLine {
@@ -368,7 +381,7 @@ pub(crate) struct IncrementalMarkdownState {
     committed_lines: Vec<LogLine>,
     committed_line_end_bytes: Vec<usize>,
     in_code_block: bool,
-    code_state: Option<(ParseState, HighlightState)>,
+    code_state: Option<(ParseState, HighlightState, &'static Theme)>,
 }
 
 impl std::fmt::Debug for IncrementalMarkdownState {
@@ -575,14 +588,14 @@ mod tests {
 
     #[test]
     fn ts_token_resolves_non_plain_syntax() {
-        let assets = highlight_assets().expect("highlight assets");
+        let assets = highlight_assets();
         let syntax = syntax_for_language(&assets.syntax_set, Some("ts"));
         assert_ne!(syntax.name, "Plain Text");
     }
 
     #[test]
     fn typescript_prefers_non_plain_syntax_over_plain_text_token_match() {
-        let assets = highlight_assets().expect("highlight assets");
+        let assets = highlight_assets();
         let syntax = syntax_for_language(&assets.syntax_set, Some("typescript"));
         assert_ne!(syntax.name, "Plain Text");
     }
@@ -763,5 +776,38 @@ mod tests {
         assert_eq!(palette.heading, LogColor::rgb(176, 122, 143));
         assert_eq!(palette.bold, LogColor::rgb(199, 154, 170));
         assert_eq!(palette.inline_code, LogColor::rgb(187, 178, 202));
+    }
+
+    #[test]
+    fn highlight_assets_resolves_theme_dynamically_after_warmup() {
+        use super::{resolve_highlight_theme, HighlightLines};
+
+        let assets = highlight_assets();
+        let solarized = resolve_highlight_theme(assets, "Solarized (dark)", "Solarized (dark)")
+            .expect("solarized dark theme");
+        let ocean = resolve_highlight_theme(assets, "base16-ocean.dark", "Solarized (dark)")
+            .expect("ocean dark theme");
+        assert!(!std::ptr::eq(solarized, ocean));
+
+        let syntax = syntax_for_language(&assets.syntax_set, Some("rust"));
+        let sample = "let answer: usize = 42;\n";
+        let solarized_ranges = HighlightLines::new(syntax, solarized)
+            .highlight_line(sample, &assets.syntax_set)
+            .expect("solarized highlight");
+        let ocean_ranges = HighlightLines::new(syntax, ocean)
+            .highlight_line(sample, &assets.syntax_set)
+            .expect("ocean highlight");
+        let fg_of = |ranges: Vec<(syntect::highlighting::Style, &str)>| {
+            ranges
+                .into_iter()
+                .map(|(style, text)| {
+                    (
+                        text.to_string(),
+                        (style.foreground.r, style.foreground.g, style.foreground.b),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_ne!(fg_of(solarized_ranges), fg_of(ocean_ranges));
     }
 }
