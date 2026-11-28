@@ -97,6 +97,7 @@ codelia mcp auth set my-server --access-token <token>
 codelia mcp auth clear my-server
 ```
 
+`codelia mcp auth set` reuses the configured HTTP server `url` when `my-server` has one defined; otherwise pass `--url <server-url>` (see [`reference/cli.md#mcp-auth`](./reference/cli.md#mcp-auth)).
 For HTTP servers, `codelia mcp test` automatically uses a stored bearer token when one exists for that server id.
 
 ## TUI usage

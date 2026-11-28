@@ -11,7 +11,7 @@ Codelia では、**コマンドが起動した後にできること**をサン�
 | モード | シェルとその子プロセスの実効範囲 |
 | --- | --- |
 | `readonly` | 通常のローカルファイルを参照できる。作業ツリーは読み取り専用。実行用の一時領域を利用できる。直接通信は遮断 |
-| `workspace-write`（旧 `trusted`） | 指定した作業ツリーと一時領域に書き込める。通常のローカルファイルはツリー外も参照できる。Codelia の認証・権限設定への書き込みと、外部への直接通信を制限する |
+| `workspace-write`（旧 `trusted`） | 指定した作業ツリーと一時領域に書き込める。通常のローカルファイルはツリー外も参照できる。Codelia の認証情報の読み書きと権限設定への書き込み、外部への直接通信を制限する |
 | `full-access` | **OS サンドボックスを外す。** 起動したシェルと子孫はログインユーザーのファイル・ネットワーク権限で動く。認証ファイルや Codelia の設定にもアクセスし得る。管理者への昇格は行わない。起動前には選択した承認ポリシーを適用する |
 
 ```sh
@@ -28,11 +28,11 @@ codelia --sandbox-mode full-access
 
 作業ツリーはライブ編集される。テストが途中で失敗しても、それまでに書いた変更は残り得る。`workspace-write` で既存の通常ファイルのハードリンクを直接編集すると、ツリー外の別名からも変更が見える。読み取り専用モードでソースの変更を要求した場合は、ユーザーがコマンドを承認しても、そのモードの書き込み制限が適用される。
 
-組み込みの編集ツールからは、作業ツリーの Git 管理データと `.codelia/` を読み取り専用にする。隔離シェルでは `.codelia/` は読み取り専用のまま、ローカル TUI ホストで未作成パスの拒否を強制できるバックエンド（現在は macOS Seatbelt / MXC）の `workspace-write` 開発用コマンドに限り、ワークスペース直下に `.git` を持つリポジトリに対する通常のローカル Git 操作（`git add`、`commit`、`switch`、`stash` など）ができる。Git ディレクトリ（逆参照を検証済みの linked worktree ではそのメタデータと作業ツリー外の共通ディレクトリ）が書き込み可能になり、親リポジトリやサブディレクトリ内の `.git` ポインタは読み取り専用のまま残る。さらに、後でサンドボックス外の Git に別の場所を参照させたりコードを実行させたりできる項目は、まだ存在しないもの・多段シンボリックリンクの中間リンクと実体・既存設定の `include.path` / `includeIf.*.path` / `core.hooksPath` の参照先も含めて読み取り専用のまま残す。対象は `config`、`config.worktree`、`hooks/`、`commondir`、`gitdir`、`objects/info/alternates`、`remotes/`、`branches/`、`modules/`、`rebase-merge/`、`rebase-apply/`、`sequencer/`、既存の linked worktree の参照ファイル・リベース状態、linked worktree 自身の `.git` ファイル。設定の構文を安全に解釈できない場合やシンボリックリンク循環がある場合は安全側へ倒し `.git` 全体を読み取り専用に保つ。これら保護項目への書き込みが必要な操作（設定変更、`git rebase`、`git push -u`、上流ブランチの設定、サブモジュール）、通信を伴う Git 操作、エージェントのソケットを使うコミット署名には昇格が要る。ブランチや履歴は対象バックエンドではサンドボックスで守られず、隔離内のコマンドでも ref を移動・削除できる。明示 opt-in のない SDK ホストや未作成パスの拒否を持たないバックエンド（現在の Linux MXC Bubblewrap / Linux gVisor）では `.git` 全体を読み取り専用のまま維持するため、ローカルのコミットにも昇格を使う。隔離シェルは TTY が必要なテスト向けに疑似端末を確保できる。macOS では隔離内で作った端末だけを読み書きでき、既存の端末には制御呼び出しだけを許す。隔離シェルの HOME はログインユーザーのもの（既存の許可の外は読み取り専用）で、`TMPDIR` と `XDG_CACHE_HOME` は専用の一時領域。Codelia 本体は管理操作に必要な状態を保存できる。Codelia 自身の認証ファイルも、非公開に指定しなければ OS がユーザーに許す範囲で読める。
+組み込みの編集ツールからは、作業ツリーの Git 管理データと `.codelia/` を読み取り専用にする。隔離シェルでは `.codelia/` は読み取り専用のまま、ローカル TUI ホストで未作成パスの拒否を強制できるバックエンド（現在は macOS Seatbelt / MXC）の `workspace-write` 開発用コマンドに限り、ワークスペース直下に `.git` を持つリポジトリに対する通常のローカル Git 操作（`git add`、`commit`、`switch`、`stash` など）ができる。Git ディレクトリ（逆参照を検証済みの linked worktree ではそのメタデータと作業ツリー外の共通ディレクトリ）が書き込み可能になり、親リポジトリやサブディレクトリ内の `.git` ポインタは読み取り専用のまま残る。さらに、後でサンドボックス外の Git に別の場所を参照させたりコードを実行させたりできる項目は、まだ存在しないもの・多段シンボリックリンクの中間リンクと実体・既存設定の `include.path` / `includeIf.*.path` / `core.hooksPath` の参照先も含めて読み取り専用のまま残す。対象は `config`、`config.worktree`、`hooks/`、`commondir`、`gitdir`、`objects/info/alternates`、`remotes/`、`branches/`、`modules/`、`rebase-merge/`、`rebase-apply/`、`sequencer/`、既存の linked worktree の参照ファイル・リベース状態、linked worktree 自身の `.git` ファイル。設定の構文を安全に解釈できない場合やシンボリックリンク循環がある場合は安全側へ倒し `.git` 全体を読み取り専用に保つ。これら保護項目への書き込みが必要な操作（設定変更、`git rebase`、`git push -u`、上流ブランチの設定、サブモジュール）、通信を伴う Git 操作、エージェントのソケットを使うコミット署名には昇格が要る。ブランチや履歴は対象バックエンドではサンドボックスで守られず、隔離内のコマンドでも ref を移動・削除できる。明示 opt-in のない SDK ホストや未作成パスの拒否を持たないバックエンド（現在の Linux MXC Bubblewrap / Linux gVisor）では `.git` 全体を読み取り専用のまま維持するため、ローカルのコミットにも昇格を使う。隔離シェルは TTY が必要なテスト向けに疑似端末を確保できる。macOS では隔離内で作った端末だけを読み書きでき、既存の端末には制御呼び出しだけを許す。隔離シェルの HOME はログインユーザーのもの（既存の許可の外は読み取り専用）で、`TMPDIR` と `XDG_CACHE_HOME` は専用の一時領域。Codelia 本体は管理操作に必要な状態を保存できる。
 
 ### 読ませたくないファイルを指定する
 
-ローカルの通常ファイルはプロジェクト外も含めて原則読み取り可。ワークスペースの `.env` も、ホームにある各種ツールの設定も、名前を理由に一律に隠すことはない。隔離時に読ませたくないファイル・ディレクトリはユーザー所有の `projects.json` に絶対パスで指定する。たとえば次の設定は一つのディレクトリを全プロジェクトで非公開にする。
+ローカルの通常ファイルはプロジェクト外も含めて原則読み取り可。ワークスペースの `.env` も、ホームにある各種ツールの設定も、名前を理由に一律に隠すことはない。ただし Codelia 自身の認証ディレクトリ（`~/.codelia/credentials/`、および `CODELIA_LAYOUT=xdg` 時の `$XDG_CONFIG_HOME/codelia/credentials/`、ならびに旧 `auth.json` / `mcp-auth.json`）は、隔離モードと組み込みファイルツールの双方で既定により読み書きから保護される。隔離時に読ませたくない他のファイル・ディレクトリはユーザー所有の `projects.json` に絶対パスで指定する。たとえば次の設定は一つのディレクトリを全プロジェクトで非公開にする。
 
 ```json
 {
@@ -61,7 +61,7 @@ Codelia を起動した環境の `PATH` をコマンドに渡す。SDK ホスト
 | Linux | 既定は同梱の MXC Rust ヘルパー経由の Bubblewrap（`bwrap >= 0.5.0`、root 所有の `bwrap` とシステム `sh` を検証、非特権 user namespace、隔離ネットワーク、seccomp、専用 `/tmp`・`/run`、x64 / arm64）。`CODELIA_LINUX_SHELL_BACKEND=gvisor` で rootless gVisor `runsc bwrap` へ切り替え可能（未定義値は fail-closed）。読み取り範囲はシステム標準領域と既存の `/home`・`/opt`・`/srv`・`/mnt`・`/media`・`/nix/store`・`/usr/local`・`/usr/include`・`/var/cache` に限り、`/`・`/run`・`/var/run`・`/var/lib`・`/nix/var`・ホスト `/tmp` はマウントしない（`/tmp` 全体の write root 指定も拒否）。ただし `~` 配下など bind マウント内に置かれたパス名 Unix ドメインソケット（例: `~/.docker/desktop/docker.sock`、`~/.1password/agent.sock` 等）には `connect(2)` が通り得るため、遮断したい場合はソケットまたは親ディレクトリを `protected_paths` でマスクするか gVisor を選ぶ。両方式とも未作成の保護パスや必要な分離を提供できないホストでは起動を拒否する |
 | Windows | ネイティブの MXC ProcessContainer を評価中。Codelia が要求する許可に加え、Windows が既存 ACL で許すファイルや IPC がある。実機で確認済みの標準構成がない間は、対応する SDK バックエンドが必要。ローカル TUI は利用できない理由を表示する |
 
-macOS の標準ローカル `workspace-write` では、Git オブジェクトを共有する clone でもソースを編集し、開発シェルでテストできる。Git 管理パスは読み取り専用。共有された Git ファイル自体をシェルから既存の書き込み可能な別名で編集すると、元リポジトリにも影響する。組み込みの編集ツールは書き込み先が Git 管理データの別名なら拒否する。Linux・Windows の隔離下で新規作成・移動・削除を使うには、それぞれ対応する実行基盤が必要になる。
+macOS の標準ローカル `workspace-write` では、Git オブジェクトを共有する clone でもソースを編集し、開発シェルでテストできる。保護対象の Git 設定・リダイレクト用エントリは読み取り専用。共有された Git ファイル自体をシェルから既存の書き込み可能な別名で編集すると、元リポジトリにも影響する。組み込みの編集ツールは書き込み先が Git 管理データの別名なら拒否する。Linux・Windows の隔離下で新規作成・移動・削除を使うには、それぞれ対応する実行基盤が必要になる。
 
 ローカルで MXC を選ぶには、エージェントが編集できる作業ツリーの外にヘルパーをインストールする。CLI のグローバルインストールがその一例。ツリー内の依存パッケージとしてしか見つからない場合、隔離シェルは起動前に停止する。明示した `full-access` ではローカルシェルをユーザー権限で起動する。[Windows の実機評価手順と対応状況](../dev-docs/specs/windows-mxc-qualification.md)・[Windows MXC のポリシー仕様](https://github.com/microsoft/mxc/blob/v1.1.0/docs/schema.md)
 
@@ -142,7 +142,7 @@ TUI の `/permissions list` で保存済みルールを確認し、`/permissions
 
 選択の優先順位は **CLI → 環境変数 → プロジェクト個別値 → 全体既定 → 組み込み既定**。同じ層に旧指定と新指定があれば新指定を使う。CLI や環境変数の指定を変えるには再起動する。対応する GUI は、上位の指定がないとき、アイドル中にそのワークスペースの設定を変更できる。次の run から有効になる。
 
-- 旧 `--approval-mode trusted` や `CODELIA_APPROVAL_MODE=trusted` を指定していた起動では、その起動中の共有 allow も有効になる。新しい `--sandbox-mode workspace-write` だけに変更した場合は、必要なプロジェクトで一度 `/permissions trust` を選ぶ。
+- `projects.json` に旧 `approval_mode: "trusted"` が保存されていれば、`--sandbox-mode workspace-write` を指定しても共有 allow の信頼は引き継がれる（明示した `trust_project_allows` が優先。なお `--approval-mode` と `CODELIA_APPROVAL_MODE` は廃止済み）。信頼のない新規プロジェクトで `workspace-write` を選んだだけでは共有 allow は有効にならず、必要な場合は `/permissions trust` を実行する。 <!-- check-docs:allow-retired-env -->
 - ユーザーの `projects.json` は `projects["<プロジェクトの実体パス>"].sandbox_mode` または `default.sandbox_mode` を使う。標準は `~/.codelia/projects.json`。XDG レイアウトでは `$XDG_CONFIG_HOME/codelia/projects.json`、未指定時は `~/.config/codelia/projects.json`。リポジトリ内の設定からこの権限を引き上げることはできない。
 - 例として、全体既定が旧 `minimal` でも、対象プロジェクトの旧 `trusted` が優先されて `workspace-write` になる。そのプロジェクトに新旧両方の値を残して `sandbox_mode: "readonly"` と指定すると、`readonly` を選ぶ。
 - 旧 `permissions.allow` と `permissions.deny` は設定ファイルに残したまま使用できる。新しい `workspace-write` を単独で選んだ場合は、共有設定の信頼をユーザーが選ぶ。以前のテスト専用 Auto approve は、対象が広がるため設定を選び直す。
@@ -158,6 +158,5 @@ TUI の `/permissions list` で保存済みルールを確認し、`/permissions
 | Auto approve を選んだのに確認画面が開く | 現在のワークスペースの設定、実効モード、追加の書き込み先や stdin などを確認する。選択したモデルの認証状態は、隔離内の自動起動とは独立して表示する |
 | 審査のエラーが返り、確認画面が開かない | 有効な対話 UI があるか、要求が失効していないかを確認する。強制ルールによる拒否はその場で終了する。対話できない経路ではコマンドは未実行で、通信失敗・応答形式などの診断が返る。ファイル調査なら `read` や `read_line` で続けられる |
 | `legacy_deny_rule` または `deny_rule_unverifiable` | 前者は明示した禁止に一致した。後者は、そのシェルに適用される禁止ルールを評価しきれなかった。いずれも起動前に止まる |
-| 明示した旧 `trusted` だけを理由に `legacy_approval_mode (project)` になる | これは改修途中の旧 runtime の挙動。実際に TUI が起動している runtime と起動引数を確認する |
 
 [実行基盤と承認の設計仕様](../dev-docs/specs/command-approval-and-auto-review.md)・[provider と送信データ](./command-approval.md)

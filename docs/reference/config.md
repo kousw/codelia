@@ -32,7 +32,7 @@ Codelia resolves effective config as:
 - global config
 - project config
 
-When the same field appears in both global and project config, the project value wins.
+When the same field appears in both global and project config, the project value wins (except global-only settings such as `auth.storage` and `update.*`, which read only the global config).
 
 For list-like permission rules, allow/deny entries are combined rather than replaced.
 For MCP servers, project servers override global servers with the same server id.
@@ -44,7 +44,7 @@ For MCP servers, project servers override global servers with the same server id
   "version": 1,
   "model": {
     "provider": "openai",
-    "name": "gpt-5.2-codex",
+    "name": "gpt-5.6",
     "reasoning": "medium",
     "verbosity": "medium",
     "fast": true
@@ -66,7 +66,7 @@ Choose the default model used by the runtime.
   "version": 1,
   "model": {
     "provider": "openai",
-    "name": "gpt-5.2-codex",
+    "name": "gpt-5.6",
     "reasoning": "medium",
     "verbosity": "medium",
     "fast": true
@@ -79,7 +79,7 @@ Fields:
 - `name`
 - `reasoning` accepts `low`, `medium`, `high`, `xhigh`, or `max`; runtime falls back to the nearest lower level when the selected model does not support the requested effort.
 - `verbosity`
-- `fast` enables provider-specific fast mode only when the selected model declares fast support; unsupported models behave as if fast is disabled.
+- `fast` accepts `false` (default), `true` (silently behaves as disabled on unsupported models), or `"ultrafast"` (validated at model construction; errors on non-OpenAI or unsupported models).
 
 ### `subagent`
 
@@ -283,19 +283,99 @@ still preserved.
 
 ### `tui`
 
-Current supported user-facing key:
+Supported keys:
 
 ```json
 {
   "version": 1,
   "tui": {
-    "theme": "forest"
+    "theme": "forest",
+    "color_scheme": "dark",
+    "image_protocol": "halfblocks"
   }
 }
 ```
 
-At startup, a configured TUI theme overrides the default theme selection.
-See [`../themes.md`](../themes.md) for the supported theme names and `/theme` workflow.
+- `theme`: built-in theme name (see [`../themes.md`](../themes.md))
+- `color_scheme`: `"dark"` (default) or `"light"` (overridden per launch by `--color-scheme`)
+- `image_protocol`: `"halfblocks"` (default) or `"kitty"` (overridden per launch by `--image-protocol`)
+
+### `auth`
+
+Configure credential storage and OAuth browser launch behavior:
+
+```json
+{
+  "version": 1,
+  "auth": {
+    "storage": "auto",
+    "oauth_browser": "auto"
+  }
+}
+```
+
+- `storage`: `"auto"` (default), `"keyring"`, or `"file"` — global `config.json` only (can also be overridden via `CODELIA_AUTH_STORAGE`)
+- `oauth_browser`: `"auto"` or `"manual"` (defaults to manual over SSH)
+
+### `agents`
+
+Control `AGENTS.md` hierarchy discovery (enabled by default):
+
+```json
+{
+  "version": 1,
+  "agents": {
+    "enabled": true
+  }
+}
+```
+
+### `update`
+
+Global-only CLI self-update settings (project config is ignored):
+
+```json
+{
+  "version": 1,
+  "update": {
+    "mode": "notify",
+    "channel": "latest"
+  }
+}
+```
+
+- `mode`: `"notify"` (default), `"auto"`, or `"off"` (can be overridden by `CODELIA_AUTO_UPDATE`)
+- `channel`: npm dist-tag to follow (inferred from the running version when omitted)
+
+Note: `codelia update` and launcher checks read the standard global `config.json` (ignoring `CODELIA_CONFIG_PATH`), whereas `auth.storage` respects `CODELIA_CONFIG_PATH`.
+
+### `execution_environment`
+
+Configure lightweight startup probes captured into the initial execution-environment context:
+
+```json
+{
+  "version": 1,
+  "execution_environment": {
+    "startup_checks": {
+      "enabled": true,
+      "mode": "append",
+      "commands": [["node", "--version"]],
+      "timeout_ms": 10000
+    }
+  }
+}
+```
+
+- `startup_checks.enabled`: boolean (default `true`)
+- `startup_checks.mode`: `"append"` (default; keeps built-in `["rg", "--version"]` plus `commands`) or `"replace"`. When project config sets `mode: "append"` explicitly alongside `commands`, project `commands` are concatenated after global `commands` (keeping built-in `["rg", "--version"]`). When project config sets only `commands`, project `commands` replace global `commands` while inheriting the effective `mode` (if global sets `"replace"` and project omits `mode`, `"replace"` stays in effect and built-in `["rg", "--version"]` is omitted; when effective `mode` is `"append"`, built-in `["rg", "--version"]` is preserved).
+- `startup_checks.commands`: array of `[program, ...args]`
+- `startup_checks.timeout_ms`: per-command timeout in milliseconds (default `10000`)
+
+### `providers` & `image_generation`
+
+- Custom named HTTP Responses endpoints are configured under `providers.<name>` — see [`../responses-providers.md`](../responses-providers.md).
+- Image generation routing and provider options are configured under `image_generation` — see [`../image-generation.md`](../image-generation.md).
 
 ## Legacy approval policy
 

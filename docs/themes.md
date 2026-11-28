@@ -28,9 +28,9 @@ The current built-in theme names are:
 | `crimson` | rich red accents | `crimson-mist`, `crimsonmist` |
 | `wine` | wine-magenta accents | `wine-steel`, `winesteel` |
 
-## Config and environment
+## Config and CLI options
 
-You can also choose the startup theme outside the picker.
+You can also choose the startup theme and color scheme outside the picker.
 
 Config example:
 
@@ -38,20 +38,21 @@ Config example:
 {
   "version": 1,
   "tui": {
-    "theme": "forest"
+    "theme": "forest",
+    "color_scheme": "dark"
   }
 }
 ```
 
-Environment example:
+CLI flag example for terminal background scheme:
 
 ```sh
-CODELIA_TUI_THEME=ocean codelia
+codelia --color-scheme light
 ```
 
 Notes:
-- `CODELIA_TUI_MARKDOWN_THEME` is still read as a legacy/fallback env var.
-- At startup, a configured `tui.theme` overrides the env/default theme selection.
+- `tui.color_scheme` accepts `"dark"` (default) or `"light"` to adjust accent contrast for light terminal backgrounds; `--color-scheme` overrides `tui.color_scheme` for that launch.
+- At startup, a configured `tui.theme` overrides the default theme selection.
 
 ## Where theme changes are saved
 

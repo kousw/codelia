@@ -57,15 +57,12 @@ Codex OAuth access to 2.6 have not been live-verified.
 
 The custom Google route uses the Gemini Interactions API with `store=false`.
 Select `gemini-nano-banana-2.1` (general generation and reference editing),
-`gemini-3.1-flash-lite-image` (1K only), or `gemini-3-pro-image` (1K/2K/4K). The
-picker offers Google's default output format or explicit JPEG; an explicit PNG
-request is rejected. Google selections are not silently replaced with another
-model or provider.
-
-Google image generation and 1K Flash Lite generation passed live smoke on
-November 2, 2026. Explicit JPEG worked; an explicit PNG request returned HTTP 400,
-so PNG output selection is not offered while returned PNG originals remain
-supported. Edit quality and additional model access remain **UNVERIFIED**.
+`gemini-3.1-flash-lite-image` (1K only), or `gemini-3-pro-image` (1K/2K/4K). Codelia
+validates `output_format` to accept only `"jpeg"` or Google's default (omitted)
+because the upstream API rejects explicit PNG output selection, while returned
+PNG and JPEG originals are both accepted. Google selections are not silently
+replaced with another model or provider. Google edit quality and broader model
+access remain unverified against live APIs.
 
 ## Configuration and authentication
 
@@ -90,8 +87,8 @@ scope. Example with a separately named environment key:
 `api_key_env` selects that variable exclusively. Without it, image credentials
 resolve from a stored API key, then the standard provider environment variable.
 OAuth is never used for custom images. Literal keys, arbitrary URLs, headers and
-unknown provider options are rejected. There is no separate image-key entry UI
-or stored OAuth/API-key coexistence migration yet.
+unknown provider options are rejected. Stored OAuth and API-key credentials for
+the same provider can coexist, though there is no separate image-key entry UI.
 
 For `provider: "google"`, `provider_options.google` accepts `image_size`
 (`1K`, `2K`, or `4K`), `aspect_ratio` (for example `1:1` or `16:9`), and
@@ -177,11 +174,8 @@ guaranteeing server-side cache hits.
   are transient, not embedded into permanent terminal history. Default rendering
   uses colored halfblocks; native terminal visual quality still needs manual
   confirmation.
-- Automated tests cover the real tools, runtime configuration/RPC, immutable
-  files, history/model input and TUI transport with mocked HTTP. On September 13,
-  2026, a user-approved Codex OAuth request for `gpt-image-2` also passed real
-  generation, original save/reload and model-image-input restoration. The server
-  did not report an effective model. OpenAI live editing and public API-key
-  generation remain **UNVERIFIED**; the Google checks above are separate. See the
-  gated one-request commands in the
+- Automated tests cover the tools, runtime configuration/RPC, immutable
+  files, history/model input and TUI transport with mocked HTTP. OpenAI live
+  editing and public API-key generation remain unverified against live APIs;
+  see the gated live test commands in
   [implementation and verification notes](../dev-docs/specs/image-generation.md#12-implemented-codex-oauth-builtin).

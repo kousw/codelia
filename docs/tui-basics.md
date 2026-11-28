@@ -14,11 +14,15 @@ A typical session looks like this:
 6. Resume later with `codelia --resume`
 
 The status line shows `TPS: 42.1` after a model response finishes. It uses the
-provider's output token count and the time from the first output chunk to stream
-completion, excluding the initial wait. The latest call's value stays visible
-after the run and resets on the next run. No diagnostics flag is needed; if
-timing or token usage is unavailable, TPS is hidden. Hidden reasoning and stream
-buffering can affect comparisons between models.
+provider's output token count and the time from the earlier of observed reasoning
+activity or the first output chunk to stream completion, excluding the initial
+wait. The latest call's value stays visible
+until a replacement measurement arrives or logout clears the session. No diagnostics flag is needed; if
+no valid measurement has been recorded yet, TPS is hidden (an unavailable response
+does not clear an earlier measurement). Hidden reasoning and stream
+buffering can affect comparisons between models. For live telemetry and TUI
+rendering metrics, press `Alt+H` to cycle the 1-line bar (`Info` → `Telemetry` → `Help`),
+`Alt+P` (or `/perf`) to toggle the 2-line live footer bar, or run `/stats` (`/diag`).
 
 ## Writing prompts in the composer
 
@@ -135,11 +139,19 @@ The built-in picker shows sessions from the current worktree/workspace by defaul
 ```sh
 codelia --diagnostics
 codelia --initial-message "Review the latest diff"
+codelia --tui-mode alternate
+codelia --color-scheme light
+codelia --sandbox-mode readonly
 ```
 
 What they do:
-- `--diagnostics` enables per-call LLM diagnostics
+- `--diagnostics` expands per-call LLM telemetry into transcript lines
 - `--initial-message` queues the first prompt immediately at startup
+- `--tui-mode` selects `auto` (default), `inline`, or `alternate`
+- `--color-scheme` selects `dark` or `light` accent palette
+- `--sandbox-mode` selects `readonly`, `workspace-write`, or `full-access`
+
+See [`reference/cli.md`](./reference/cli.md) for the full option list.
 
 ## Related docs
 

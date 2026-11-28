@@ -30,40 +30,45 @@ bun run tui
 
 ## 2. Set up provider auth
 
-Before the first real run, configure one of the supported providers.
+The easiest way to sign in is directly from the TUI: launch `codelia` and follow the interactive provider and authentication prompts on your first run (or switch later with `/model`).
 
-Environment variables:
+```sh
+codelia
+```
+
+Notes:
+- **OpenAI**: supports OAuth (ChatGPT Plus/Pro), device-code login (for SSH/headless shells), or an API key.
+- **Anthropic, Google, DeepSeek, OpenRouter, Moonshot, Z.ai, and xAI**: currently use API-key auth.
+- **Credential storage**: on macOS, Codelia stores saved credentials in macOS Keychain by default; otherwise (or when `auth.storage: "file"`) it writes them to `~/.codelia/credentials/` (or `$XDG_CONFIG_HOME/codelia/credentials/` when `CODELIA_LAYOUT=xdg`).
+
+If macOS Keychain access times out or is denied after an update, run `codelia auth authorize-keychain` from a local terminal. See [Keychain recovery and prompt choices](reference/cli.md#macos-keychain-access-after-an-update).
+
+### Alternative: environment variables
+
+If you prefer not to save credentials—such as for non-interactive `codelia --prompt` runs, CI, or temporary injection from a secret manager—Codelia also works when you export a provider API key in the environment:
 
 ```sh
 export OPENAI_API_KEY=...
 export ANTHROPIC_API_KEY=...
 export OPENROUTER_API_KEY=...
-export GOOGLE_API_KEY=...
+export GOOGLE_API_KEY=...    # or GEMINI_API_KEY
 export DEEPSEEK_API_KEY=...
 export MOONSHOT_API_KEY=...
 export ZAI_API_KEY=...
 export XAI_API_KEY=...
 ```
 
-Or launch the TUI and follow the interactive auth prompts.
+Environment API keys stay strictly in memory (never written to disk). If a saved credential already exists for the selected provider, saved auth takes precedence over environment variables for chat runs.
 
-Notes:
-- OpenAI supports OAuth or API key during interactive setup.
-- Anthropic, Google, DeepSeek, OpenRouter, Moonshot, Z.ai, and xAI currently use API key setup.
-- Google also accepts `GEMINI_API_KEY` when `GOOGLE_API_KEY` is unset.
-- On macOS, Codelia prefers Keychain for saved credentials. The file backend stores credentials under `~/.codelia/credentials/` by default, or under the XDG config directory with `CODELIA_LAYOUT=xdg`.
+## 3. Daily TUI session
 
-If macOS Keychain access times out or is denied after an update, run `codelia auth authorize-keychain` from a local terminal. See [Keychain recovery and prompt choices](reference/cli.md#macos-keychain-access-after-an-update).
-
-## 3. Start the TUI
-
-Launch the agent:
+Once signed in, start the TUI anytime with:
 
 ```sh
 codelia
 ```
 
-On startup, the TUI loads the runtime, resolves the current provider/model state, and shows the main composer/log view.
+On startup, the TUI connects to the runtime, loads your active provider/model state, and opens the main composer/log view.
 
 ## 4. Send your first request
 
@@ -91,7 +96,7 @@ Common day-to-day commands include:
 - `/theme` — open the theme picker or save a theme choice
 - `/skills` — browse available skills
 - `/mcp` — inspect loaded MCP servers
-- `/logout [provider]` — clear all saved credentials, or only the named provider (for example `/logout home`), after confirmation
+- `/logout [provider]` — clear all saved model-provider credentials, or only the named provider (for example `/logout openai`), after confirmation (MCP tokens are managed separately via `codelia mcp auth`)
 
 See [`tui-basics.md`](./tui-basics.md) for the day-to-day workflow.
 

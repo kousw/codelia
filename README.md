@@ -8,27 +8,31 @@ It helps you inspect, edit, and reason about code directly in your repository.
 The product ships through the `codelia` CLI, while the main interactive experience is the TUI.
 Under the hood, a TypeScript runtime and a Rust TUI communicate over JSON-RPC.
 
-⚠️ **Early Development / Alpha Stage** — Codelia is under active development and is not yet production-ready.
+> **Beta (`0.x`)** — Actively developed with primary support for macOS and Linux terminals. Native Windows sandboxing and some workflow features are still in progress; see [Known limitations](#known-limitations).
 
 ## Provider support
 
-Current provider support:
-- `openai` (API Key or OAuth with ChatGPT Plus/Pro)
-- `anthropic` (API Key only)
-- `openrouter` (API Key only)
-- `google` (API Key only; native Gemini chat and image generation)
-- `deepseek` (API Key only; native `deepseek-flash` and `deepseek-v4-pro`)
-- `moonshot` (API Key only; native Kimi K3 support)
-- `zai` (API Key only; **New:** native GLM-5.2 support, with additional GLM models selectable)
-- `xai` (API Key only; native Grok 4.5 Responses API support)
+Current built-in providers:
+- `openai` (API key or OAuth with ChatGPT Plus/Pro)
+- `anthropic` (API key only)
+- `openrouter` (API key only)
+- `google` (API key only; native Gemini chat and image generation)
+- `deepseek` (API key only; native `deepseek-flash` and `deepseek-v4-pro`)
+- `moonshot` (API key only; native Kimi K3 / K3.1 support)
+- `zai` (API key only; native GLM-5.x support)
+- `xai` (API key only; native Grok 4.x Responses API support)
 
-## Security note
+You can also register custom named HTTP Responses API endpoints in `config.json` (see [`docs/responses-providers.md`](docs/responses-providers.md)).
 
-Codelia does **not** currently provide a strong OS-level sandbox.
-Its current safety model is mainly rule/policy-based, and commands such as `bash` still run on the host with the configured working directory.
+## Security & sandbox note
 
-If you need strong isolation, treat the current release as **not sufficient on its own**.
-Worker/runtime sandbox hardening is still planned/in progress.
+Codelia defaults to `workspace-write` sandbox mode (`readonly | workspace-write | full-access`) paired with command approval (or opt-in per-workspace Auto approve).
+
+- Confined `shell` execution uses OS-level isolation where qualified: Seatbelt (or MXC via `CODELIA_MAC_SHELL_BACKEND=mxc` on arm64) on macOS and packaged MXC Bubblewrap (or rootless gVisor via `CODELIA_LINUX_SHELL_BACKEND=gvisor`) on Linux.
+- Ordinary local files within the backend's readable scope remain readable unless restricted in `projects.json` (`protected_paths`); Codelia credentials are protected from reads and writes, and Codelia authority/config settings are write-protected by default.
+- Native Windows MXC containment is still under evaluation: confined shell launches are unavailable in the local CLI/TUI on native Windows (explicit `--sandbox-mode full-access` runs outside OS isolation).
+
+See [`docs/command-approval.md`](docs/command-approval.md) ([日本語ガイド](docs/command-approval.ja.md)) for sandbox boundaries and approval rules.
 
 ## Quickstart
 
@@ -41,7 +45,8 @@ npm install -g @codelia/cli
 Update to the latest version:
 
 ```sh
-npm update -g @codelia/cli@latest
+codelia update
+# or: npm update -g @codelia/cli@latest
 ```
 
 Launch the TUI:
@@ -94,8 +99,13 @@ codelia --debug
 
 ### User docs
 
+- Index: [`docs/README.md`](docs/README.md)
 - Start here: [`docs/getting-started.md`](docs/getting-started.md)
+- Sandbox & command approval: [`docs/command-approval.md`](docs/command-approval.md) · [日本語ガイド](docs/command-approval.ja.md)
 - TUI basics: [`docs/tui-basics.md`](docs/tui-basics.md)
+- Image generation & preview: [`docs/image-generation.md`](docs/image-generation.md)
+- Decisions: [`docs/decisions.md`](docs/decisions.md)
+- Session storage & retention: [`docs/session-storage.md`](docs/session-storage.md)
 - Themes: [`docs/themes.md`](docs/themes.md)
 - CLI reference: [`docs/reference/cli.md`](docs/reference/cli.md)
 - Config reference: [`docs/reference/config.md`](docs/reference/config.md)
@@ -103,11 +113,13 @@ codelia --debug
 - AGENTS.md: [`docs/agents-md.md`](docs/agents-md.md)
 - Skills: [`docs/skills.md`](docs/skills.md)
 - MCP: [`docs/mcp.md`](docs/mcp.md)
+- Custom Responses endpoints: [`docs/responses-providers.md`](docs/responses-providers.md)
+- DeepSeek guide: [`docs/deepseek.md`](docs/deepseek.md)
 
 ### Developer / internal docs
 
 - Docs index: [`dev-docs/README.md`](dev-docs/README.md)
-- Architecture notes: [`dev-docs/typescript-architecture-spec.md`](dev-docs/typescript-architecture-spec.md)
+- Architecture & dependency graph: [`dev-docs/reference-architecture.md`](dev-docs/reference-architecture.md)
 - Specs: [`dev-docs/specs/`](dev-docs/specs/)
 - npm publish runbook: [`dev-docs/npm-publish.md`](dev-docs/npm-publish.md)
 
@@ -129,15 +141,9 @@ Run the TUI directly from this repo:
 bun run tui
 ```
 
-### Development API keys (Infisical)
+### Development API keys
 
-Use Infisical when running with development API keys:
-
-```sh
-infisical run --env=dev -- bun run tui
-```
-
-Setup, environment/folder selection, and live-test examples are maintained in the repository-local [`codelia-infisical` skill](.agents/skills/codelia-infisical/SKILL.md). Infisical owns the current key inventory; `.infisical.yaml` stays local and git-ignored. Commands that do not need development secrets can run directly.
+Provide API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, etc.) through environment variables—either exported in your shell or injected via your preferred secret manager. Keep local secret/env files (such as `.env` or `.infisical.yaml`) out of version control. Commands that do not invoke live providers run directly without keys.
 
 Useful development commands:
 
@@ -151,7 +157,10 @@ Useful development commands:
 
 ## Repository layout
 
-- `packages/runtime` — runtime process, tools, permissions, MCP
+- `packages/core` — agent loop, history, compaction, and provider adapters
+- `packages/protocol` — JSON-RPC wire catalog and schemas
+- `packages/storage` — session logs, checkpoints, credential/keychain storage, and artifact stores
+- `packages/runtime` — runtime server, tools, permissions, sandbox, and MCP
 - `crates/tui` — Rust TUI client
 - `packages/cli` — `codelia` CLI entrypoint
 - `docs/` — user-facing documentation
@@ -159,6 +168,5 @@ Useful development commands:
 
 ## Known limitations
 
-- Permissions are policy-based and are not a full OS-level security boundary.
-- `bash` runs on the host shell with the sandbox working directory; this is not complete isolation.
-- Worker isolation hardening is still planned/in progress.
+- Native Windows MXC containment and local subagent execution are still under evaluation: confined shell launches are unavailable in the local CLI/TUI on native Windows (explicit `--sandbox-mode full-access` runs outside OS isolation).
+- Snapshot-based file rollback, lifecycle hooks, LSP/IDE extensions, hosted/remote worker isolation, and automatic retention GC for generated image artifacts remain planned work.

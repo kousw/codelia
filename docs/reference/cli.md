@@ -25,11 +25,14 @@ These flags are passed through to the TUI launcher:
 | Option | Meaning |
 |---|---|
 | `-r`, `--resume [session_id]` | Resume through the latest/session picker flow, or resume a specific session id |
-| `--debug[=true|false]` | Enable debug runtime/RPC log lines |
-| `--diagnostics[=true|false]` | Enable per-call LLM diagnostics |
+| `--debug[=true\|false]` | Enable debug runtime/RPC log lines |
+| `--diagnostics[=true\|false]` | Expand per-call LLM telemetry into transcript lines |
 | `--initial-message <text>` | Queue an initial prompt |
 | `--initial-user-message <text>` | Alias of `--initial-message` |
-| `--debug-perf[=true|false]` | Enable the perf panel |
+| `--tui-mode <auto\|inline\|alternate>` | Select terminal buffer mode (`auto` default, `inline`, or `alternate`) |
+| `--color-scheme <dark\|light>` | Select accent palette (`dark` or `light`, overrides `tui.color_scheme`) |
+| `--image-protocol <halfblocks\|kitty>` | Select local image preview protocol (`halfblocks` default, or `kitty`) |
+| `--debug-perf[=true\|false]` | Enable the live perf footer bar |
 | `--sandbox-mode <mode>` | Select `readonly`, `workspace-write` (default) or `full-access`. Full access runs as the current user after command approval. |
 
 Examples:
@@ -163,7 +166,33 @@ codelia mcp auth set <server-id> --access-token <token> [--url <server-url>] [--
 codelia mcp auth clear <server-id>
 ```
 
-Use the configured MCP server URL for `--url`. A refresh token also needs a token endpoint, supplied by OAuth discovery, configuration, or `--token-url`.
+`codelia mcp auth set` reuses the configured HTTP server `url` when present; pass `--url <server-url>` to override it or when no URL is configured (for example, undefined or stdio server IDs). A refresh token also needs a token endpoint, supplied by OAuth discovery, configuration, or `--token-url`.
+
+## `update` command
+
+Check for a newer `@codelia/cli` release or apply an in-place update for supported global npm installations:
+
+```sh
+codelia update --check
+codelia update
+```
+
+Non-npm installations (such as Homebrew, Nix, pnpm, Bun, Yarn, Volta, mise, or source checkouts) print the appropriate manual update hint instead of modifying files automatically.
+
+## `session` commands
+
+Manage saved session lifecycle and run-log retention from the terminal:
+
+```sh
+codelia session list
+codelia session pin <session_id>
+codelia session unpin <session_id>
+codelia session archive <session_id>
+codelia session unarchive <session_id>
+codelia session cleanup
+```
+
+See [`../session-storage.md`](../session-storage.md) for retention and compression rules.
 
 ## Related docs
 
