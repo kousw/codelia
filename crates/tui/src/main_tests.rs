@@ -112,6 +112,38 @@ fn version_label_falls_back_without_tui_version_when_cli_is_missing() {
 }
 
 #[test]
+fn version_label_shows_dev_build_sha_and_detects_cli_tui_mismatch() {
+    use crate::entry::cli::resolve_version_label_with_builds;
+
+    assert_eq!(
+        resolve_version_label_with_builds(
+            Some("0.1.91"),
+            "0.1.91",
+            Some("39161864"),
+            Some("39161864")
+        ),
+        "codelia 0.1.91 (dev 39161864)"
+    );
+    assert_eq!(
+        resolve_version_label_with_builds(
+            Some("0.1.91"),
+            "0.1.91",
+            Some("39161864"),
+            Some("feefec49")
+        ),
+        "codelia 0.1.91 (dev cli:39161864 tui:feefec49)"
+    );
+    assert_eq!(
+        resolve_version_label_with_builds(Some("0.1.91"), "0.1.91", None, Some("39161864")),
+        "codelia 0.1.91 (dev tui:39161864)"
+    );
+    assert_eq!(
+        resolve_version_label_with_builds(Some("0.1.91"), "0.1.91", Some(""), Some("")),
+        "codelia 0.1.91"
+    );
+}
+
+#[test]
 fn truncate_bang_preview_line_appends_marker_when_long() {
     let input = "x".repeat(300);
     let out = truncate_bang_preview_line(&input);

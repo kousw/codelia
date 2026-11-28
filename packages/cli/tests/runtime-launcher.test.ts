@@ -77,6 +77,25 @@ describe("buildTuiLaunchContext", () => {
 			}),
 		).toEqual({});
 	});
+
+	test("passes cli_build when present and omits when blank", () => {
+		expect(
+			buildTuiLaunchContext({
+				env: {},
+				cliVersion: "0.1.91",
+				cliBuild: " 39161864 ",
+				resolveRuntimeEntry: () => null,
+			}),
+		).toEqual({ cli_version: "0.1.91", cli_build: "39161864" });
+		expect(
+			buildTuiLaunchContext({
+				env: {},
+				cliVersion: "0.1.91",
+				cliBuild: "   ",
+				resolveRuntimeEntry: () => null,
+			}),
+		).toEqual({ cli_version: "0.1.91" });
+	});
 });
 
 describe("buildTuiArgs", () => {

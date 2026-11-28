@@ -38,20 +38,42 @@ pub(crate) fn parse_basic_cli_mode_from_args(
 
 pub(crate) fn resolve_version_label() -> String {
     let tui_version = env!("CARGO_PKG_VERSION");
-    let cli_version = crate::entry::launch_context::launch_context()
-        .cli_version
-        .as_deref();
-    resolve_version_label_from_versions(cli_version, tui_version)
+    let ctx = crate::entry::launch_context::launch_context();
+    resolve_version_label_with_builds(
+        ctx.cli_version.as_deref(),
+        tui_version,
+        ctx.cli_build.as_deref(),
+        option_env!("CODELIA_TUI_BUILD"),
+    )
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_version_label_from_versions(
     cli_version: Option<&str>,
+    tui_version: &str,
+) -> String {
+    resolve_version_label_with_builds(cli_version, tui_version, None, None)
+}
+
+pub(crate) fn resolve_version_label_with_builds(
+    cli_version: Option<&str>,
     _tui_version: &str,
+    cli_build: Option<&str>,
+    tui_build: Option<&str>,
 ) -> String {
     let normalized = cli_version.map(str::trim).filter(|value| !value.is_empty());
-    match normalized {
+    let base = match normalized {
         Some(cli) => format!("codelia {cli}"),
         None => "codelia".to_string(),
+    };
+    let cli_id = cli_build.map(str::trim).filter(|value| !value.is_empty());
+    let tui_id = tui_build.map(str::trim).filter(|value| !value.is_empty());
+    match (cli_id, tui_id) {
+        (Some(cli), Some(tui)) if cli == tui => format!("{base} (dev {cli})"),
+        (Some(cli), Some(tui)) => format!("{base} (dev cli:{cli} tui:{tui})"),
+        (Some(cli), None) => format!("{base} (dev cli:{cli})"),
+        (None, Some(tui)) => format!("{base} (dev tui:{tui})"),
+        (None, None) => base,
     }
 }
 

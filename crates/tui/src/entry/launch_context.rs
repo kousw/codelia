@@ -29,6 +29,8 @@ pub(crate) struct LaunchContext {
     #[serde(default)]
     pub(crate) cli_version: Option<String>,
     #[serde(default)]
+    pub(crate) cli_build: Option<String>,
+    #[serde(default)]
     pub(crate) runtime: Option<RuntimeLaunch>,
     #[serde(default)]
     pub(crate) update_notice_file: Option<String>,

@@ -7,7 +7,7 @@ import {
 	validatePromptText,
 } from "./basic-options";
 import { resolveLoadedCliPackageRoot } from "./package-root";
-import { CLI_VERSION } from "./version";
+import { CLI_VERSION, CLI_VERSION_DISPLAY } from "./version";
 
 const args = process.argv.slice(2);
 const packageRoot = resolveLoadedCliPackageRoot();
@@ -18,7 +18,7 @@ const main = async (): Promise<void> => {
 			console.log(TOP_LEVEL_HELP_TEXT);
 			return;
 		case "version":
-			console.log(CLI_VERSION);
+			console.log(CLI_VERSION_DISPLAY);
 			return;
 		case "auth": {
 			const { runAuthCommand } = await import("./commands/auth");

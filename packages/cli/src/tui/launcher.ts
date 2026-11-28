@@ -12,7 +12,7 @@ import {
 	NOOP_LAUNCH_UPDATE_SESSION,
 } from "../update/launch";
 import { UPDATE_REEXEC_ENV } from "../update/launcher-entry";
-import { CLI_VERSION } from "../version";
+import { CLI_BUILD, CLI_VERSION } from "../version";
 import type { StartupConfirmationId } from "./startup-confirmations";
 
 const resolveTuiBinaryName = (platform: NodeJS.Platform): string =>
@@ -132,6 +132,7 @@ export const TUI_LAUNCH_CONTEXT_FLAG = "--internal-launch-context";
 
 export type TuiLaunchContext = {
 	cli_version?: string;
+	cli_build?: string;
 	runtime?: RuntimeLaunch;
 	update_notice_file?: string;
 	update_control?: { node: string; entry: string };
@@ -141,20 +142,24 @@ export type TuiLaunchContext = {
 export const buildTuiLaunchContext = ({
 	env,
 	cliVersion = CLI_VERSION,
+	cliBuild = CLI_BUILD,
 	update = NOOP_LAUNCH_UPDATE_SESSION,
 	launcherEntry,
 	resolveRuntimeEntry = resolveBundledRuntimeEntry,
 }: {
 	env: NodeJS.ProcessEnv;
 	cliVersion?: string;
+	cliBuild?: string;
 	update?: LaunchUpdateSession;
 	launcherEntry?: string;
 	resolveRuntimeEntry?: () => string | null;
 }): TuiLaunchContext => {
 	const runtime = resolveBundledRuntimeLaunch(env, resolveRuntimeEntry);
 	const version = cliVersion.trim();
+	const build = cliBuild?.trim();
 	return {
 		...(version ? { cli_version: version } : {}),
+		...(build ? { cli_build: build } : {}),
 		...(runtime ? { runtime } : {}),
 		...(update.noticeFile ? { update_notice_file: update.noticeFile } : {}),
 		// Bind update controls to this launcher, not to PATH or the runtime.
